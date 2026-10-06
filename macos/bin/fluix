@@ -1,7 +1,7 @@
 #!/bin/bash
 # Fluix for macOS: runs JuiceFS in a small Lima VM and mounts it in the
 # Finder over SMB. Everything lives in ~/.fluix; no admin rights needed.
-set -euo pipefail
+set -eEuo pipefail
 
 FLUIX_HOME="${FLUIX_HOME:-$HOME/.fluix}"
 export LIMA_HOME="$FLUIX_HOME/vms"
@@ -12,13 +12,28 @@ AGENT_LABEL=dev.esse.fluix
 AGENT_PLIST="$HOME/Library/LaunchAgents/$AGENT_LABEL.plist"
 NSMB_CONF="$HOME/Library/Preferences/nsmb.conf"
 LIMA_LOG="$FLUIX_HOME/lima.log"
+STOPPED_FLAG="$FLUIX_HOME/stopped"
+RESTART_STAMP="$FLUIX_HOME/last-vm-restart"
+# How often the agent checks the VM, the share and the Mac's free space.
+TICK_SECONDS=120
 
 log() { printf '%s\n' "$*" >&2; }
 die() { log "fluix: $*"; exit 1; }
+# Any unexpected failure says where it happened and shows the end of the log,
+# instead of dropping back to the prompt in silence.
+on_error() {
+  log "fluix: failed (exit $1, line $2). Last lines of $LIMA_LOG:"
+  [ -f "$LIMA_LOG" ] && tail -15 "$LIMA_LOG" >&2
+}
+trap 'on_error $? $LINENO' ERR
+
 lima() { "$LIMACTL" "$@"; }
 vm_status() { lima list --format '{{.Status}}' "$VM" 2>/dev/null || true; }
 in_vm() { lima shell --workdir / "$VM" "$@"; }
-config() { grep "^$1=" "$FLUIX_HOME/config.env" | cut -d= -f2-; }
+config() { grep "^$1=" "$FLUIX_HOME/config.env" | cut -d= -f2- || true; }
+notify() {
+  /usr/bin/osascript -e "display notification \"$1\" with title \"Fluix\"" >/dev/null 2>&1 || true
+}
 # Where macOS mounted the share. Usually /Volumes/Fluix, but macOS picks
 # Fluix-1 and so on when the name is taken, so it is never assumed.
 mount_point() {
@@ -28,6 +43,26 @@ is_mounted() { [ -n "$(mount_point)" ]; }
 
 vm_ip() {
   in_vm ip -4 -o addr show lima0 | awk '{print $4}' | cut -d/ -f1
+}
+
+# A VM can be "Running" for Lima while its disk is broken (it happened when the
+# Mac ran out of space): every command inside then fails with an I/O error.
+vm_healthy() { in_vm true >/dev/null 2>&1; }
+
+# A dead SMB mount stays listed by `mount` and can hang whoever touches it:
+# list it in the background and give up after 5 seconds.
+mount_alive() {
+  local mp pid
+  mp=$(mount_point)
+  [ -n "$mp" ] || return 1
+  /bin/ls "$mp" >/dev/null 2>&1 &
+  pid=$!
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    if ! kill -0 "$pid" 2>/dev/null; then wait "$pid"; return $?; fi
+    sleep 0.5
+  done
+  kill "$pid" 2>/dev/null || true
+  return 1
 }
 
 # Maps a path under the Finder volume to the same path inside the VM.
@@ -40,6 +75,24 @@ vm_path() {
     "$mp"|"$mp"/*) printf '/mnt/drive%s' "${p#"$mp"}" ;;
     *) die "$1 is not on $mp" ;;
   esac
+}
+
+# Space on the Mac. The VM cannot see it: its disk is a sparse file that grows
+# with the cache, and JuiceFS's own free-space check only looks inside the VM.
+# When the Mac fills up the file cannot grow and the VM's disk breaks.
+mac_free_mb() { df -m "$HOME" | awk 'NR == 2 {print $4}'; }
+reserve_mb() { local r; r=$(config RESERVE_MB); echo "${r:-20480}"; }
+cache_used_mb() { in_vm sudo du -sm /var/cache/fluix 2>/dev/null | cut -f1 || echo 0; }
+
+# The cache limit: half of what the Mac can spare above the reserve, capped by
+# CACHE_SIZE_MB. Space the cache already holds counts as spare.
+cache_limit_mb() {
+  local used="${1:-0}" max spare limit
+  max=$(config CACHE_SIZE_MB); max="${max:-102400}"
+  spare=$(( $(mac_free_mb) + used - $(reserve_mb) ))
+  limit=$(( spare / 2 ))
+  [ "$limit" -gt "$max" ] && limit=$max
+  echo "$limit"
 }
 
 start_vm() {
@@ -64,8 +117,32 @@ set_smb_timeout() {
   mv "$NSMB_CONF.tmp" "$NSMB_CONF"
 }
 
+# Used only when the user stops or removes the drive, or when the VM behind
+# the mount is restarted and the mount is dead for sure.
+unmount_share() {
+  local mp
+  mp=$(mount_point)
+  [ -n "$mp" ] || return 0
+  /usr/sbin/diskutil unmount "$mp" >/dev/null 2>&1 || /usr/sbin/diskutil unmount force "$mp" >/dev/null 2>&1 || true
+}
+
+# With "keep", an existing mount is never touched: a busy mount (a large copy
+# in progress) answers slowly and looks dead, and replacing it aborts the copy.
+# It happened: the agent force-unmounted the disk in the middle of a cp. After
+# a wake from sleep macOS reconnects SMB by itself. Only an explicit
+# `fluix start` replaces a mount that stays unresponsive, and never by
+# force.
 mount_share() {
-  is_mounted && return 0
+  if is_mounted; then
+    [ "${1:-}" = keep ] && return 0
+    for _ in 1 2 3; do
+      mount_alive && return 0
+      sleep 5
+    done
+    log "$(date '+%F %T') The disk is not responding, mounting it again..."
+    /usr/sbin/diskutil unmount "$(mount_point)" >/dev/null 2>&1 \
+      || die "the disk is busy and not responding: close the apps using it and run fluix start again"
+  fi
   local ip
   ip=$(vm_ip)
   [ -n "$ip" ] || die "VM has no network address"
@@ -74,10 +151,27 @@ mount_share() {
     /usr/bin/nc -z -G 1 "$ip" 445 2>/dev/null && break
     sleep 1
   done
+  # CapCut projects point at media by full path: the disk must come back as
+  # /Volumes/Fluix, never Fluix-1. macOS picks -1 while the folder
+  # of the previous mount still exists, so wait for it to go.
+  for _ in $(seq 30); do
+    [ -e "/Volumes/$SHARE" ] || break
+    rmdir "/Volumes/$SHARE" 2>/dev/null || true
+    sleep 1
+  done
   /usr/bin/osascript -e "mount volume \"smb://drive:$(config SMB_PASSWORD)@$ip/$SHARE\"" >/dev/null
   is_mounted || die "mount failed"
+  if [ "$(mount_point)" != "/Volumes/$SHARE" ]; then
+    log "$(date '+%F %T') warning: mounted at $(mount_point), CapCut links to /Volumes/$SHARE will break"
+  fi
   # No Spotlight indexing: it would read every file through the network.
   /usr/bin/mdutil -i off "$(mount_point)" >/dev/null 2>&1 || true
+}
+
+# Drops the whole cache and gives the space back to the Mac.
+evict_all() {
+  in_vm sudo juicefs warmup --evict /mnt/drive >/dev/null 2>&1 || true
+  in_vm sudo fstrim / >/dev/null 2>&1 || true
 }
 
 install_agent() {
@@ -89,8 +183,9 @@ install_agent() {
 <dict>
   <key>Label</key><string>$AGENT_LABEL</string>
   <key>ProgramArguments</key>
-  <array><string>$FLUIX_HOME/bin/fluix</string><string>start</string></array>
+  <array><string>$FLUIX_HOME/bin/fluix</string><string>tick</string></array>
   <key>RunAtLoad</key><true/>
+  <key>StartInterval</key><integer>$TICK_SECONDS</integer>
   <key>StandardOutPath</key><string>$FLUIX_HOME/agent.log</string>
   <key>StandardErrorPath</key><string>$FLUIX_HOME/agent.log</string>
 </dict>
@@ -102,29 +197,86 @@ EOF
 
 cmd_setup() {
   [ -f "$FLUIX_HOME/config.env" ] || die "missing $FLUIX_HOME/config.env"
-  if [ -z "$(vm_status)" ]; then
-    log "Creating the VM (first time: downloads Debian, a few minutes)..."
-    lima create --name="$VM" --tty=false "$FLUIX_HOME/vm/lima.yaml" >>"$LIMA_LOG" 2>&1
+  local used=0 limit disk_gib conf
+  if [ -n "$(vm_status)" ]; then
+    start_vm
+    used=$(cache_used_mb)
   fi
-  start_vm
-  log "Installing the drive in the VM..."
+  limit=$(cache_limit_mb "$used")
+  if [ "$limit" -lt 5120 ]; then
+    die "not enough free space on this Mac: $(( $(mac_free_mb) / 1024 )) GB free, at least $(( ($(reserve_mb) + 10240) / 1024 )) GB needed"
+  fi
+  if [ -z "$(vm_status)" ]; then
+    # The VM's disk only needs to hold the cache plus Debian. Its size is fixed
+    # here, at creation: later setups change the cache limit, not the disk.
+    disk_gib=$(( limit / 1024 + 10 ))
+    log "Creating the VM (first time: downloads Debian, a few minutes)..."
+    lima create --name="$VM" --tty=false --disk="$disk_gib" "$FLUIX_HOME/vm/lima.yaml" >>"$LIMA_LOG" 2>&1
+    start_vm
+  fi
+  log "Installing the drive in the VM (cache up to $(( limit / 1024 )) GB)..."
+  conf=$(mktemp)
+  sed '/^CACHE_SIZE_MB=/d' "$FLUIX_HOME/config.env" > "$conf"
+  echo "CACHE_SIZE_MB=$limit" >> "$conf"
   in_vm rm -rf /tmp/fluix-guest
   lima copy -r "$FLUIX_HOME/vm/guest" "$VM:/tmp/fluix-guest"
-  lima copy "$FLUIX_HOME/config.env" "$VM:/tmp/fluix-guest/config.env"
+  lima copy "$conf" "$VM:/tmp/fluix-guest/config.env"
+  rm -f "$conf"
   in_vm sudo bash /tmp/fluix-guest/guest-install.sh >>"$LIMA_LOG" 2>&1
   in_vm rm -rf /tmp/fluix-guest
+  rm -f "$STOPPED_FLAG"
   install_agent
   mount_share
   log "Ready: $(mount_point)"
 }
 
 cmd_start() {
+  rm -f "$STOPPED_FLAG"
   start_vm
+  vm_healthy || die "the VM is not responding, run: fluix status"
   mount_share
 }
 
+# Run by the launchd agent at login and every TICK_SECONDS: brings the VM and
+# the disk back, and frees the cache when the Mac runs low on space.
+cmd_tick() {
+  [ -f "$STOPPED_FLAG" ] && return 0
+  [ -n "$(vm_status)" ] || return 0
+  start_vm
+  if ! vm_healthy; then
+    # Restart a broken VM at most every 10 minutes, so a VM that cannot boot
+    # does not loop.
+    local now last
+    now=$(date +%s); last=$(cat "$RESTART_STAMP" 2>/dev/null || echo 0)
+    if [ $(( now - last )) -lt 600 ]; then return 0; fi
+    echo "$now" > "$RESTART_STAMP"
+    log "$(date '+%F %T') VM not responding, restarting it"
+    notify "Il disco non risponde, lo sto riavviando."
+    unmount_share
+    lima stop --force "$VM" >>"$LIMA_LOG" 2>&1 || true
+    start_vm
+    vm_healthy || { notify "Il disco non riparte. Scrivi a chi ti ha installato Fluix."; return 0; }
+  fi
+  # JuiceFS can restart on its own; Samba then serves a dead path until it is
+  # restarted as well.
+  # One unit per call: with several units is-active succeeds if any is active.
+  if ! in_vm systemctl is-active --quiet fluix-mount || ! in_vm systemctl is-active --quiet smbd; then
+    log "$(date '+%F %T') drive services down, restarting them"
+    in_vm sudo systemctl restart fluix-mount smbd >>"$LIMA_LOG" 2>&1 || true
+  fi
+  local free
+  free=$(mac_free_mb)
+  if [ "$free" -lt $(( $(reserve_mb) / 2 )) ]; then
+    log "$(date '+%F %T') Mac free space ${free} MB: freeing the whole cache"
+    notify "Spazio quasi finito sul Mac: ho liberato le copie locali del disco. I file restano online."
+    evict_all
+  fi
+  mount_share keep
+}
+
 cmd_stop() {
-  if is_mounted; then /usr/sbin/diskutil unmount "$(mount_point)" >/dev/null; fi
+  touch "$STOPPED_FLAG"
+  unmount_share
   [ "$(vm_status)" = Running ] && lima stop "$VM" >>"$LIMA_LOG" 2>&1
   return 0
 }
@@ -132,11 +284,20 @@ cmd_stop() {
 cmd_status() {
   local st
   st=$(vm_status)
+  if [ "$st" = Running ] && ! vm_healthy; then st="Running but not responding (VM error, see $LIMA_LOG)"; fi
   printf 'VM:      %s\n' "${st:-not set up}"
-  if is_mounted; then printf 'Disk:    mounted at %s\n' "$(mount_point)"; else printf 'Disk:    not mounted\n'; fi
+  if is_mounted; then
+    if mount_alive; then printf 'Disk:    mounted at %s\n' "$(mount_point)"
+    else printf 'Disk:    mounted at %s but not responding\n' "$(mount_point)"; fi
+  else
+    printf 'Disk:    not mounted\n'
+  fi
+  [ -f "$STOPPED_FLAG" ] && printf 'Stopped: by the user, `fluix start` brings it back\n'
+  printf 'Mac:     %s GB free\n' "$(( $(mac_free_mb) / 1024 ))"
   if [ "$st" = Running ]; then
     printf 'Drive:   %s\n' "$(in_vm systemctl is-active fluix-mount || true)"
-    printf 'Cache:   %s\n' "$(in_vm sudo du -sh /var/cache/fluix | cut -f1)"
+    printf 'Cache:   %s MB of %s MB\n' "$(cache_used_mb)" \
+      "$(in_vm sudo sh -c '. /etc/fluix/config.env; echo $CACHE_SIZE_MB' 2>/dev/null || echo '?')"
   fi
 }
 
@@ -148,6 +309,8 @@ cmd_warmup() {
 cmd_free() {
   [ $# -ge 1 ] || die "usage: fluix free <file or folder on the disk>"
   for p in "$@"; do in_vm sudo juicefs warmup --evict "$(vm_path "$p")"; done
+  # Gives the freed space back to the Mac now instead of at the weekly trim.
+  in_vm sudo fstrim / >/dev/null
 }
 
 cmd_uninstall() {
@@ -155,10 +318,13 @@ cmd_uninstall() {
   log "the files in the bucket become unreadable. Type 'delete' to confirm:"
   read -r answer
   [ "$answer" = delete ] || die "cancelled"
-  cmd_stop || true
   /bin/launchctl bootout "gui/$(id -u)/$AGENT_LABEL" 2>/dev/null || true
   rm -f "$AGENT_PLIST"
-  [ -n "$(vm_status)" ] && lima delete --force "$VM" >>"$LIMA_LOG" 2>&1
+  unmount_share
+  if [ -n "$(vm_status)" ]; then
+    lima stop --force "$VM" >>"$LIMA_LOG" 2>&1 || true
+    lima delete --force "$VM" >>"$LIMA_LOG" 2>&1
+  fi
   if [ -f "$NSMB_CONF" ]; then
     sed -i '' '/^# fluix begin$/,/^# fluix end$/d' "$NSMB_CONF"
     [ -s "$NSMB_CONF" ] || rm -f "$NSMB_CONF"
@@ -170,6 +336,6 @@ cmd_uninstall() {
 }
 
 case "${1:-}" in
-  setup|start|stop|status|warmup|free|uninstall) cmd="$1"; shift; "cmd_$cmd" "$@" ;;
+  setup|start|tick|stop|status|warmup|free|uninstall) cmd="$1"; shift; "cmd_$cmd" "$@" ;;
   *) log "usage: fluix setup|start|stop|status|warmup <path>|free <path>|uninstall"; exit 2 ;;
 esac

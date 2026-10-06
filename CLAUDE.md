@@ -39,9 +39,13 @@ Non ci sono comandi di qualità: gli script si controllano almeno con `bash -n`.
 
 **Mai `juicefs mount` direttamente su macOS.** Con FUSE-T fallisce (`no FUSE mount utility found`), con il backend FSKit di macFUSE resta appeso, e l'unica via che funziona è l'estensione del kernel, che obbliga ogni Mac a passare dalla modalità di recupero. JuiceFS gira in Linux (la VM), il Mac monta SMB.
 
-**Il punto di montaggio non è fisso.** macOS usa `/Volumes/Fluix-1` quando il nome è occupato (cartella rimasta da uno smontaggio, un'altra condivisione `Fluix`), ed è successo in questa forma: ogni comando cercava `/Volumes/Fluix` e falliva.
-- Sbagliato: `VOLUME=/Volumes/Fluix; dd if="$VOLUME/x"`
-- Giusto: `mount_point` in `macos/bin/fluix`, che legge `/sbin/mount`.
+**Il punto di montaggio deve restare `/Volumes/Fluix`, ma non si dà per scontato.** CapCut richiama i video col percorso completo: con `Fluix-1` i progetti perdono i file. macOS sceglie `-1` quando la cartella di un montaggio precedente c'è ancora, ed è successo dopo uno stop del Mac. Si monta solo a nome libero (`mount_share`), e si legge il punto di montaggio da `/sbin/mount` (`mount_point`), mai `VOLUME=/Volumes/Fluix`.
+
+**Mai smontare o rimontare in automatico un disco montato.** Un disco occupato da una copia grande risponde lento e sembra morto: l'agente lo ha smontato a forza a metà di un `cp` e la copia è fallita. Il `tick` monta solo se il disco manca (`mount_share keep`); il rimontaggio sta solo in `fluix start`, chiesto dall'utente, e mai con `force`.
+
+**La VM non vede il disco del Mac.** Il controllo di spazio di JuiceFS (`--free-space-ratio`) guarda il disco della VM, che si crede grande; sul Mac di una tester la cache ha riempito il disco e il filesystem della VM è andato in errore. I limiti di spazio si calcolano dal lato Mac (`cache_limit_mb`, `RESERVE_MB`, il controllo nel `tick`), e una VM "Running" per Lima può essere rotta dentro (`vm_healthy`).
+
+**`systemctl is-active` con più unità risponde sì se almeno una è attiva.** Un controllo su `fluix-mount smbd` insieme non ha visto Samba fermo. Una unità per chiamata.
 
 **Percorsi assoluti per gli strumenti di sistema.** In alcuni shell e sotto launchd `/usr/sbin` non è nel PATH: `diskutil` "non trovato" ha fatto fallire in silenzio i rimontaggi di un benchmark. Si scrive `/usr/sbin/diskutil`, `/usr/bin/osascript`, `/sbin/mount`.
 

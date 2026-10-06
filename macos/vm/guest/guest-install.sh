@@ -24,7 +24,7 @@ install -m 755 fluix-mount /usr/local/sbin/fluix-mount
 install -m 644 smb.conf /etc/samba/smb.conf
 install -m 644 fluix-mount.service /etc/systemd/system/fluix-mount.service
 install -d /etc/systemd/system/smbd.service.d
-printf '[Unit]\nRequires=fluix-mount.service\nAfter=fluix-mount.service\n' \
+printf '[Unit]\nRequires=fluix-mount.service\nAfter=fluix-mount.service\n[Service]\nRestart=on-failure\nRestartSec=3\n' \
   > /etc/systemd/system/smbd.service.d/fluix.conf
 
 # shellcheck disable=SC1091

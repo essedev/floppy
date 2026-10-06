@@ -2,6 +2,14 @@
 
 Log del lavoro fatto, il più recente in cima. I piani stanno in [ROADMAP.md](ROADMAP.md), il perché delle scelte in [ARCHITECTURE.md](ARCHITECTURE.md).
 
+## 2. Il primo test di una collega e le difese sullo spazio (06/10/2026)
+
+- **Incidente**: sul Mac della tester (macOS 27.0.1, 16 GB di RAM, 10 GB liberi su 228) il caricamento di 9,9 GB e l'uso di CapCut hanno riempito il disco del Mac. Il file della VM non è più cresciuto, il filesystem della VM è andato in errore, CapCut ha visto "disconnessione dal server" e ogni comando nella VM rispondeva `Input/output error`. I 9,9 GB erano già tutti su OVH. Anche la prima installazione era fallita in silenzio.
+- **Causa**: il controllo di spazio di JuiceFS guarda la VM, non il Mac.
+- **Correzioni**: tetto della cache calcolato sullo spazio del Mac e disco della VM dimensionato su quel tetto; agente ogni 2 minuti che riavvia VM e servizi, libera la cache col Mac quasi pieno e monta il disco se manca; `fstrim` dopo `free`; `status` che vede una VM rotta; errori che mostrano il log; aggiornamento esplicito in `install.sh`.
+- **Trovati provando le correzioni**: dopo uno stop del Mac l'agente rimontava il disco come `Fluix-1`, che rompe i progetti CapCut; un agente impaziente smontava a forza un disco occupato da una copia; `systemctl is-active` su due unità non vedeva Samba fermo. Corretti e riprovati: 3 clip copiati con 5 controlli dell'agente in parallelo, identici byte per byte.
+- **Per la tester**: reinstallazione pulita dopo aver liberato spazio; il volume orfano va cancellato dal bucket.
+
 ## 1. Dall'analisi al pacchetto di test (06/10/2026)
 
 **Obiettivo**: capire se un disco remoto su S3 regge il montaggio video da Mac, e arrivare a qualcosa da far provare a una collega.

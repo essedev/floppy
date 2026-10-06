@@ -10,6 +10,13 @@ major=$(sw_vers -productVersion | cut -d. -f1)
 [ "$major" -ge 13 ] || { echo "Fluix needs macOS 13 or later." >&2; exit 1; }
 
 FLUIX_HOME="$HOME/.fluix"
+# Over an existing install this is an update: it keeps the config, the VM and
+# the volume. A fresh start is `fluix uninstall` first.
+if [ -f "$FLUIX_HOME/config.env" ]; then
+  echo "Updating the existing Fluix install (your files stay as they are)."
+else
+  echo "New Fluix install."
+fi
 mkdir -p "$FLUIX_HOME"
 rm -rf "$FLUIX_HOME/lima" "$FLUIX_HOME/bin" "$FLUIX_HOME/vm"
 cp -R lima bin vm "$FLUIX_HOME/"
