@@ -163,7 +163,10 @@ cmd_uninstall() {
     sed -i '' '/^# fluix begin$/,/^# fluix end$/d' "$NSMB_CONF"
     [ -s "$NSMB_CONF" ] || rm -f "$NSMB_CONF"
   fi
-  log "Removed. $FLUIX_HOME is left in place; delete it by hand if you want."
+  # The config names a volume whose metadata died with the VM: a reinstall
+  # must start from a new name, so nothing of this install is kept.
+  rm -rf "$FLUIX_HOME"
+  log "Removed."
 }
 
 case "${1:-}" in
