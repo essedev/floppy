@@ -1,6 +1,6 @@
 # Architettura
 
-Fluix è un disco remoto condiviso per il team che monta video: sul Mac compare come un volume nel Finder, i file stanno su object storage S3, e chi lavora non deve sapere altro. Questo documento raccoglie l'analisi fatta finora e le decisioni che ne sono uscite. È un progetto in fase di ipotesi: niente è ancora installato.
+Fluix è un disco remoto condiviso per il team che monta video: sul Mac compare come un volume nel Finder, i file stanno su object storage S3, e chi lavora non deve sapere altro. Questo documento raccoglie l'analisi fatta finora e le decisioni che ne sono uscite. È un progetto in fase di test: esiste un pacchetto di prova per macOS su un bucket OVH di Milano, con i metadati dentro ogni Mac, senza PostgreSQL condiviso e senza app.
 
 Prezzi e caratteristiche dei servizi di terzi sono rilevati al 06/10/2026 e vanno riverificati prima di decidere.
 
@@ -30,17 +30,19 @@ JuiceFS (Community Edition, open source) ha la stessa architettura di LucidLink:
 
 | Componente | Scelta | Ruolo |
 |---|---|---|
-| Dati | Bucket OVH Object Storage Standard, versioning attivo | I blocchi dei file |
+| Dati | Bucket OVH Object Storage Standard, versioning da decidere (vedi sotto) | I blocchi dei file |
 | Metadati | PostgreSQL, preferibilmente gestito da OVH, nella stessa regione | Albero di file e cartelle, lock |
 | Client | `juicefs` in una piccola macchina Linux su ogni Mac, condiviso al Mac via SMB su `localhost` | Il volume nel Finder e la cache |
 
 **Perché una macchina Linux e non `juicefs` direttamente sul Mac**: vedi [macFUSE](#macfuse). Il Mac monta una cartella di rete SMB, cosa che sa fare da sé senza estensioni; JuiceFS gira in Linux, dove FUSE è nativo. Il prezzo è un componente in più su ogni Mac.
 
-**Regione**: dati e metadati il più vicino possibile a chi monta. Ogni operazione su file e cartelle è un giro verso il database: con 1-3 ms il disco sembra locale, con 30 ms no. Da verificare se OVH offre Object Storage e PostgreSQL gestito a Milano.
+**Regione**: dati e metadati il più vicino possibile a chi monta. Ogni operazione su file e cartelle è un giro verso il database: con 1-3 ms il disco sembra locale, con 30 ms no. Object Storage a Milano c'è (regione `EU-SOUTH-MIL`, 3-AZ): ci sta il bucket di test e risponde in circa 15 ms. Da verificare PostgreSQL gestito a Milano, e se per la produzione basta una regione 1-AZ, che costa meno.
 
 **Perché OVH**: circa 8 $/TB al mese e traffico in uscita gratuito in Europa. Per il video l'uscita conta più dello spazio, perché ogni clip non in cache si riscarica.
 
 **Perché PostgreSQL gestito**: è il componente critico (vedi Backup) e uno gestito porta backup e PITR senza un server da curare. Coerente col principio guida. Il prezzo va verificato; l'alternativa è una VPS a circa 15-30 €/mese.
+
+**Versioning e Object Lock**: spenti sul bucket di test. JuiceFS ha il suo cestino; con il versioning ogni blocco che JuiceFS cancella o compatta resterebbe nel bucket e si pagherebbe, e Object Lock gli impedirebbe di cancellare e compattare. Contro le cancellazioni restano cestino e replica (vedi Backup). Per la produzione è una decisione aperta.
 
 ## La cache
 
@@ -50,7 +52,7 @@ La cache sta sull'SSD di ogni Mac, dentro il disco della macchina Linux, gestita
 - **Come ci entrano i blocchi**: leggendo, con il prefetch che scarica in avanti durante la riproduzione, con `juicefs warmup <cartella>` che precarica un progetto intero, e scrivendo, ma solo con `--cache-large-write`, che di default è spento: chi carica il girato lo ha già in cache, i colleghi no.
 - **Restano anche dopo il riavvio**, finché: la cache raggiunge `--cache-size` (si eliminano i blocchi usati meno di recente), lo spazio libero del Mac scende sotto `--free-space-ratio` (default 10%, la cache non riempie mai il disco), scade `--cache-expire` se impostato, oppure si liberano a mano con `juicefs warmup --evict <cartella>`. I blocchi di un file cancellato spariscono subito sul Mac che lo cancella; sugli altri diventano orfani e vengono eliminati per primi.
 - **Ogni Mac ha la sua cache**: ciò che ha visto un collega non aiuta gli altri.
-- **Non funziona offline**: anche con i blocchi in cache, l'albero dei file sta nel database. Senza rete il disco non si usa.
+- **Non funziona offline**: anche con i blocchi in cache, l'albero dei file sta nel database. Senza rete il disco non si usa. Fa eccezione la configurazione di test, con i metadati in SQLite dentro la VM: lì i file già in cache dovrebbero restare leggibili, ma non è provato.
 - **Mai dati vecchi**: un file modificato viene scritto in blocchi nuovi, quelli in cache restano solo inutilizzati.
 
 ## Prestazioni misurate
@@ -133,7 +135,23 @@ JuiceFS Community non ha alcuna interfaccia per l'utente finale: è un programma
 | Credenziali in chiaro su ogni Mac | Accesso con SSO e credenziali personali revocabili |
 | Non va e nessuno sa perché | "Invia diagnostica" con log e stato |
 
-Forma prevista: **app Tauri** nella barra dei menu, sullo scheletro di Portsage (`~/Development/Projects/portsage`), che ha già icona e pannello nella barra dei menu, avvio all'accesso e un binario esterno incluso nell'app (`externalBin`). Swift scartato: non è nello stack di Acme e nessuno nel team lo manterrebbe; servirebbe solo per badge e menu nativi del Finder, che un'estensione Swift potrebbe aggiungere accanto all'app senza riscriverla. 
+Forma prevista: **app Tauri** nella barra dei menu, sullo scheletro di Portsage (`~/Development/Projects/portsage`), che ha già icona e pannello nella barra dei menu, avvio all'accesso e un binario esterno incluso nell'app (`externalBin`). Swift scartato: non è nello stack di Acme e nessuno nel team lo manterrebbe; servirebbe solo per badge e menu nativi del Finder, che un'estensione Swift potrebbe aggiungere accanto all'app senza riscriverla.
+
+**Prima versione anticipata, solo sul comando.** Il lavoro sull'app parte prima della fine del pilota, ma la prima versione fa solo ciò che fa già il comando `fluix` (stato, accendi e spegni, rendi disponibile, libera spazio, spazio occupato sul Mac): è il motore che l'app comanda, quindi non è lavoro buttato. Le funzioni della tabella sopra restano legate a ciò che il pilota mostra.
+
+**Mockup del pannello**: `mockups/panel.html`, tre varianti affiancate con gli stati Normale, Download in corso, Non raggiungibile, Avvio e Spento, e pulsanti che simulano il download alla velocità misurata su OVH. Stile e colori sono quelli di Portsage. La variante è da scegliere:
+
+- **A, Prima i progetti**: l'elenco dei progetti con quanto c'è già sul Mac e l'azione per cambiarlo; lo stato del disco è un'etichetta che si allarga solo quando qualcosa non va. Stessa ossatura del pannello di Portsage.
+- **B, Prima lo stato**: una frase e un pulsante grande che fa la cosa giusta nello stato corrente (Apri nel Finder, Riconnetti, Accendi); sotto, lo spazio del Mac diviso per progetto, con le azioni nel menu di ogni riga.
+- **C, Compatto, come il Finder**: il disco è una voce con Espelli, i progetti una lista con le icone di stato di iCloud Drive; selezionando una riga compaiono dettagli e azioni.
+
+Decisioni che il mockup lascia aperte:
+
+- **Testo quando il disco non è raggiungibile**: il mockup dice che i file non si aprono finché il disco non torna. Vale con PostgreSQL condiviso, non del tutto con i metadati nella VM (vedi [La cache](#la-cache)). Si sceglie con la configurazione finale.
+- **Cache piena**: il mockup blocca con "Serve spazio" un progetto che non ci sta. L'alternativa è avvisare e lasciare che JuiceFS liberi i blocchi usati meno di recente.
+- **Riconnessione automatica**: il pannello promette un nuovo tentativo ogni 30 secondi, che oggi nessun componente fa.
+- **"Spegni" o "Espelli"**: le varianti usano parole diverse per la stessa azione; l'app ne usa una.
+- Nomi dei progetti, versione e date sono inventati.
 
 **Solo macOS per ora, con lo strato del sistema isolato.** L'interfaccia (stato, cache, warmup) è comune; cambia solo come gira JuiceFS, dietro un'interfaccia unica (monta, smonta, stato, warmup, libera spazio) con un modulo per sistema selezionato da `#[cfg(target_os)]`, come lo scanner di Portsage:
 
@@ -151,7 +169,8 @@ Effort stimato, congettura: 3-4 giorni per stato, montaggio, warmup e cache part
 
 ## Accessi e sicurezza
 
-- Ogni Mac contiene le credenziali di database e bucket. **Non ci sono permessi per persona**: chi ha il disco vede e può cancellare tutto. Cestino e versioning mitigano le cancellazioni.
+- Ogni Mac contiene le credenziali di database e bucket. **Non ci sono permessi per persona**: chi ha il disco vede e può cancellare tutto. Cestino e replica mitigano le cancellazioni.
+- **Le chiavi S3 di OVH aprono tutti i bucket del progetto Public Cloud**, non solo il proprio. L'utente di test (`fluix-test`, ruolo Object Storage Operator) oggi vede solo il bucket di test perché nel progetto non ce ne sono altri; se ne arrivano, all'utente va applicata una policy limitata al suo bucket.
 - **Uscita di una persona**: senza app, vanno ruotate le credenziali su tutti i Mac. Con l'app di fase 2, credenziali personali (un ruolo PostgreSQL e una chiave S3 per persona) si revocano singolarmente. I permessi restano comunque "tutto o niente".
 - Se serve controllo per utente o per cartella, JuiceFS Community non lo offre in modo semplice; SpaceFS e LucidLink sì.
 
@@ -185,10 +204,10 @@ Il modulo macOS, oggi un comando (`macos/bin/fluix`) e domani il motore dell'app
 - **Configurazione**: `config.env` (modello in `macos/config.env.example`) con bucket, chiavi, password SMB tra Mac e VM, cache e limiti di banda simulati. Lo zip contiene le chiavi: si passa in privato, con una chiave OVH dedicata al bucket di test, da revocare a fine test.
 - **Un volume per Mac**: con `VOLUME_NAME` vuoto, `install.sh` genera `fluix-<utente>-<codice>`, così lo stesso zip va a più persone sullo stesso bucket, ognuna col suo disco. Una reinstallazione sopra un'installazione esistente tiene la configurazione; `uninstall` cancella tutto, perché il volume è perso con la VM.
 - **Metadati del test**: SQLite dentro la VM. Disinstallare il pacchetto o perdere la VM rende illeggibili i file nel bucket; per più persone serve PostgreSQL (`META_URL`).
-- **Peso**: sul Mac la VM occupa al massimo 1 GB di RAM (1.035 MB misurati, 670 MB appena avviata), contro i 2.060 MB della prima versione con 2 GiB. Il tetto è la memoria assegnata, non il buffer di JuiceFS: Linux riempie la RAM libera con la cache delle pagine, il framework di Apple tiene ogni pagina toccata e Lima non usa il balloon per restituirla, quindi dopo la prima lettura di un clip la VM pesa tutta la sua `memory`. Dentro la VM JuiceFS arriva a 420 MB copiando 2,7 GB con `--buffer-size` a 256 MB (era 1 GB), senza processi chiusi per memoria esaurita. Le prestazioni restano quelle con 2 GiB: lettura a freddo 11,6-13 MB/s, salto a freddo 0,8-1 s, warmup di un clip 27-33 s, copia di 2,7 GB 129 s (133 s con la configurazione di prima, nello stesso momento). Cambia solo la rilettura dopo uno smontaggio, 0,5 s invece di 0,2, perché arriva dalla cache su disco invece che dalla RAM. Sul disco la VM cresce con la cache.
-- **Installazione misurata**: 84-111 s, compreso il download dell'immagine Debian.
+- **Peso**: sul Mac la VM occupa al massimo 1 GB di RAM (1.035 MB misurati, 670 MB appena avviata), contro i 2.060 MB della prima versione con 2 GiB. Il tetto è la memoria assegnata, non il buffer di JuiceFS: Linux riempie la RAM libera con la cache delle pagine, il framework di Apple tiene ogni pagina toccata e Lima non usa il balloon per restituirla, quindi dopo la prima lettura di un clip la VM pesa tutta la sua `memory`. Dentro la VM JuiceFS arriva a 420 MB copiando 2,7 GB con `--buffer-size` a 256 MB (era 1 GB), senza processi chiusi per memoria esaurita. Le prestazioni restano quelle con 2 GiB: lettura a freddo 11,6-13 MB/s, salto a freddo 0,8-1 s, warmup di un clip 27-33 s, copia di 2,7 GB 129 s (133 s con la configurazione di prima, nello stesso momento). Cambia solo la rilettura dopo uno smontaggio, 0,5 s invece di 0,2, perché arriva dalla cache su disco invece che dalla RAM. Sul disco la VM cresce con la cache. La `memory` vale per le VM create da qui in poi: `setup` non la cambia su una VM esistente, che va aggiornata a mano o reinstallata.
+- **Installazione misurata**: 84-111 s, compreso il download dell'immagine Debian. Serve un Mac con Apple Silicon e macOS 13 o successivo, che `install.sh` controlla.
 - **Prestazioni**: come lo spike con Docker a 100 Mbps simulati: lettura a freddo 5,3-7,2 MB/s, salto a freddo in media 0,8 s. A caldo le letture le serve anche la cache del client SMB di macOS.
-- **Da fare**: le Azioni rapide nel Finder ("Rendi disponibile", "Libera spazio"); per ora sono `fluix warmup <percorso>` e `fluix free <percorso>`.
+- **Da fare**: le Azioni rapide nel Finder ("Rendi disponibile", "Libera spazio"); per ora sono `fluix warmup <percorso>` e `fluix free <percorso>`. Mai provati l'avvio all'accesso dopo un riavvio vero e la ripresa dopo uno stop del Mac o un cambio di rete.
 
 ## Alternative considerate
 
