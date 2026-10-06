@@ -1,0 +1,1214 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pannello Fluix</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --page: #e6e7ea;
+  --page-text: #24252a;
+  --page-muted: #5f626a;
+  --page-line: #cfd2d8;
+  --seg-bg: #dcdee2;
+  --seg-on: #ffffff;
+
+  --bg-surface: #fcfcfb;
+  --bg-elevated: #f1f0ed;
+  --border-subtle: #e3e0db;
+  --text-primary: #26231f;
+  --text-secondary: #6b665f;
+  --text-muted: #9a958e;
+
+  --accent-amber: #8a5c0d;
+  --accent-amber-fill: #d4a044;
+  --accent-amber-hover: #c99536;
+  --accent-amber-glow: #d4a04400;
+  --accent-amber-soft: #d4a04424;
+  --accent-amber-soft-2: #d4a0443d;
+  --on-amber: #1f1a12;
+
+  --danger: #b3443c;
+  --danger-soft: #b3443c12;
+  --danger-line: #b3443c38;
+  --success: #3b8459;
+  --success-soft: #3b845914;
+  --track: #e8e5e0;
+  --idle: #bdb8b0;
+  --zebra: #f6f5f2;
+
+  --mb-bg: rgba(246, 246, 248, 0.62);
+  --mb-text: #1d1d1f;
+  --mb-press: rgba(0, 0, 0, 0.1);
+  --pop-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.1), 0 24px 48px -14px rgba(30, 30, 40, 0.38);
+  --flash-bg: #26231f;
+  --flash-text: #fcfcfb;
+  --wallpaper:
+    radial-gradient(120% 80% at 15% 115%, #e8c486 0%, transparent 58%),
+    radial-gradient(90% 70% at 95% -5%, #98aecd 0%, transparent 70%),
+    linear-gradient(160deg, #c7d1df, #e4d6be);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --page: #141418;
+    --page-text: #e8e4df;
+    --page-muted: #9a9590;
+    --page-line: #2c2c34;
+    --seg-bg: #1c1c22;
+    --seg-on: #2e2e37;
+
+    --bg-surface: #222228;
+    --bg-elevated: #2a2a32;
+    --border-subtle: #333340;
+    --text-primary: #e8e4df;
+    --text-secondary: #9a9590;
+    --text-muted: #6b6661;
+
+    --accent-amber: #d4a044;
+    --accent-amber-fill: #d4a044;
+    --accent-amber-hover: #deb05a;
+    --accent-amber-glow: #d4a04440;
+    --accent-amber-soft: #d4a04418;
+    --accent-amber-soft-2: #d4a04430;
+    --on-amber: #1a1a1f;
+
+    --danger: #c45c5c;
+    --danger-soft: #c45c5c17;
+    --danger-line: #c45c5c40;
+    --success: #6aa886;
+    --success-soft: #6aa88617;
+    --track: #33333d;
+    --idle: #5c5856;
+    --zebra: #25252c;
+
+    --mb-bg: rgba(28, 28, 32, 0.55);
+    --mb-text: #f1f1f1;
+    --mb-press: rgba(255, 255, 255, 0.18);
+    --pop-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.7), 0 24px 48px -12px rgba(0, 0, 0, 0.65);
+    --flash-bg: #e8e4df;
+    --flash-text: #1a1a1f;
+    --wallpaper:
+      radial-gradient(120% 80% at 15% 115%, #5c4220 0%, transparent 58%),
+      radial-gradient(90% 70% at 95% -5%, #2b3a57 0%, transparent 70%),
+      linear-gradient(160deg, #191e2a, #2a2218);
+  }
+}
+
+:root[data-theme="dark"] {
+  --page: #141418;
+  --page-text: #e8e4df;
+  --page-muted: #9a9590;
+  --page-line: #2c2c34;
+  --seg-bg: #1c1c22;
+  --seg-on: #2e2e37;
+
+  --bg-surface: #222228;
+  --bg-elevated: #2a2a32;
+  --border-subtle: #333340;
+  --text-primary: #e8e4df;
+  --text-secondary: #9a9590;
+  --text-muted: #6b6661;
+
+  --accent-amber: #d4a044;
+  --accent-amber-fill: #d4a044;
+  --accent-amber-hover: #deb05a;
+  --accent-amber-glow: #d4a04440;
+  --accent-amber-soft: #d4a04418;
+  --accent-amber-soft-2: #d4a04430;
+  --on-amber: #1a1a1f;
+
+  --danger: #c45c5c;
+  --danger-soft: #c45c5c17;
+  --danger-line: #c45c5c40;
+  --success: #6aa886;
+  --success-soft: #6aa88617;
+  --track: #33333d;
+  --idle: #5c5856;
+  --zebra: #25252c;
+
+  --mb-bg: rgba(28, 28, 32, 0.55);
+  --mb-text: #f1f1f1;
+  --mb-press: rgba(255, 255, 255, 0.18);
+  --pop-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.7), 0 24px 48px -12px rgba(0, 0, 0, 0.65);
+  --flash-bg: #e8e4df;
+  --flash-text: #1a1a1f;
+  --wallpaper:
+    radial-gradient(120% 80% at 15% 115%, #5c4220 0%, transparent 58%),
+    radial-gradient(90% 70% at 95% -5%, #2b3a57 0%, transparent 70%),
+    linear-gradient(160deg, #191e2a, #2a2218);
+}
+
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--page);
+  color: var(--page-text);
+  font: 14px/1.5 -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+button { font: inherit; color: inherit; }
+h1, h2, h3 { text-wrap: balance; }
+
+/* Page chrome around the three mockups */
+.page-head { max-width: 1320px; margin: 0 auto; padding: 40px 24px 4px; }
+.page-title { font-size: 24px; font-weight: 600; letter-spacing: -0.01em; margin: 0 0 8px; }
+.page-lede { margin: 0; max-width: 72ch; color: var(--page-muted); }
+.page-controls { display: flex; flex-wrap: wrap; gap: 12px 28px; margin-top: 20px; align-items: center; }
+.control { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.control-label { font-size: 12.5px; color: var(--page-muted); }
+
+.seg { display: inline-flex; flex-wrap: wrap; gap: 2px; padding: 2px; border-radius: 8px; background: var(--seg-bg); border: 1px solid var(--page-line); }
+.seg button { border: 0; background: transparent; padding: 4px 10px; border-radius: 6px; font-size: 12.5px; color: var(--page-muted); cursor: pointer; }
+.seg button:hover { color: var(--page-text); }
+.seg button[aria-pressed="true"] { background: var(--seg-on); color: var(--page-text); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12); }
+.seg button:focus-visible { outline: 2px solid var(--accent-amber-fill); outline-offset: 1px; }
+
+.variants {
+  max-width: 1320px; margin: 0 auto; padding: 28px 24px 64px;
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 392px), 1fr));
+  gap: 44px 28px; align-items: start;
+}
+.variant { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.variant-head { display: flex; align-items: center; gap: 10px; }
+.letter { font: 600 14px/1 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--on-amber); background: var(--accent-amber-fill); border-radius: 5px; padding: 5px 8px; }
+.variant-head h2 { margin: 0; font-size: 16px; font-weight: 600; }
+.variant-note { margin: 2px 0 0; color: var(--page-muted); font-size: 13.5px; max-width: 62ch; }
+
+/* Fake macOS desktop strip */
+.desk { position: relative; height: 640px; border-radius: 12px; overflow: hidden; background: var(--wallpaper); border: 1px solid var(--page-line); }
+.menubar {
+  height: 26px; display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 0 10px; background: var(--mb-bg); color: var(--mb-text); font-size: 12.5px; white-space: nowrap;
+  backdrop-filter: blur(20px) saturate(1.4); -webkit-backdrop-filter: blur(20px) saturate(1.4);
+}
+.mb-left { display: flex; gap: 14px; overflow: hidden; min-width: 0; }
+.mb-left b { font-weight: 700; }
+.mb-right { display: flex; align-items: center; gap: 11px; flex-shrink: 0; }
+.mb-right svg { display: block; }
+.mb-yd { display: grid; place-items: center; width: 28px; height: 20px; border-radius: 5px; background: var(--mb-press); border: 0; padding: 0; cursor: default; }
+.desk-icon {
+  position: absolute; left: 18px; bottom: 18px; width: 84px;
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  color: #fff; font-size: 11.5px; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.55); transition: opacity 0.2s ease;
+}
+.desk-icon.gone { opacity: 0; }
+.flash {
+  position: absolute; left: 50%; bottom: 22px; transform: translate(-50%, 8px); opacity: 0;
+  background: var(--flash-bg); color: var(--flash-text); font-size: 12.5px; padding: 7px 12px; border-radius: 8px;
+  pointer-events: none; transition: opacity 0.2s ease, transform 0.2s ease; white-space: nowrap; max-width: calc(100% - 24px);
+  overflow: hidden; text-overflow: ellipsis;
+}
+.flash.show { opacity: 1; transform: translate(-50%, 0); }
+
+/* The popover window */
+.popover {
+  position: absolute; top: 31px; right: 8px; width: min(364px, calc(100% - 16px)); max-height: calc(100% - 40px);
+  display: flex; flex-direction: column; overflow: hidden;
+  background: var(--bg-surface); color: var(--text-primary);
+  border: 1px solid var(--border-subtle); border-radius: 12px; box-shadow: var(--pop-shadow);
+  font-size: 13px; line-height: 1.4;
+}
+.scroll { overflow-y: auto; flex: 1 1 auto; min-height: 0; }
+.wordmark { font: 400 14px/1 ui-monospace, SFMono-Regular, Menlo, monospace; text-shadow: 0 0 12px var(--accent-amber-glow); }
+.num { font-variant-numeric: tabular-nums; }
+
+/* Shared controls inside the popover */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  border: 1px solid transparent; background: transparent; color: var(--text-primary);
+  border-radius: 6px; padding: 4px 10px; font-size: 12px; font-weight: 500; line-height: 1.3;
+  cursor: pointer; white-space: nowrap; transition: background-color 0.15s ease, color 0.15s ease;
+}
+.btn:hover:not(:disabled) { background: var(--bg-elevated); }
+.btn:focus-visible { outline: 2px solid var(--accent-amber-fill); outline-offset: 1px; }
+.btn:disabled { opacity: 0.42; cursor: default; }
+.btn-primary { background: var(--accent-amber-fill); color: var(--on-amber); font-weight: 600; }
+.btn-primary:hover:not(:disabled) { background: var(--accent-amber-hover); }
+.btn-soft { background: var(--accent-amber-soft); color: var(--accent-amber); }
+.btn-soft:hover:not(:disabled) { background: var(--accent-amber-soft-2); }
+.btn-ghost { color: var(--text-secondary); }
+.btn-ghost:hover:not(:disabled) { color: var(--text-primary); }
+.btn-danger { background: var(--danger); color: #fff; }
+.btn-danger:hover:not(:disabled) { background: var(--danger); filter: brightness(1.08); }
+.btn-icon { width: 26px; height: 26px; padding: 0; color: var(--text-secondary); }
+.btn-icon:hover:not(:disabled) { color: var(--text-primary); }
+.btn-link {
+  padding: 0; border: 0; border-radius: 2px; color: var(--text-secondary); font-size: 11.5px; font-weight: 400;
+  text-decoration: underline; text-decoration-color: var(--border-subtle); text-underline-offset: 2px;
+}
+.btn-link:hover:not(:disabled) { background: none; color: var(--text-primary); text-decoration-color: currentColor; }
+.btn-big { width: 100%; height: 40px; font-size: 13.5px; border-radius: 8px; }
+.muted-note { font-size: 11.5px; color: var(--text-muted); }
+
+.dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; flex-shrink: 0; }
+.pulse { animation: pulse 1.4s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: 0.35; } }
+.spin {
+  width: 14px; height: 14px; border-radius: 50%; display: inline-block; flex-shrink: 0;
+  border: 1.5px solid var(--accent-amber-soft-2); border-top-color: var(--accent-amber-fill);
+  animation: spin 0.9s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.pill { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 500; padding: 3px 9px; border-radius: 999px; background: var(--bg-elevated); color: var(--text-secondary); }
+.st-ok { color: var(--success); }
+.st-starting { color: var(--accent-amber); }
+.st-offline { color: var(--danger); }
+.st-stopped { color: var(--text-muted); }
+.pill.st-ok { background: var(--success-soft); }
+.pill.st-starting { background: var(--accent-amber-soft); }
+.pill.st-offline { background: var(--danger-soft); }
+
+.bar { height: 3px; border-radius: 2px; background: var(--track); overflow: hidden; }
+.bar > i { display: block; height: 100%; border-radius: inherit; background: var(--success); transition: width 0.3s ease; }
+.bar.dl > i { background: var(--accent-amber-fill); }
+.bar.neutral > i { background: var(--text-secondary); }
+.bar.warn > i { background: var(--accent-amber-fill); }
+.bar.thick { height: 6px; border-radius: 3px; }
+
+.confirm { margin: 8px 12px; padding: 10px 12px; border-radius: 8px; background: var(--bg-elevated); font-size: 12px; color: var(--text-secondary); }
+.confirm p { margin: 0; }
+.confirm strong { color: var(--text-primary); font-weight: 600; }
+.confirm-act { display: flex; justify-content: flex-end; gap: 6px; margin-top: 10px; }
+
+.hd { display: flex; align-items: center; justify-content: space-between; gap: 8px; height: 42px; padding: 0 10px 0 16px; flex-shrink: 0; border-bottom: 1px solid var(--border-subtle); }
+.hd-r { display: flex; align-items: center; gap: 4px; }
+.ft { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 46px; padding: 6px 10px 6px 16px; border-top: 1px solid var(--border-subtle); flex-shrink: 0; }
+.ver { font-size: 11px; color: var(--text-muted); }
+.block { padding: 26px 20px; display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+.block h3 { margin: 0; font-size: 14px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+.block p { margin: 0; color: var(--text-secondary); font-size: 12.5px; max-width: 36ch; }
+.block .btn { margin-top: 8px; }
+.dim { opacity: 0.45; pointer-events: none; user-select: none; }
+
+/* Variant A: projects first */
+.pa-sec { display: flex; justify-content: space-between; align-items: baseline; padding: 12px 16px 4px; font-size: 11.5px; color: var(--text-muted); }
+.pa-sec-title { font: 400 12px/1 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--text-primary); }
+.pa-list { padding: 2px 8px 8px; }
+.pa-row { display: flex; gap: 12px; align-items: center; padding: 8px; border-radius: 8px; }
+.pa-row:hover { background: var(--bg-elevated); }
+.pa-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.pa-name { font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pa-meta { font-size: 11.5px; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+.pa-meta.ready { color: var(--success); }
+.pa-act { display: flex; flex-direction: column; align-items: flex-end; gap: 5px; flex-shrink: 0; }
+.pa-row + .confirm { margin: 0 4px 8px; }
+.notice { display: flex; gap: 12px; margin: 12px; padding: 12px; border-radius: 8px; background: var(--danger-soft); border: 1px solid var(--danger-line); }
+.notice-ic { color: var(--danger); flex-shrink: 0; margin-top: 1px; }
+.notice-title { font-weight: 600; margin: 0 0 4px; font-size: 13px; }
+.notice p { margin: 0; font-size: 12px; color: var(--text-secondary); }
+.notice-act { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; margin-top: 10px; }
+.space { padding: 12px 16px; border-top: 1px solid var(--border-subtle); display: flex; flex-direction: column; gap: 7px; flex-shrink: 0; }
+.space-top { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--text-secondary); }
+.space-top .num { color: var(--text-primary); }
+
+/* Variant B: status first */
+.pb-hero { padding: 18px 16px 16px; display: flex; flex-direction: column; gap: 14px; border-bottom: 1px solid var(--border-subtle); }
+.pb-top { display: flex; gap: 12px; align-items: flex-start; }
+.pb-glyph { width: 40px; height: 40px; border-radius: 10px; display: grid; place-items: center; flex-shrink: 0; background: var(--success-soft); color: var(--success); }
+.pb-glyph.st-starting { background: var(--accent-amber-soft); }
+.pb-glyph.st-offline { background: var(--danger-soft); }
+.pb-glyph.st-stopped { background: var(--bg-elevated); }
+.pb-glyph.dl { background: var(--accent-amber-soft); color: var(--accent-amber); }
+.pb-hero h2 { margin: 0; font-size: 15.5px; font-weight: 600; line-height: 1.3; }
+.pb-hero p { margin: 3px 0 0; font-size: 12.5px; color: var(--text-secondary); }
+.pb-steps { margin: 6px 0 0; padding-left: 18px; font-size: 12.5px; color: var(--text-secondary); }
+.pb-steps li + li { margin-top: 2px; }
+.pb-prog { display: flex; flex-direction: column; gap: 8px; }
+.pb-prog-row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.pb-big-num { font-size: 30px; font-weight: 300; letter-spacing: -0.02em; line-height: 1; font-variant-numeric: tabular-nums; }
+.pb-prog-meta { font-size: 12px; color: var(--text-secondary); text-align: right; font-variant-numeric: tabular-nums; }
+.pb-btns { display: flex; gap: 8px; }
+.pb-btns .btn-big { flex: 1; }
+.pb-btns .btn-ghost { height: 40px; }
+.pb-sec { padding: 14px 16px 6px; }
+.pb-sec-top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 9px; font-size: 12px; color: var(--text-secondary); }
+.pb-sec-title { font: 400 12px/1 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--text-primary); }
+.stack { display: flex; gap: 1px; height: 8px; border-radius: 4px; overflow: hidden; background: var(--track); }
+.stack i { display: block; height: 100%; transition: width 0.3s ease; }
+.legend { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
+.legend li { display: flex; align-items: center; gap: 8px; }
+.legend .sw { width: 8px; height: 8px; border-radius: 2px; flex-shrink: 0; }
+.legend .n { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); }
+.legend .v { font-variant-numeric: tabular-nums; }
+.pb-list { padding: 0 8px 8px; }
+.pb-row { display: flex; align-items: center; gap: 8px; padding: 3px 3px 3px 8px; border-radius: 6px; min-height: 32px; }
+.pb-row:hover, .pb-row.open { background: var(--bg-elevated); }
+.pb-row .n { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; }
+.tag { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+.tag.ready { color: var(--success); }
+.tag.dl { color: var(--accent-amber); }
+.menu { margin: 2px 4px 6px 12px; padding: 4px; border-radius: 8px; background: var(--bg-surface); border: 1px solid var(--border-subtle); display: flex; flex-direction: column; box-shadow: 0 6px 18px -8px rgba(0, 0, 0, 0.3); }
+.menu .btn { justify-content: flex-start; width: 100%; font-weight: 400; padding: 6px 8px; font-size: 12.5px; }
+.menu .btn:hover:not(:disabled) { background: var(--accent-amber-soft); }
+.menu .btn .aside { margin-left: auto; color: var(--text-muted); font-size: 11.5px; padding-left: 12px; }
+.menu-note { font-size: 11.5px; color: var(--text-muted); padding: 4px 8px 6px; }
+.pb-hint { margin: 0; padding: 10px 16px; font-size: 11.5px; color: var(--text-muted); border-top: 1px solid var(--border-subtle); }
+
+/* Variant C: compact, Finder-like */
+.pc-disk { display: flex; align-items: center; gap: 4px; padding: 6px 8px; border-bottom: 1px solid var(--border-subtle); flex-shrink: 0; }
+.pc-disk-main { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; border: 0; background: transparent; padding: 6px 8px; border-radius: 6px; cursor: pointer; text-align: left; }
+.pc-disk-main:hover:not(:disabled) { background: var(--bg-elevated); }
+.pc-disk-main:focus-visible { outline: 2px solid var(--accent-amber-fill); outline-offset: 1px; }
+.pc-disk-main:disabled { cursor: default; }
+.pc-disk-ic { color: var(--text-secondary); flex-shrink: 0; }
+.pc-disk-txt { display: flex; flex-direction: column; min-width: 0; }
+.pc-disk-name { font-weight: 600; font-size: 13px; }
+.pc-disk-state { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; }
+.pc-open { margin-left: auto; color: var(--text-muted); flex-shrink: 0; }
+.pc-msg { padding: 9px 16px; font-size: 12px; color: var(--text-secondary); background: var(--danger-soft); border-bottom: 1px solid var(--danger-line); }
+.pc-msg strong { color: var(--danger); font-weight: 600; }
+.pc-cols { display: flex; justify-content: space-between; padding: 6px 18px 5px; font-size: 11px; color: var(--text-muted); border-bottom: 1px solid var(--border-subtle); }
+.pc-list { padding: 4px 6px; }
+.pc-row {
+  display: flex; align-items: center; gap: 8px; width: 100%; height: 28px; padding: 0 10px;
+  border: 0; background: transparent; border-radius: 5px; cursor: pointer; text-align: left; font-size: 12.5px; color: var(--text-primary);
+}
+.pc-row:nth-child(even) { background: var(--zebra); }
+.pc-row[aria-selected="true"] { background: var(--accent-amber-soft-2); }
+.pc-row:focus-visible { outline: 2px solid var(--accent-amber-fill); outline-offset: -2px; }
+.pc-row .fi { color: var(--text-secondary); flex-shrink: 0; }
+.pc-row .n { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pc-st { display: inline-flex; align-items: center; justify-content: flex-end; gap: 5px; width: 96px; flex-shrink: 0; font-size: 11.5px; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+.pc-st.ready { color: var(--success); }
+.pc-st.dl { color: var(--accent-amber); }
+.pc-st.cloud { color: var(--text-muted); }
+.pc-inspect { margin: 4px 8px 8px; padding: 10px 12px; border-radius: 8px; background: var(--bg-elevated); }
+.pc-inspect .n { font-weight: 600; font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pc-inspect .m { font-size: 11.5px; color: var(--text-secondary); margin-top: 2px; font-variant-numeric: tabular-nums; }
+.pc-inspect .acts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
+.pc-inspect .confirm { margin: 9px 0 0; padding: 0; background: none; }
+.pc-skel { display: flex; align-items: center; gap: 10px; height: 28px; padding: 0 10px; }
+.pc-skel i { display: block; height: 9px; border-radius: 3px; background: var(--bg-elevated); }
+.pc-status { display: flex; align-items: center; gap: 10px; padding: 9px 12px 9px 16px; font-size: 11.5px; color: var(--text-secondary); border-top: 1px solid var(--border-subtle); flex-shrink: 0; }
+.pc-status .bar { width: 56px; flex-shrink: 0; }
+.pc-status .grow { flex: 1; min-width: 0; }
+
+@media (max-width: 520px) {
+  .page-head { padding: 28px 16px 4px; }
+  .variants { padding: 24px 16px 48px; }
+  .mb-left span:nth-child(n + 3) { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+</style>
+</head>
+<body>
+<header class="page-head">
+  <h1 class="page-title">Fluix nella barra dei menu</h1>
+  <p class="page-lede">Tre proposte per il pannello che si apre cliccando l'icona di Fluix in alto a destra. Stessi progetti di esempio in tutte e tre: spazio riservato su questo Mac 100 GB, download a circa 14,5 MB/s (434 MB in 30 secondi su una linea da 170 Mbps). I pulsanti dentro i pannelli rispondono davvero.</p>
+  <div class="page-controls">
+    <div class="control">
+      <span class="control-label">Stato di tutte</span>
+      <div class="seg" id="global-mode" role="group" aria-label="Stato di tutte le varianti"></div>
+    </div>
+    <div class="control">
+      <span class="control-label">Aspetto</span>
+      <div class="seg" id="global-theme" role="group" aria-label="Aspetto">
+        <button type="button" data-theme-set="auto" aria-pressed="true">Come il sistema</button>
+        <button type="button" data-theme-set="light" aria-pressed="false">Chiaro</button>
+        <button type="button" data-theme-set="dark" aria-pressed="false">Scuro</button>
+      </div>
+    </div>
+  </div>
+</header>
+
+<main class="variants" id="variants"></main>
+
+<script>
+"use strict";
+
+const LIMIT_GB = 100;
+const OTHER_GB = 3.1; // recently opened files outside the listed projects
+const RATE_MB_S = 14.5; // measured: 434 MB in about 30 s on a 170 Mbps line
+const VERSION = "0.1.0";
+const REDUCED = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+const BASE_PROJECTS = [
+  { id: "moretti", name: "Pastificio Moretti - Spot Natale", size: 38.2, avail: 38.2 },
+  { id: "arnaldi", name: "Cantine Arnaldi - Vendemmia", size: 24.6, avail: 6.9 },
+  { id: "showreel", name: "Showreel Acme 2026", size: 11.4, avail: 0 },
+  { id: "lirica", name: "Fondazione Lirica - Backstage", size: 31.5, avail: 0 },
+  { id: "archivio", name: "Archivio 2025", size: 412, avail: 0 },
+];
+
+const MODES = [
+  ["ok", "Normale"],
+  ["download", "Download in corso"],
+  ["offline", "Non raggiungibile"],
+  ["starting", "Avvio"],
+  ["stopped", "Spento"],
+];
+
+const VARIANTS = [
+  {
+    key: "A",
+    title: "Prima i progetti",
+    note: "La lista dei progetti è la prima cosa che vedi: per ognuno quanto c'è già su questo Mac e il pulsante per cambiarlo. Lo stato del disco sta in una pastiglia nell'intestazione e prende tutto lo spazio solo quando qualcosa non va. Stessa ossatura del pannello di Portsage.",
+  },
+  {
+    key: "B",
+    title: "Prima lo stato, un'azione grande",
+    note: "Una frase dice com'è messo il disco e un solo pulsante grande fa la cosa giusta in quel momento: apre il Finder, riconnette o accende. Sotto, lo spazio di questo Mac diviso per progetto; le azioni sui singoli progetti stanno nel menu di ogni riga.",
+  },
+  {
+    key: "C",
+    title: "Compatto, come il Finder",
+    note: "Parla la lingua del Finder: il disco è una voce con il tasto Espelli, i progetti una lista con le icone di stato di iCloud Drive (nuvola, spicchio, spunta). Selezioni una riga e i dettagli con le azioni compaiono sotto. Il più denso dei tre.",
+  },
+];
+
+const ICON_PATHS = {
+  drive: '<path d="M22 12H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/><path d="M6 16h.01"/><path d="M10 16h.01"/>',
+  folder: '<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>',
+  power: '<path d="M12 2v10"/><path d="M18.4 6.6a9 9 0 1 1-12.77.04"/>',
+  refresh: '<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/>',
+  cloud: '<path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/>',
+  cloudDown: '<path d="M12 13v8l-4-4"/><path d="m12 21 4-4"/><path d="M4.393 15.269A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.436 8.284"/>',
+  dots: '<circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/>',
+  eject: '<path d="M12 5 5 13h14z"/><path d="M5 18h14"/>',
+  wifiOff: '<path d="M12 20h.01"/><path d="M8.5 16.429a5 5 0 0 1 7 0"/><path d="M5 12.859a10 10 0 0 1 5.17-2.69"/><path d="M19 12.859a10 10 0 0 0-2.007-1.523"/><path d="M2 8.82a15 15 0 0 1 4.177-2.643"/><path d="M22 8.82a15 15 0 0 0-11.288-3.764"/><path d="m2 2 20 20"/>',
+  open: '<path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>',
+  clock: '<circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>',
+};
+
+function icon(name, size = 16, sw = 1.6) {
+  return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON_PATHS[name]}</svg>`;
+}
+
+const RING_C = 40.84; // circumference for r = 6.5
+const PIE_C = 20.42; // circumference for r = 3.25
+
+function ring(pct) {
+  return `<svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.5" fill="none" stroke="var(--track)" stroke-width="2"/><circle data-live="ring" cx="8" cy="8" r="6.5" fill="none" stroke="var(--accent-amber-fill)" stroke-width="2" stroke-linecap="round" stroke-dasharray="${((pct / 100) * RING_C).toFixed(2)} ${RING_C}" transform="rotate(-90 8 8)"/></svg>`;
+}
+
+function pie(pct) {
+  return `<svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" stroke-width="1.3"/><circle cx="8" cy="8" r="3.25" fill="none" stroke="currentColor" stroke-width="6.5" stroke-dasharray="${((pct / 100) * PIE_C).toFixed(2)} ${PIE_C}" transform="rotate(-90 8 8)"/></svg>`;
+}
+
+function checkFilled() {
+  return '<svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="7" fill="currentColor"/><path d="m5 8.2 2 2 4-4" fill="none" stroke="var(--bg-surface)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+}
+
+const nf1 = new Intl.NumberFormat("it-IT", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+const nf0 = new Intl.NumberFormat("it-IT", { maximumFractionDigits: 0 });
+const num = (n) => (n >= 100 || n === 0 ? nf0.format(n) : nf1.format(n));
+const gb = (n) => `${num(n)} GB`;
+
+const state = {};
+
+function freshState() {
+  return {
+    mode: "ok",
+    projects: BASE_PROJECTS.map((p) => ({ ...p })),
+    target: null,
+    queue: [],
+    confirm: null,
+    menu: null,
+    sel: "arnaldi",
+    done: null,
+    timer: null,
+  };
+}
+
+const find = (v, id) => v.projects.find((p) => p.id === id);
+const pctOf = (p) => (p.avail / p.size) * 100;
+const used = (v) => v.projects.reduce((s, p) => s + p.avail, 0) + OTHER_GB;
+const usedText = (v) => `${num(used(v))} di ${LIMIT_GB} GB`;
+const isFull = (p) => p.avail >= p.size - 0.001;
+
+function etaFor(gbLeft) {
+  const secs = (gbLeft * 1000) / RATE_MB_S;
+  if (secs < 60) return "meno di un minuto";
+  const m = Math.ceil(secs / 60);
+  if (m < 60) return `circa ${m} min`;
+  return `circa ${Math.floor(m / 60)} h ${m % 60} min`;
+}
+const eta = (p) => etaFor(p.size - p.avail);
+
+// Space still promised to the running download and the queue.
+function reserved(v) {
+  return [v.target, ...v.queue].filter(Boolean).reduce((s, id) => {
+    const p = find(v, id);
+    return s + (p.size - p.avail);
+  }, 0);
+}
+
+// kind drives every variant: what the project is and what can be done with it.
+function kindOf(v, p) {
+  if (v.target === p.id) return "dl";
+  if (v.queue.includes(p.id)) return "queued";
+  if (isFull(p)) return "full";
+  if (p.size > LIMIT_GB) return "big";
+  const room = LIMIT_GB - used(v) - reserved(v);
+  const fits = p.size - p.avail <= room;
+  if (p.avail > 0) return fits ? "partial" : "partial-noroom";
+  return fits ? "zero" : "zero-noroom";
+}
+
+const live = {
+  pct: (p) => `<span data-live="pct">${Math.floor(pctOf(p))}%</span>`,
+  eta: (p) => `<span data-live="eta">${eta(p)}</span>`,
+  gb: (p) => `<span data-live="gb">${num(p.avail)} di ${gb(p.size)}</span>`,
+  bar: (p, cls = "dl") => `<div class="bar ${cls}"><i data-live="w" style="width:${pctOf(p)}%"></i></div>`,
+};
+
+const STATUS = {
+  ok: { label: "Collegato", cls: "st-ok" },
+  starting: { label: "In avvio", cls: "st-starting" },
+  offline: { label: "Non raggiungibile", cls: "st-offline" },
+  stopped: { label: "Spento", cls: "st-stopped" },
+};
+
+function stopConfirm(v, title, body, yes) {
+  const extra = v.target ? " Il download in corso si ferma." : "";
+  return `<div class="confirm" role="alertdialog" aria-label="${title}">
+    <p><strong>${title}</strong> ${body}${extra}</p>
+    <div class="confirm-act">
+      <button type="button" class="btn btn-ghost" data-act="cancel">Annulla</button>
+      <button type="button" class="btn btn-danger" data-act="stop-yes">${yes}</button>
+    </div>
+  </div>`;
+}
+
+function freeConfirm(v) {
+  const p = find(v, v.confirm.free);
+  return `<div class="confirm" role="alertdialog" aria-label="Libera spazio">
+    <p><strong>Liberare ${gb(p.avail)} su questo Mac?</strong> I file restano su Fluix. Finché non lo rendi di nuovo disponibile, scorrere la timeline sarà più lento.</p>
+    <div class="confirm-act">
+      <button type="button" class="btn btn-ghost" data-act="cancel">Annulla</button>
+      <button type="button" class="btn btn-soft" data-act="free-yes">Libera spazio</button>
+    </div>
+  </div>`;
+}
+
+/* Variant A */
+
+function rowA(v, p) {
+  const k = kindOf(v, p);
+  const pct = Math.round(pctOf(p));
+  const warmTitle = `Tempo stimato con questa connessione: ${eta(p)}`;
+  let meta = "";
+  let bar = `<div class="bar"><i style="width:${pctOf(p)}%"></i></div>`;
+  let act = "";
+  const warmBtn = `<button type="button" class="btn btn-soft" data-act="warm" data-id="${p.id}" title="${warmTitle}">Rendi disponibile</button>`;
+  const noRoom = `<span class="muted-note" title="Libera prima un progetto che non stai montando">Serve spazio</span>`;
+  const freeLink = `<button type="button" class="btn btn-link" data-act="free" data-id="${p.id}">Libera spazio</button>`;
+
+  switch (k) {
+    case "dl":
+      meta = `Download ${live.pct(p)}, ${live.eta(p)}`;
+      bar = live.bar(p);
+      act = `<button type="button" class="btn btn-ghost" data-act="abort">Interrompi</button>`;
+      break;
+    case "queued":
+      meta = "In coda, parte dopo il download in corso";
+      bar = `<div class="bar dl"><i style="width:${pctOf(p)}%"></i></div>`;
+      act = `<button type="button" class="btn btn-link" data-act="unqueue" data-id="${p.id}">Togli dalla coda</button>`;
+      break;
+    case "full":
+      meta = v.done === p.id
+        ? `<span class="pa-meta ready">Pronto: scorre in timeline senza attese</span>`
+        : `Tutto su questo Mac, ${gb(p.size)}`;
+      act = `<button type="button" class="btn btn-ghost" data-act="free" data-id="${p.id}">Libera spazio</button>`;
+      break;
+    case "partial":
+    case "partial-noroom":
+      meta = `${pct}% su questo Mac, ${num(p.avail)} di ${gb(p.size)}`;
+      act = (k === "partial" ? warmBtn : noRoom) + freeLink;
+      break;
+    case "zero":
+    case "zero-noroom":
+      meta = `Solo online, ${gb(p.size)}`;
+      act = k === "zero" ? warmBtn : noRoom;
+      break;
+    case "big":
+      meta = `Solo online, ${gb(p.size)}: più grande dello spazio su questo Mac`;
+      break;
+  }
+
+  const confirm = v.confirm && v.confirm.free === p.id ? freeConfirm(v) : "";
+  return `<div class="pa-row">
+      <div class="pa-main">
+        <div class="pa-name" title="${p.name}">${p.name}</div>
+        <div class="pa-meta">${meta}</div>
+        ${bar}
+      </div>
+      <div class="pa-act">${confirm ? "" : act}</div>
+    </div>${confirm}`;
+}
+
+function spaceA(v) {
+  const u = used(v);
+  const cls = u / LIMIT_GB > 0.85 ? "warn" : "neutral";
+  const warn = u / LIMIT_GB > 0.85
+    ? `<span class="muted-note">Quasi pieno: libera un progetto che non stai montando.</span>`
+    : "";
+  return `<div class="space">
+    <div class="space-top"><span>Spazio usato su questo Mac</span><span class="num" data-live="used">${usedText(v)}</span></div>
+    <div class="bar thick ${cls}"><i data-live="used-w" style="width:${Math.min(100, (u / LIMIT_GB) * 100)}%"></i></div>
+    ${warn}
+  </div>`;
+}
+
+function renderA(v) {
+  const s = STATUS[v.mode];
+  const dot = `<i class="dot${v.mode === "starting" ? " pulse" : ""}"></i>`;
+  const stopBtn = v.mode === "stopped"
+    ? ""
+    : `<button type="button" class="btn btn-icon" data-act="stop" title="Spegni Fluix" aria-label="Spegni Fluix">${icon("power", 14)}</button>`;
+
+  let body = "";
+  const list = (dim) => `<div class="pa-sec"><span class="pa-sec-title">Progetti</span><span>su questo Mac</span></div>
+      <div class="pa-list${dim ? " dim" : ""}">${v.projects.map((p) => rowA(v, p)).join("")}</div>`;
+
+  if (v.mode === "ok") {
+    body = list(false);
+  } else if (v.mode === "offline") {
+    body = `<div class="notice" role="alert">
+        <span class="notice-ic">${icon("wifiOff", 18)}</span>
+        <div>
+          <p class="notice-title">Fluix non è raggiungibile</p>
+          <p>Controlla che il Mac sia connesso a internet, poi premi Riconnetti. Finché non torna, CapCut non riesce ad aprire i file del disco: salva il progetto e aspetta.</p>
+          <div class="notice-act">
+            <button type="button" class="btn btn-primary" data-act="reconnect">${icon("refresh", 13)} Riconnetti</button>
+            <span class="muted-note">Riprova da solo ogni 30 secondi</span>
+          </div>
+        </div>
+      </div>${list(true)}`;
+  } else if (v.mode === "starting") {
+    body = `<div class="block">
+        <h3><span class="spin"></span>Fluix si sta avviando</h3>
+        <p>Di solito bastano pochi secondi. I progetti compaiono qui appena è pronto.</p>
+      </div>`;
+  } else {
+    body = `<div class="block">
+        <h3>Fluix è spento</h3>
+        <p>Il disco non compare nel Finder. Accendilo per tornare ai progetti.</p>
+        <button type="button" class="btn btn-primary" data-act="start">${icon("power", 13)} Accendi Fluix</button>
+      </div>`;
+  }
+
+  const canOpen = v.mode === "ok";
+  return `<header class="hd">
+      <span class="wordmark">fluix</span>
+      <div class="hd-r"><span class="pill ${s.cls}">${dot}${s.label}</span>${stopBtn}</div>
+    </header>
+    ${v.confirm === "stop" ? stopConfirm(v, "Spegnere Fluix?", "Il disco sparisce dal Finder e CapCut non vede più i file finché non lo riaccendi.", "Spegni") : ""}
+    <div class="scroll">${body}</div>
+    ${spaceA(v)}
+    <footer class="ft">
+      <span class="ver">Fluix ${VERSION}</span>
+      <button type="button" class="btn btn-primary" data-act="finder"${canOpen ? "" : " disabled"}>${icon("open", 13)} Apri nel Finder</button>
+    </footer>`;
+}
+
+/* Variant B */
+
+const SHADES = [
+  "var(--accent-amber-fill)",
+  "color-mix(in srgb, var(--accent-amber-fill) 62%, var(--bg-surface))",
+  "color-mix(in srgb, var(--accent-amber-fill) 38%, var(--bg-surface))",
+  "color-mix(in srgb, var(--success) 60%, var(--bg-surface))",
+];
+
+function storageParts(v) {
+  const parts = v.projects.filter((p) => p.avail > 0).map((p, i) => ({ name: p.name, gb: p.avail, color: SHADES[i % SHADES.length] }));
+  parts.push({ name: "Altri file aperti di recente", gb: OTHER_GB, color: "var(--idle)" });
+  return parts;
+}
+
+function stackB(v) {
+  return storageParts(v).map((s) => `<i style="width:${(s.gb / LIMIT_GB) * 100}%;background:${s.color}"></i>`).join("");
+}
+
+function legendB(v) {
+  const free = Math.max(0, LIMIT_GB - used(v));
+  return storageParts(v)
+    .map((s) => `<li><span class="sw" style="background:${s.color}"></span><span class="n">${s.name}</span><span class="v">${gb(s.gb)}</span></li>`)
+    .join("") + `<li><span class="sw" style="background:var(--track)"></span><span class="n">Ancora libero</span><span class="v">${gb(free)}</span></li>`;
+}
+
+function menuB(v, p, k) {
+  const items = [];
+  if (k === "dl") items.push(`<button type="button" class="btn" data-act="abort">Interrompi download</button>`);
+  if (k === "queued") items.push(`<button type="button" class="btn" data-act="unqueue" data-id="${p.id}">Togli dalla coda</button>`);
+  if (k === "zero" || k === "partial") {
+    items.push(`<button type="button" class="btn" data-act="warm" data-id="${p.id}">Rendi disponibile<span class="aside">${eta(p)}</span></button>`);
+  }
+  if (k === "zero-noroom" || k === "partial-noroom") {
+    items.push(`<button type="button" class="btn" disabled>Rendi disponibile</button><div class="menu-note">Serve più spazio: libera prima un progetto che non stai montando.</div>`);
+  }
+  if (k === "big") {
+    items.push(`<div class="menu-note">Con ${gb(p.size)} è più grande dello spazio su questo Mac (${LIMIT_GB} GB). Si apre lo stesso dal Finder, solo più lento da scorrere.</div>`);
+  }
+  if (p.avail > 0 && k !== "dl") {
+    items.push(`<button type="button" class="btn" data-act="free" data-id="${p.id}">Libera spazio<span class="aside">${gb(p.avail)}</span></button>`);
+  }
+  items.push(`<button type="button" class="btn" data-act="finder">Mostra nel Finder</button>`);
+  return `<div class="menu" role="menu">${items.join("")}</div>`;
+}
+
+function rowB(v, p) {
+  const k = kindOf(v, p);
+  let tag = "";
+  if (k === "dl") tag = `<span class="tag dl">${ring(pctOf(p))}${live.pct(p)}</span>`;
+  else if (k === "queued") tag = `<span class="tag">In coda</span>`;
+  else if (k === "full") tag = `<span class="tag ready">${checkFilled()}Pronto</span>`;
+  else if (k.startsWith("partial")) tag = `<span class="tag">${Math.round(pctOf(p))}%</span>`;
+  else tag = `<span class="tag">Solo online</span>`;
+
+  const open = v.menu === p.id;
+  const confirm = v.confirm && v.confirm.free === p.id ? freeConfirm(v) : "";
+  return `<div class="pb-row${open ? " open" : ""}">
+      <span class="n" title="${p.name}">${p.name}</span>${tag}
+      <button type="button" class="btn btn-icon" data-act="menu" data-id="${p.id}" aria-expanded="${open}" aria-label="Azioni per ${p.name}">${icon("dots", 15)}</button>
+    </div>${open ? menuB(v, p, k) : ""}${confirm}`;
+}
+
+function heroB(v) {
+  const p = v.target ? find(v, v.target) : null;
+  if (v.mode === "ok" && p) {
+    const next = v.queue.length ? `<p>Poi: ${find(v, v.queue[0]).name}${v.queue.length > 1 ? ` e altri ${v.queue.length - 1}` : ""}.</p>` : "";
+    return `<section class="pb-hero">
+      <div class="pb-top">
+        <div class="pb-glyph dl">${icon("cloudDown", 20)}</div>
+        <div><h2>Download di ${p.name}</h2><p>Puoi già montare: i file arrivano mentre lavori.</p>${next}</div>
+      </div>
+      <div class="pb-prog">
+        <div class="pb-prog-row"><span class="pb-big-num">${live.pct(p)}</span><span class="pb-prog-meta">${live.gb(p)}<br>${live.eta(p)}</span></div>
+        <div class="bar thick dl"><i data-live="w" style="width:${pctOf(p)}%"></i></div>
+      </div>
+      <div class="pb-btns">
+        <button type="button" class="btn btn-primary btn-big" data-act="finder">${icon("open", 15)} Apri nel Finder</button>
+        <button type="button" class="btn btn-ghost" data-act="abort">Interrompi</button>
+      </div>
+    </section>`;
+  }
+  if (v.mode === "ok") {
+    const doneP = v.done ? find(v, v.done) : null;
+    const sub = doneP
+      ? `${doneP.name} è pronto: scorre in timeline senza attese.`
+      : "I progetti sono nel Finder, sotto Fluix.";
+    return `<section class="pb-hero">
+      <div class="pb-top">
+        <div class="pb-glyph st-ok">${icon("drive", 20)}</div>
+        <div><h2>Fluix è collegato</h2><p>${sub}</p></div>
+      </div>
+      <button type="button" class="btn btn-primary btn-big" data-act="finder">${icon("open", 15)} Apri nel Finder</button>
+    </section>`;
+  }
+  if (v.mode === "offline") {
+    return `<section class="pb-hero" role="alert">
+      <div class="pb-top">
+        <div class="pb-glyph st-offline">${icon("wifiOff", 20)}</div>
+        <div><h2>Fluix non è raggiungibile</h2>
+          <ol class="pb-steps">
+            <li>Salva il progetto in CapCut.</li>
+            <li>Controlla che il Mac sia connesso a internet.</li>
+            <li>Premi Riconnetti.</li>
+          </ol>
+        </div>
+      </div>
+      <button type="button" class="btn btn-primary btn-big" data-act="reconnect">${icon("refresh", 15)} Riconnetti</button>
+    </section>`;
+  }
+  if (v.mode === "starting") {
+    return `<section class="pb-hero">
+      <div class="pb-top">
+        <div class="pb-glyph st-starting"><span class="spin"></span></div>
+        <div><h2>Fluix si sta avviando</h2><p>Pochi secondi e i progetti tornano nel Finder.</p></div>
+      </div>
+      <button type="button" class="btn btn-primary btn-big" disabled>${icon("open", 15)} Apri nel Finder</button>
+    </section>`;
+  }
+  return `<section class="pb-hero">
+    <div class="pb-top">
+      <div class="pb-glyph st-stopped">${icon("power", 20)}</div>
+      <div><h2>Fluix è spento</h2><p>Accendilo per ritrovare i progetti nel Finder.</p></div>
+    </div>
+    <button type="button" class="btn btn-primary btn-big" data-act="start">${icon("power", 15)} Accendi Fluix</button>
+  </section>`;
+}
+
+function renderB(v) {
+  const listOn = v.mode === "ok" || v.mode === "offline";
+  const list = listOn
+    ? `<div class="pb-sec"><div class="pb-sec-top"><span class="pb-sec-title">Progetti</span><span>${v.projects.length}</span></div></div>
+       <div class="pb-list${v.mode === "offline" ? " dim" : ""}">${v.projects.map((p) => rowB(v, p)).join("")}</div>`
+    : "";
+  const stopBtn = v.mode === "stopped"
+    ? ""
+    : `<button type="button" class="btn btn-ghost" data-act="stop">${icon("power", 13)} Spegni</button>`;
+  return `${heroB(v)}
+    <div class="scroll">
+      <div class="pb-sec">
+        <div class="pb-sec-top"><span class="pb-sec-title">Su questo Mac</span><span class="num" data-live="used">${usedText(v)}</span></div>
+        <div class="stack" data-live="stack">${stackB(v)}</div>
+        <ul class="legend" data-live="legend">${legendB(v)}</ul>
+      </div>
+      ${list}
+    </div>
+    <p class="pb-hint">Un progetto pronto su questo Mac scorre in timeline senza attese. Gli altri si aprono lo stesso, ma ogni salto nel video aspetta circa un secondo.</p>
+    ${v.confirm === "stop" ? stopConfirm(v, "Spegnere Fluix?", "Il disco sparisce dal Finder e CapCut non vede più i file finché non lo riaccendi.", "Spegni") : ""}
+    <footer class="ft"><span class="ver">Fluix ${VERSION}</span>${stopBtn}</footer>`;
+}
+
+/* Variant C */
+
+function statusCellC(v, p, k) {
+  if (k === "dl") return `<span class="pc-st dl">${ring(pctOf(p))}${live.pct(p)}</span>`;
+  if (k === "queued") return `<span class="pc-st">${icon("clock", 13)}in coda</span>`;
+  if (k === "full") return `<span class="pc-st ready">${checkFilled()}tutto</span>`;
+  if (k.startsWith("partial")) return `<span class="pc-st">${pie(pctOf(p))}${Math.round(pctOf(p))}%</span>`;
+  return `<span class="pc-st cloud">${icon("cloud", 14)}solo online</span>`;
+}
+
+function inspectC(v) {
+  const p = find(v, v.sel);
+  const k = kindOf(v, p);
+  const off = v.mode !== "ok";
+  const dis = off ? " disabled" : "";
+  const warm = `<button type="button" class="btn btn-soft" data-act="warm" data-id="${p.id}"${dis}>${icon("cloudDown", 13)} Rendi disponibile</button>`;
+  const free = `<button type="button" class="btn btn-ghost" data-act="free" data-id="${p.id}"${dis}>${icon("cloud", 13)} Libera spazio</button>`;
+  let meta = "";
+  let acts = "";
+  switch (k) {
+    case "dl":
+      meta = `Download ${live.pct(p)}, ${live.gb(p)}, ${live.eta(p)}`;
+      acts = `<button type="button" class="btn btn-ghost" data-act="abort">Interrompi</button>`;
+      break;
+    case "queued":
+      meta = `In coda, ${gb(p.size)}. Parte dopo il download in corso.`;
+      acts = `<button type="button" class="btn btn-ghost" data-act="unqueue" data-id="${p.id}">Togli dalla coda</button>`;
+      break;
+    case "full":
+      meta = v.done === p.id
+        ? "Pronto: scorre in timeline senza attese."
+        : `Tutto su questo Mac, ${gb(p.size)}. Scorre in timeline senza attese.`;
+      acts = free;
+      break;
+    case "partial":
+      meta = `${num(p.avail)} di ${gb(p.size)} su questo Mac. Il resto arriva in ${eta(p)}.`;
+      acts = warm + free;
+      break;
+    case "partial-noroom":
+      meta = `${num(p.avail)} di ${gb(p.size)} su questo Mac. Per il resto serve spazio: libera prima un altro progetto.`;
+      acts = free;
+      break;
+    case "zero":
+      meta = `Solo online, ${gb(p.size)}. Si apre lo stesso, ma ogni salto nel video aspetta circa un secondo. Scaricarlo richiede ${eta(p)}.`;
+      acts = warm;
+      break;
+    case "zero-noroom":
+      meta = `Solo online, ${gb(p.size)}. Per renderlo disponibile serve spazio: libera prima un altro progetto.`;
+      break;
+    case "big":
+      meta = `${gb(p.size)}, più dello spazio riservato su questo Mac (${LIMIT_GB} GB). Si apre lo stesso dal Finder, solo più lento da scorrere.`;
+      break;
+  }
+  const confirm = v.confirm && v.confirm.free === p.id;
+  return `<div class="pc-inspect">
+    <div class="n" title="${p.name}">${p.name}</div>
+    <div class="m">${meta}</div>
+    ${confirm ? freeConfirm(v) : acts ? `<div class="acts">${acts}</div>` : ""}
+  </div>`;
+}
+
+function renderC(v) {
+  const s = STATUS[v.mode];
+  const stateTxt = { ok: "collegato", starting: "in avvio", offline: "non raggiungibile", stopped: "espulso" }[v.mode];
+  const dot = v.mode === "starting" ? `<span class="spin" style="width:9px;height:9px"></span>` : `<i class="dot"></i>`;
+  let side = "";
+  if (v.mode === "ok") side = `<button type="button" class="btn btn-icon" data-act="stop" title="Espelli Fluix" aria-label="Espelli Fluix">${icon("eject", 14)}</button>`;
+  if (v.mode === "offline") side = `<button type="button" class="btn btn-primary" data-act="reconnect">Riconnetti</button>`;
+  if (v.mode === "stopped") side = `<button type="button" class="btn btn-primary" data-act="start">Collega</button>`;
+
+  const disk = `<div class="pc-disk">
+      <button type="button" class="pc-disk-main" data-act="finder" title="Apri Fluix nel Finder"${v.mode === "ok" ? "" : " disabled"}>
+        <span class="pc-disk-ic">${icon("drive", 20, 1.5)}</span>
+        <span class="pc-disk-txt"><span class="pc-disk-name">Fluix</span><span class="pc-disk-state ${s.cls}">${dot}${stateTxt}</span></span>
+        ${v.mode === "ok" ? `<span class="pc-open">${icon("open", 13)}</span>` : ""}
+      </button>
+      ${side}
+    </div>`;
+
+  let body = "";
+  if (v.mode === "ok" || v.mode === "offline") {
+    const rows = v.projects.map((p) => {
+      const k = kindOf(v, p);
+      return `<button type="button" class="pc-row" role="option" data-act="sel" data-id="${p.id}" aria-selected="${v.sel === p.id}">
+          <span class="fi">${icon("folder", 15, 1.5)}</span><span class="n">${p.name}</span>${statusCellC(v, p, k)}
+        </button>`;
+    }).join("");
+    body = `${v.mode === "offline" ? `<div class="pc-msg" role="alert"><strong>Non raggiungibile.</strong> Controlla la connessione a internet, poi premi Riconnetti. Intanto salva il progetto in CapCut.</div>` : ""}
+      <div class="pc-cols"><span>Nome</span><span>Su questo Mac</span></div>
+      <div class="pc-list${v.mode === "offline" ? " dim" : ""}" role="listbox" aria-label="Progetti">${rows}</div>
+      ${inspectC(v)}`;
+  } else if (v.mode === "starting") {
+    const widths = [62, 48, 70, 55, 34];
+    body = `<div class="pc-cols"><span>Nome</span><span>Su questo Mac</span></div>
+      <div class="pc-list" aria-hidden="true">${widths.map((w) => `<div class="pc-skel"><i style="width:15px"></i><i style="width:${w}%"></i></div>`).join("")}</div>`;
+  } else {
+    body = `<div class="block"><h3>Fluix è espulso</h3><p>Premi Collega per ritrovarlo nel Finder con tutti i progetti.</p></div>`;
+  }
+
+  const u = used(v);
+  return `${disk}
+    ${v.confirm === "stop" ? stopConfirm(v, "Espellere Fluix?", "Sparisce dal Finder e CapCut non vede più i file finché non lo ricolleghi.", "Espelli") : ""}
+    <div class="scroll">${body}</div>
+    <div class="pc-status">
+      <div class="bar neutral"><i data-live="used-w" style="width:${Math.min(100, (u / LIMIT_GB) * 100)}%"></i></div>
+      <span class="grow"><span class="num" data-live="used">${usedText(v)}</span> usati su questo Mac</span>
+      <span class="ver">${VERSION}</span>
+    </div>`;
+}
+
+const RENDER = { A: renderA, B: renderB, C: renderC };
+
+/* Shell: desktop strip, menu bar icon, toggles */
+
+function menubarIcon(v) {
+  const opacity = v.mode === "starting" ? 0.55 : v.mode === "stopped" ? 0.4 : 1;
+  let badge = "";
+  if (v.mode === "offline") badge = "var(--danger)";
+  else if (v.mode === "ok" && v.target) badge = "var(--accent-amber-fill)";
+  return `<svg width="20" height="14" viewBox="0 0 20 14" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true" style="opacity:${opacity}">
+    <rect x="1.5" y="3" width="13.5" height="8.5" rx="2.4"/><path d="M4.6 8.4h3.4"/><circle cx="11.6" cy="8.4" r=".6" fill="currentColor" stroke="none"/>
+    ${badge ? `<circle cx="16.4" cy="3.6" r="2.8" fill="${badge}" stroke="none"/>` : ""}
+  </svg>`;
+}
+
+function deskShell(meta) {
+  const modes = MODES.map(([m, label]) => `<button type="button" data-mode="${m}" aria-pressed="false">${label}</button>`).join("");
+  return `<article class="variant" data-variant="${meta.key}">
+    <div class="variant-head"><span class="letter">${meta.key}</span><h2>${meta.title}</h2></div>
+    <div class="seg" role="group" aria-label="Stato mostrato nella variante ${meta.key}">${modes}</div>
+    <div class="desk">
+      <div class="menubar">
+        <div class="mb-left"><span><b>Finder</b></span><span>File</span><span>Modifica</span><span>Vista</span><span>Vai</span></div>
+        <div class="mb-right">
+          <button type="button" class="mb-yd" aria-label="Fluix" tabindex="-1"></button>
+          <svg width="16" height="12" viewBox="0 0 24 18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M2 6.5a15 15 0 0 1 20 0"/><path d="M5.5 10.2a10 10 0 0 1 13 0"/><path d="M9 13.8a5 5 0 0 1 6 0"/><circle cx="12" cy="16.6" r=".6" fill="currentColor"/></svg>
+          <svg width="24" height="12" viewBox="0 0 26 12" fill="none" aria-hidden="true"><rect x=".7" y=".7" width="21.6" height="10.6" rx="3" stroke="currentColor" stroke-opacity=".5" stroke-width="1.2"/><rect x="2.4" y="2.4" width="14" height="7.2" rx="1.6" fill="currentColor"/><path d="M24 4.2v3.6" stroke="currentColor" stroke-opacity=".5" stroke-width="1.4" stroke-linecap="round"/></svg>
+          <span>mar 6 ott 10:42</span>
+        </div>
+      </div>
+      <div class="desk-icon" aria-hidden="true">
+        <svg width="46" height="40" viewBox="0 0 46 40"><rect x="3" y="9" width="40" height="24" rx="5" fill="#dcdce1" stroke="#a9a9b2"/><rect x="3" y="24" width="40" height="9" rx="4" fill="#c4c4cb"/><circle cx="36" cy="28.5" r="1.8" fill="#d4a044"/></svg>
+        <span>Fluix</span>
+      </div>
+      <div class="popover" role="dialog" aria-label="Pannello di Fluix, variante ${meta.key}"></div>
+      <div class="flash" aria-live="polite"></div>
+    </div>
+    <p class="variant-note">${meta.note}</p>
+  </article>`;
+}
+
+const modeKey = (v) => (v.mode === "ok" && v.target ? "download" : v.mode);
+
+function syncGlobal() {
+  // Variants render one by one at startup: skip the ones not built yet.
+  const keys = VARIANTS.filter((m) => state[m.key]).map((m) => modeKey(state[m.key]));
+  const same = keys.every((k) => k === keys[0]) ? keys[0] : null;
+  document.querySelectorAll("#global-mode [data-mode]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.mode === same)));
+}
+
+function render(key) {
+  const v = state[key];
+  const root = document.querySelector(`[data-variant="${key}"]`);
+  root.querySelector(".popover").innerHTML = RENDER[key](v);
+  const mb = root.querySelector(".mb-yd");
+  mb.innerHTML = menubarIcon(v);
+  mb.setAttribute("aria-label", `Fluix, ${STATUS[v.mode].label.toLowerCase()}`);
+  root.querySelector(".desk-icon").classList.toggle("gone", v.mode === "starting" || v.mode === "stopped");
+  root.querySelectorAll(".seg [data-mode]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.mode === modeKey(v))));
+  const firstConfirm = root.querySelector(".confirm .btn");
+  if (firstConfirm) firstConfirm.focus({ preventScroll: true });
+  syncGlobal();
+}
+
+// Updates only the numbers that move during a download, so hover and focus survive.
+function patch(key) {
+  const v = state[key];
+  const root = document.querySelector(`[data-variant="${key}"]`);
+  const p = v.target ? find(v, v.target) : null;
+  root.querySelectorAll("[data-live]").forEach((el) => {
+    switch (el.dataset.live) {
+      case "w": if (p) el.style.width = `${pctOf(p)}%`; break;
+      case "pct": if (p) el.textContent = `${Math.floor(pctOf(p))}%`; break;
+      case "eta": if (p) el.textContent = eta(p); break;
+      case "gb": if (p) el.textContent = `${num(p.avail)} di ${gb(p.size)}`; break;
+      case "ring": if (p) el.setAttribute("stroke-dasharray", `${((pctOf(p) / 100) * RING_C).toFixed(2)} ${RING_C}`); break;
+      case "used": el.textContent = usedText(v); break;
+      case "used-w": el.style.width = `${Math.min(100, (used(v) / LIMIT_GB) * 100)}%`; break;
+      case "stack": el.innerHTML = stackB(v); break;
+      case "legend": el.innerHTML = legendB(v); break;
+    }
+  });
+}
+
+function flash(key, msg) {
+  const el = document.querySelector(`[data-variant="${key}"] .flash`);
+  el.textContent = msg;
+  el.classList.add("show");
+  clearTimeout(el._t);
+  el._t = setTimeout(() => el.classList.remove("show"), 2200);
+}
+
+function setMode(key, m) {
+  const old = state[key];
+  if (old) clearTimeout(old.timer);
+  const v = freshState();
+  if (old) v.sel = old.sel;
+  if (m === "download") {
+    v.mode = "ok";
+    v.target = "arnaldi";
+    v.sel = "arnaldi";
+    if (REDUCED) find(v, "arnaldi").avail = 15.3;
+  } else {
+    v.mode = m;
+  }
+  state[key] = v;
+  render(key);
+}
+
+function act(key, a, id) {
+  const v = state[key];
+  switch (a) {
+    case "warm":
+      if (v.mode !== "ok") return;
+      if (!v.target) v.target = id;
+      else if (v.target !== id && !v.queue.includes(id)) v.queue.push(id);
+      v.menu = null;
+      break;
+    case "abort":
+      v.target = v.queue.shift() || null;
+      v.menu = null;
+      break;
+    case "unqueue":
+      v.queue = v.queue.filter((q) => q !== id);
+      v.menu = null;
+      break;
+    case "free":
+      v.confirm = { free: id };
+      v.menu = null;
+      break;
+    case "free-yes":
+      find(v, v.confirm.free).avail = 0;
+      v.confirm = null;
+      render(key);
+      flash(key, "Spazio liberato. I file restano su Fluix.");
+      return;
+    case "cancel":
+      v.confirm = null;
+      break;
+    case "stop":
+      v.confirm = "stop";
+      v.menu = null;
+      break;
+    case "stop-yes":
+      v.confirm = null;
+      v.target = null;
+      v.queue = [];
+      v.mode = "stopped";
+      break;
+    case "start":
+    case "reconnect":
+      v.mode = "starting";
+      v.confirm = null;
+      clearTimeout(v.timer);
+      v.timer = setTimeout(() => {
+        if (state[key] !== v || v.mode !== "starting") return;
+        v.mode = "ok";
+        render(key);
+        flash(key, a === "reconnect" ? "Fluix è di nuovo collegato." : "Fluix è acceso.");
+      }, 2600);
+      break;
+    case "finder":
+      flash(key, "Si apre il Finder su Fluix.");
+      return;
+    case "menu":
+      v.menu = v.menu === id ? null : id;
+      v.confirm = null;
+      break;
+    case "sel":
+      v.sel = id;
+      v.confirm = null;
+      break;
+    default:
+      return;
+  }
+  render(key);
+}
+
+function tick() {
+  for (const { key } of VARIANTS) {
+    const v = state[key];
+    if (v.mode !== "ok" || !v.target) continue;
+    const p = find(v, v.target);
+    p.avail = Math.min(p.size, p.avail + p.size * 0.004);
+    if (isFull(p)) {
+      p.avail = p.size;
+      v.done = p.id;
+      v.target = v.queue.shift() || null;
+      render(key);
+      const doneId = p.id;
+      setTimeout(() => {
+        if (state[key] === v && v.done === doneId) {
+          v.done = null;
+          render(key);
+        }
+      }, 5000);
+    } else {
+      patch(key);
+    }
+  }
+}
+
+function init() {
+  document.getElementById("variants").innerHTML = VARIANTS.map(deskShell).join("");
+  document.getElementById("global-mode").innerHTML = MODES.map(([m, label]) => `<button type="button" data-mode="${m}" aria-pressed="false">${label}</button>`).join("");
+
+  for (const { key } of VARIANTS) {
+    setMode(key, "ok");
+    const root = document.querySelector(`[data-variant="${key}"]`);
+    root.querySelector(".seg").addEventListener("click", (e) => {
+      const b = e.target.closest("[data-mode]");
+      if (b) setMode(key, b.dataset.mode);
+    });
+    root.querySelector(".popover").addEventListener("click", (e) => {
+      const b = e.target.closest("[data-act]");
+      if (!b || b.disabled) return;
+      act(key, b.dataset.act, b.dataset.id);
+    });
+  }
+
+  document.getElementById("global-mode").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-mode]");
+    if (!b) return;
+    for (const { key } of VARIANTS) setMode(key, b.dataset.mode);
+  });
+
+  document.getElementById("global-theme").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-theme-set]");
+    if (!b) return;
+    const t = b.dataset.themeSet;
+    if (t === "auto") document.documentElement.removeAttribute("data-theme");
+    else document.documentElement.setAttribute("data-theme", t);
+    document.querySelectorAll("#global-theme button").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+  });
+
+  if (!REDUCED) setInterval(tick, 300);
+}
+
+init();
+</script>
+</body>
+</html>
