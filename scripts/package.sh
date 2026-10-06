@@ -4,6 +4,7 @@
 # Usage: scripts/package.sh <config.env> [output dir, default dist/]
 set -euo pipefail
 cd "$(dirname "$0")/.."
+umask 077 # the zip holds the bucket keys
 
 LIMA_VERSION=2.2.1
 config="${1:?usage: scripts/package.sh <config.env> [output dir]}"

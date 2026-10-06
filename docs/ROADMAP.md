@@ -16,7 +16,7 @@ Da chiudere prima del pilota, perché cambiano la scelta:
 
 Garage in Docker come S3, latenza e banda simulate, JuiceFS in un container Linux condiviso al Mac via SMB; si riproduce con `spike/setup.sh` e `spike/bench.sh`. Esito: JuiceFS direttamente sul Mac richiede l'estensione del kernel, la macchina Linux con SMB no; in cache il disco è come uno locale, fuori cache serve una linea da 1 Gbps. Numeri in [ARCHITECTURE.md](ARCHITECTURE.md#prestazioni-misurate). Da provare ancora: CapCut sul disco.
 
-Poi il pacchetto di test senza Docker: VM Lima, comando `fluix`, zip con `install.sh` ([ARCHITECTURE.md](ARCHITECTURE.md#pacchetto-macos)). Installato e misurato su questo Mac contro Garage. Manca il bucket OVH per darlo alla collega.
+Poi il pacchetto di test senza Docker: VM Lima, comando `fluix`, zip con `install.sh` ([ARCHITECTURE.md](ARCHITECTURE.md#pacchetto-macos)). Installato e misurato prima contro Garage, poi sul bucket `fluix-test` su OVH Milano ([numeri](ARCHITECTURE.md#prestazioni-misurate)). Pronto da dare alla collega.
 
 ## 3. Pilota
 

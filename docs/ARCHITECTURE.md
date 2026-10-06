@@ -47,13 +47,30 @@ JuiceFS (Community Edition, open source) ha la stessa architettura di LucidLink:
 La cache sta sull'SSD di ogni Mac, dentro il disco della macchina Linux, gestita dal client JuiceFS. È ciò che rende il disco veloce.
 
 - JuiceFS divide ogni file in blocchi da 4 MB. Quando un programma legge un punto di un video, scarica solo i blocchi di quel punto e ne tiene una copia in cache. La volta dopo arrivano dall'SSD.
-- **Come ci entrano i blocchi**: leggendo, con il prefetch che scarica in avanti durante la riproduzione, con `juicefs warmup <cartella>` che precarica un progetto intero, e scrivendo (chi carica il girato lo ha già in cache, i colleghi no).
+- **Come ci entrano i blocchi**: leggendo, con il prefetch che scarica in avanti durante la riproduzione, con `juicefs warmup <cartella>` che precarica un progetto intero, e scrivendo, ma solo con `--cache-large-write`, che di default è spento: chi carica il girato lo ha già in cache, i colleghi no.
 - **Restano anche dopo il riavvio**, finché: la cache raggiunge `--cache-size` (si eliminano i blocchi usati meno di recente), lo spazio libero del Mac scende sotto `--free-space-ratio` (default 10%, la cache non riempie mai il disco), scade `--cache-expire` se impostato, oppure si liberano a mano con `juicefs warmup --evict <cartella>`. I blocchi di un file cancellato spariscono subito sul Mac che lo cancella; sugli altri diventano orfani e vengono eliminati per primi.
 - **Ogni Mac ha la sua cache**: ciò che ha visto un collega non aiuta gli altri.
 - **Non funziona offline**: anche con i blocchi in cache, l'albero dei file sta nel database. Senza rete il disco non si usa.
 - **Mai dati vecchi**: un file modificato viene scritto in blocchi nuovi, quelli in cache restano solo inutilizzati.
 
 ## Prestazioni misurate
+
+**Su OVH Milano** (06/10/2026, pacchetto macOS con VM Lima, bucket `fluix-test`, linea di Simone: 170 Mbps in download, 167 in upload, 34 ms a riposo; OVH Milano risponde in circa 15 ms):
+
+| Operazione | Misura |
+|---|---|
+| Copia sul disco di 2,7 GB | 113 s (23,9 MB/s, il limite della linea) |
+| Lettura di un clip da 434 MB non in cache | 38 s (12,1 MB/s) |
+| Lettura in cache | 0,8 s |
+| Salto (lettura di 1 MB) non in cache | media 0,9 s, massimo 1,9 s |
+| Salto in cache | 0-3 ms |
+| Warmup di un clip da 434 MB | 30 s (14,3 MB/s) |
+
+- **La riproduzione regge anche fuori cache**: 12,1 MB/s contro i 7,5 che chiede un clip a 60 Mbps.
+- **Lo scrubbing su un clip mai aperto è lento**: quasi un secondo a salto. Con il warmup sparisce (3 ms). Il prossimo parametro da provare è un blocco più piccolo di 4 MB, che rende più economico il salto a freddo al prezzo di più richieste.
+- SMB costa ancora: la linea dà circa 21 MB/s, il Mac ne riceve 12 a freddo.
+
+**Spike locale** (simulazione, prima di OVH):
 
 Misure dello spike del 06/10/2026 (`spike/bench.sh`): Mac con Apple Silicon, Garage in Docker come S3, latenza di 25 ms simulata con Toxiproxy, banda limitata con `--download-limit` e `--upload-limit` di JuiceFS. Clip di prova: 4K HEVC a 60 Mbps, 434 MB ciascuna, simili al girato da telefono.
 
@@ -83,6 +100,7 @@ Misure dello spike del 06/10/2026 (`spike/bench.sh`): Mac con Apple Silicon, Gar
 | `writeback` | spento | Un file risulta salvato solo quando è su S3. Copie più lente, ma nessun file rimasto solo su un Mac chiuso a metà caricamento |
 | `--cache-size` | 100-200 GB | Ragionevole su un Mac da 512 GB |
 | `--cache-expire` | 30 giorni | I progetti vecchi si liberano da soli |
+| `--cache-large-write` | attivo | Chi carica un girato di solito lo monta: i blocchi caricati restano in cache. Di default JuiceFS non li tiene |
 | `--prefetch` | 8 | Misurato: il valore migliore a freddo via SMB |
 | `--buffer-size` | 1 GB | Riproduzione e scrubbing |
 | `--enable-xattr` | attivo | Samba ci salva i metadati del Finder; senza, la cancellazione dal Mac fallisce con "Operation not supported" |
@@ -162,11 +180,12 @@ Il modulo macOS, oggi un comando (`macos/bin/fluix`) e domani il motore dell'app
 - **Rete `vzNAT`**: la VM ha un indirizzo sul Mac (es. `192.168.64.2`) e SMB ci va diretto, senza l'inoltro di porte che nello spike con Docker costava banda. L'inoltro automatico di Lima è spento (`portForwards` con `ignore`), così la VM non espone porte sul Mac.
 - **Dentro la VM**: `vm/guest/guest-install.sh` installa Samba e JuiceFS e due servizi systemd, il mount (`fluix-mount`, che formatta il volume al primo avvio) e `smbd`, che parte solo a mount pronto. Si rilancia senza danni per aggiornare.
 - **Sul Mac**: il volume si monta con `osascript` (`mount volume`) e compare in `/Volumes/Fluix` e nella barra laterale del Finder; Spotlight è spento sul volume; un agente launchd (`dev.esse.fluix`) avvia VM e mount all'accesso.
+- **Punto di montaggio**: di solito `/Volumes/Fluix`, ma se il nome è occupato (una cartella rimasta da uno smontaggio, un'altra condivisione con lo stesso nome) macOS usa `Fluix-1`. Il comando lo legge da `mount` invece di darlo per scontato.
 - **Timeout SMB**: macOS fa fallire una lettura SMB dopo 30 s senza risposta. Il comando alza il limite a 600 s solo per l'indirizzo della VM, in un blocco suo dentro `~/Library/Preferences/nsmb.conf` (per utente, senza amministratore). Un errore di I/O è comparso una volta a 100 Mbps simulati, con una lettura a freddo lanciata subito dopo un caricamento di 2,7 GB; non si è ripresentato nel confronto A/B, il limite resta come protezione per le linee lente.
 - **Configurazione**: `config.env` (modello in `macos/config.env.example`) con bucket, chiavi, password SMB tra Mac e VM, cache e limiti di banda simulati. Lo zip contiene le chiavi: si passa in privato, con una chiave OVH dedicata al bucket di test, da revocare a fine test.
 - **Metadati del test**: SQLite dentro la VM. Disinstallare il pacchetto o perdere la VM rende illeggibili i file nel bucket; per più persone serve PostgreSQL (`META_URL`).
 - **Peso**: la VM occupa circa 2,5 GB di RAM (buffer di JuiceFS e cache delle pagine di Linux) e sul disco cresce con la cache. Su un Mac da 8 GB va ridotto.
-- **Installazione misurata**: 111 s su questo Mac, compreso il download dell'immagine Debian.
+- **Installazione misurata**: 84-111 s, compreso il download dell'immagine Debian.
 - **Prestazioni**: come lo spike con Docker a 100 Mbps simulati: lettura a freddo 5,3-7,2 MB/s, salto a freddo in media 0,8 s. A caldo le letture le serve anche la cache del client SMB di macOS.
 - **Da fare**: le Azioni rapide nel Finder ("Rendi disponibile", "Libera spazio"); per ora sono `fluix warmup <percorso>` e `fluix free <percorso>`.
 

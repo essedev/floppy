@@ -15,6 +15,7 @@ exec juicefs mount "$META_URL" /mnt/drive \
   --bucket "$BUCKET_URL" \
   --cache-dir /var/cache/fluix --cache-size "${CACHE_SIZE_MB:-102400}" \
   --cache-expire "${CACHE_EXPIRE:-720h}" \
+  --cache-large-write \
   --prefetch "${PREFETCH:-8}" --buffer-size "${BUFFER_SIZE_MB:-1024}" \
   --upload-limit "${UPLOAD_LIMIT_MBPS:-0}" --download-limit "${DOWNLOAD_LIMIT_MBPS:-0}" \
   --enable-xattr
