@@ -1,0 +1,55 @@
+# Local S3 for the spike: Garage, plus Toxiproxy in front of it to simulate
+# the latency and bandwidth of a real link to OVH.
+services:
+  garage:
+    image: dxflrs/garage:v2.1.0
+    environment:
+      GARAGE_RPC_SECRET: ${GARAGE_RPC_SECRET:?run setup.sh first}
+    volumes:
+      - ./garage.toml:/etc/garage.toml:ro
+      - garage-meta:/var/lib/garage/meta
+      - garage-data:/var/lib/garage/data
+    ports:
+      - "127.0.0.1:4500:3900" # S3, direct (no simulated network)
+
+  toxiproxy:
+    image: ghcr.io/shopify/toxiproxy:2.12.0
+    ports:
+      - "127.0.0.1:4501:4501" # S3 through the simulated link
+      - "127.0.0.1:4502:8474" # Toxiproxy API
+
+  drive:
+    build: ./drive
+    privileged: true # FUSE inside the container
+    devices:
+      - /dev/fuse
+    environment:
+      META_URL: sqlite3:///state/meta.db
+      BUCKET_URL: http://toxiproxy:4501/fluix
+      SMB_PASSWORD: ${SMB_PASSWORD:?run setup.sh first}
+      # Simulated link, in Mbps for the whole mount (0 = unlimited). Toxiproxy
+      # only adds latency: its bandwidth limit is per connection, and JuiceFS
+      # opens many in parallel.
+      DOWNLOAD_LIMIT_MBPS: ${DOWNLOAD_LIMIT_MBPS:-100}
+      UPLOAD_LIMIT_MBPS: ${UPLOAD_LIMIT_MBPS:-300}
+      PREFETCH: ${PREFETCH:-8}
+    volumes:
+      - ${HOME}/.fluix-spike:/state
+      - drive-cache:/cache
+    ports:
+      - "127.0.0.1:4503:445" # SMB, mount from Finder: smb://drive@localhost:4503/Fluix
+    depends_on:
+      - toxiproxy
+
+volumes:
+  drive-cache:
+  garage-meta:
+  garage-data:
+
+# Explicit subnet: Docker's default address pools can be exhausted on a
+# machine with many compose projects.
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: 10.250.45.0/24

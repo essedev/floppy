@@ -32,7 +32,9 @@ JuiceFS (Community Edition, open source) ha la stessa architettura di LucidLink:
 |---|---|---|
 | Dati | Bucket OVH Object Storage Standard, versioning attivo | I blocchi dei file |
 | Metadati | PostgreSQL, preferibilmente gestito da OVH, nella stessa regione | Albero di file e cartelle, lock |
-| Client | `juicefs` + macFUSE su ogni Mac | Il volume nel Finder e la cache |
+| Client | `juicefs` in una piccola macchina Linux su ogni Mac, condiviso al Mac via SMB su `localhost` | Il volume nel Finder e la cache |
+
+**Perché una macchina Linux e non `juicefs` direttamente sul Mac**: vedi [macFUSE](#macfuse). Il Mac monta una cartella di rete SMB, cosa che sa fare da sé senza estensioni; JuiceFS gira in Linux, dove FUSE è nativo. Il prezzo è un componente in più su ogni Mac.
 
 **Regione**: dati e metadati il più vicino possibile a chi monta. Ogni operazione su file e cartelle è un giro verso il database: con 1-3 ms il disco sembra locale, con 30 ms no. Da verificare se OVH offre Object Storage e PostgreSQL gestito a Milano.
 
@@ -42,7 +44,7 @@ JuiceFS (Community Edition, open source) ha la stessa architettura di LucidLink:
 
 ## La cache
 
-La cache è una cartella sull'SSD interno di ogni Mac, gestita dal client JuiceFS. È ciò che rende il disco veloce.
+La cache sta sull'SSD di ogni Mac, dentro il disco della macchina Linux, gestita dal client JuiceFS. È ciò che rende il disco veloce.
 
 - JuiceFS divide ogni file in blocchi da 4 MB. Quando un programma legge un punto di un video, scarica solo i blocchi di quel punto e ne tiene una copia in cache. La volta dopo arrivano dall'SSD.
 - **Come ci entrano i blocchi**: leggendo, con il prefetch che scarica in avanti durante la riproduzione, con `juicefs warmup <cartella>` che precarica un progetto intero, e scrivendo (chi carica il girato lo ha già in cache, i colleghi no).
@@ -51,21 +53,25 @@ La cache è una cartella sull'SSD interno di ogni Mac, gestita dal client JuiceF
 - **Non funziona offline**: anche con i blocchi in cache, l'albero dei file sta nel database. Senza rete il disco non si usa.
 - **Mai dati vecchi**: un file modificato viene scritto in blocchi nuovi, quelli in cache restano solo inutilizzati.
 
-## Prestazioni attese
+## Prestazioni misurate
 
-Stime per una fibra da 1 Gbps in download e 300 Mbps in upload, da confermare nel pilota.
+Misure dello spike del 06/10/2026 (`spike/bench.sh`): Mac con Apple Silicon, Garage in Docker come S3, latenza di 25 ms simulata con Toxiproxy, banda limitata con `--download-limit` e `--upload-limit` di JuiceFS. Clip di prova: 4K HEVC a 60 Mbps, 434 MB ciascuna, simili al girato da telefono.
 
-| Operazione | Fluix | Chiavetta USB 3 |
+| Operazione | Collegamento 100/300 Mbps | Collegamento 1 Gbps |
 |---|---|---|
-| Lettura di un file in cache | 2-3 GB/s (SSD del Mac) | 100-400 MB/s |
-| Lettura di un file non in cache | circa 50-100 MB/s | 100-400 MB/s |
-| Primo accesso o salto nella timeline | circa 0,1-0,3 s | istantaneo |
-| Copia di 10 GB sul disco | circa 5 min (300 Mbps up), circa 15 min (100 Mbps up) | 1-2 min |
+| Copia sul disco di 2,7 GB | 86 s (circa 31 MB/s, limite di upload) | non misurata |
+| Lettura di un clip non in cache | 68 s (6,7 MB/s) | 14 s (33 MB/s) |
+| Lettura di un clip in cache | 1,5 s (circa 290 MB/s) | uguale |
+| Salto (lettura di 1 MB) non in cache | media 0,8 s, massimo 1,6 s | media 0,2 s, massimo 2,9 s |
+| Salto in cache | media 2-5 ms | uguale |
+| Warmup di un clip | 43 s | non misurata |
 
-- Un video 4K da telefono chiede circa 7-8 MB/s: anche senza cache la riproduzione scorre.
-- Il primo salto su un clip mai aperto ha un attimo di attesa; il warmup della cartella prima di iniziare lo elimina.
-- La prima apertura di una cartella con molti video è lenta, perché Finder e CapCut leggono un pezzo di ogni file per le anteprime.
-- **La connessione decide tutto**: con fibra FTTH l'esperienza è vicina a un disco esterno, con FTTC (100/20 Mbps) è frustrante, soprattutto in caricamento.
+- **In cache è come un disco locale**: la cache sta nella macchina Linux e SMB su `localhost` regge circa 160-290 MB/s.
+- **Fuori cache decide la linea**: un clip a 60 Mbps chiede 7,5 MB/s. A 1 Gbps la riproduzione non in cache ha 4 volte il margine; a 100 Mbps non regge (6,7 MB/s) e il warmup prima di montare diventa obbligatorio.
+- **SMB costa metà della banda a freddo**: dentro la macchina Linux JuiceFS legge a 10,7 MB/s su 100 Mbps, via SMB il Mac ne riceve 6,7. Il client SMB di macOS tiene poche letture in volo; prefetch più alto aiuta poco (3: 5 MB/s, 8: 6,7 MB/s, 16: 6,3 MB/s).
+- **Il salto a freddo paga il blocco intero**: leggere 1 MB in un punto nuovo scarica il blocco da 4 MB che lo contiene.
+- Garage locale in Docker non è OVH: le misure isolano latenza e banda, non le prestazioni del servizio vero. Vanno ripetute su OVH.
+- La prima apertura di una cartella con molti video è lenta, perché Finder e CapCut leggono un pezzo di ogni file per le anteprime. Non ancora misurata.
 
 ## Configurazione
 
@@ -77,9 +83,12 @@ Stime per una fibra da 1 Gbps in download e 300 Mbps in upload, da confermare ne
 | `writeback` | spento | Un file risulta salvato solo quando è su S3. Copie più lente, ma nessun file rimasto solo su un Mac chiuso a metà caricamento |
 | `--cache-size` | 100-200 GB | Ragionevole su un Mac da 512 GB |
 | `--cache-expire` | 30 giorni | I progetti vecchi si liberano da soli |
-| `--prefetch`, `--buffer-size` | alti (buffer 1-2 GB) | Riproduzione e scrubbing |
+| `--prefetch` | 8 | Misurato: il valore migliore a freddo via SMB |
+| `--buffer-size` | 1 GB | Riproduzione e scrubbing |
+| `--enable-xattr` | attivo | Samba ci salva i metadati del Finder; senza, la cancellazione dal Mac fallisce con "Operation not supported" |
 | Cache dei metadati | timeout più lunghi | Meno giri verso il database dal Finder |
-| macFUSE | `noappledouble`, `noapplexattr` | Niente file `._*` e attributi inutili |
+| Samba | modulo `fruit` (con `samba-vfs-modules`), firma e cifratura spente, I/O asincrono | Compatibilità col Finder; firma spenta e I/O asincrono portano la lettura in cache da 69 a 163 MB/s. Spente solo perché SMB resta su `127.0.0.1` |
+| Samba, file nascosti | `veto files` su `.accesslog`, `.config`, `.stats`, `.trash` | I file interni di JuiceFS non compaiono nel Finder |
 | Spotlight | `mdutil -i off` sul volume | Niente indicizzazione che legge tutto |
 
 ## Flusso di lavoro con CapCut
@@ -93,7 +102,7 @@ Stime per una fibra da 1 Gbps in download e 300 Mbps in upload, da confermare ne
 
 JuiceFS Community non ha alcuna interfaccia per l'utente finale: è un programma da terminale. Chi monta vede solo un volume nel Finder.
 
-**Fase 1, pilota**: Finder più due Azioni rapide nel menu del tasto destro, "Rendi disponibile" (`juicefs warmup`) e "Libera spazio" (`juicefs warmup --evict`), e un agente launchd che monta il disco all'accesso.
+**Fase 1, pilota**: Finder più due Azioni rapide nel menu del tasto destro, "Rendi disponibile" (`juicefs warmup`) e "Libera spazio" (`juicefs warmup --evict`), eseguite dentro la macchina Linux, e il montaggio della cartella SMB all'accesso.
 
 **Fase 2, solo se il pilota lo giustifica**: un'app nella barra dei menu. È la parte che i prodotti commerciali fanno pagare. Le funzioni candidate, ognuna legata a un problema da osservare:
 
@@ -106,7 +115,11 @@ JuiceFS Community non ha alcuna interfaccia per l'utente finale: è un programma
 | Credenziali in chiaro su ogni Mac | Accesso con SSO e credenziali personali revocabili |
 | Non va e nessuno sa perché | "Invia diagnostica" con log e stato |
 
-Forma prevista: app Swift nativa (SwiftUI `MenuBarExtra`) con il binario `juicefs` incluso, più un piccolo backend che verifica l'accesso su un SSO e rilascia le credenziali. Vincoli non eliminabili: account Apple Developer (99 $/anno) per firma e notarizzazione, e macFUSE che resta un'installazione separata con permessi di amministratore. Effort stimato, congettura: 3-5 giorni per stato, montaggio, warmup e cache; 6-10 giorni con SSO e credenziali personali; più manutenzione a ogni aggiornamento di macOS o JuiceFS.
+Forma prevista: **app Tauri** nella barra dei menu, sullo scheletro di Portsage (`~/Development/Projects/portsage`), che ha già icona e pannello nella barra dei menu, avvio all'accesso e un binario esterno incluso nell'app (`externalBin`). Swift scartato: non è nello stack di Acme e nessuno nel team lo manterrebbe; servirebbe solo per badge e menu nativi del Finder, che un'estensione Swift potrebbe aggiungere accanto all'app senza riscriverla. JuiceFS gira anche su Windows, e Tauri copre anche quel caso.
+
+**Distribuzione con Homebrew**, come Portsage: un cask in un tap nostro, senza Apple Developer ID, con `xattr -cr` in postflight. Limiti: Homebrew va installato sui Mac dei colleghi (lo facciamo noi), gli aggiornamenti richiedono `brew upgrade`, e il trucco su app non firmate dipende dalle regole di Homebrew, che si stanno stringendo. L'accesso con SSO viene dopo.
+
+Effort stimato, congettura: 3-4 giorni per stato, montaggio, warmup e cache partendo da Portsage, più la gestione della macchina Linux. Manutenzione a ogni aggiornamento di macOS o JuiceFS.
 
 ## Accessi e sicurezza
 
@@ -123,11 +136,13 @@ Forma prevista: app Swift nativa (SwiftUI `MenuBarExtra`) con il binario `juicef
 
 ## macFUSE
 
-È il rischio tecnico principale lato Mac.
+**JuiceFS sul Mac richiede l'estensione del kernel di macFUSE**, verificato nello spike su macOS 26.6 con JuiceFS 1.4.1 e macFUSE 5.4.0:
 
-- Le versioni classiche usano un'estensione del kernel: su Apple Silicon richiedono di riavviare in modalità di recupero e ridurre la sicurezza di avvio, Mac per Mac.
-- macFUSE 5 su macOS 26 ha un backend FSKit che non lo richiede. **Non è verificato che JuiceFS ci funzioni**: è il primo test del pilota.
-- Ogni aggiornamento di macOS può rompere il montaggio.
+- **FUSE-T non funziona**: JuiceFS non usa libfuse ma parla direttamente col componente di macFUSE, e fallisce con `no FUSE mount utility found`.
+- **Il backend FSKit di macFUSE non basta**: macFUSE lo supporta solo tramite libfuse3. Con `-o backend=fskit` il mount resta appeso e macOS chiede di abilitare le estensioni del kernel.
+- **L'estensione del kernel** richiede, Mac per Mac, di spegnere, avviare in modalità di recupero e passare la sicurezza di avvio a "Ridotta". Per utenti non tecnici è l'opposto del principio guida.
+
+Da qui la scelta della macchina Linux con SMB: nessuna estensione sul Mac. Resta aperto come farla girare sui Mac dei colleghi: nello spike è Docker Desktop, troppo pesante da chiedere a un montatore; le candidate sono una VM leggera sul framework di virtualizzazione di Apple, avviata e gestita dall'app.
 
 ## Alternative considerate
 
