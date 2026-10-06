@@ -11,11 +11,12 @@ Da chiudere prima del pilota, perché cambiano la scelta:
 - **Che connessione hanno**: con FTTC il progetto non regge, con FTTH sì.
 - **Requisiti sui dati**: se il girato è di clienti, regione e GDPR decidono anche SpaceFS (regione non dichiarata).
 - Da verificare: Object Storage e PostgreSQL gestito OVH a Milano; prezzo dello spazio extra SpaceFS sul piano Teams.
-- Da decidere: come far girare la macchina Linux sui Mac dei colleghi senza Docker Desktop (vedi [ARCHITECTURE.md](ARCHITECTURE.md#macfuse)).
 
 ## 2. Spike locale (fatto il 06/10/2026)
 
 Garage in Docker come S3, latenza e banda simulate, JuiceFS in un container Linux condiviso al Mac via SMB; si riproduce con `spike/setup.sh` e `spike/bench.sh`. Esito: JuiceFS direttamente sul Mac richiede l'estensione del kernel, la macchina Linux con SMB no; in cache il disco è come uno locale, fuori cache serve una linea da 1 Gbps. Numeri in [ARCHITECTURE.md](ARCHITECTURE.md#prestazioni-misurate). Da provare ancora: CapCut sul disco.
+
+Poi il pacchetto di test senza Docker: VM Lima, comando `fluix`, zip con `install.sh` ([ARCHITECTURE.md](ARCHITECTURE.md#pacchetto-macos)). Installato e misurato su questo Mac contro Garage. Manca il bucket OVH per darlo alla collega.
 
 ## 3. Pilota
 

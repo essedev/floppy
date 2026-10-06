@@ -1,0 +1,30 @@
+# Fluix VM: Debian with JuiceFS and Samba. macOS mounts the share over
+# SMB, so no FUSE kernel extension is needed on the Mac.
+minimumLimaVersion: 2.0.0
+base:
+  - template:_images/debian-13
+
+vmType: vz
+cpus: 2
+memory: 2GiB
+# Sparse: the file grows with the JuiceFS cache, capped by CACHE_SIZE_MB.
+disk: 200GiB
+
+# Nothing from the Mac is shared into the VM.
+mounts: []
+
+# A VM address reachable from the Mac: SMB goes straight there instead of
+# through a port forwarder.
+networks:
+  - vzNAT: true
+
+# Lima forwards every port the VM listens on to the Mac by default. The Mac
+# reaches Samba on the vzNAT address; nothing else should be exposed.
+portForwards:
+  - guestPortRange: [1, 65535]
+    proto: any
+    ignore: true
+
+containerd:
+  system: false
+  user: false

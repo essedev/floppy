@@ -1,0 +1,15 @@
+[Unit]
+Description=Fluix JuiceFS mount
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/local/sbin/fluix-mount
+# Samba starts after this unit is "started": wait until the mount is live.
+ExecStartPost=/bin/sh -c 'for i in $(seq 60); do mountpoint -q /mnt/drive && exit 0; sleep 1; done; exit 1'
+ExecStop=/bin/umount /mnt/drive
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

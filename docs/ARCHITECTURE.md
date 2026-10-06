@@ -152,7 +152,23 @@ Effort stimato, congettura: 3-4 giorni per stato, montaggio, warmup e cache part
 - **Il backend FSKit di macFUSE non basta**: macFUSE lo supporta solo tramite libfuse3. Con `-o backend=fskit` il mount resta appeso e macOS chiede di abilitare le estensioni del kernel.
 - **L'estensione del kernel** richiede, Mac per Mac, di spegnere, avviare in modalità di recupero e passare la sicurezza di avvio a "Ridotta". Per utenti non tecnici è l'opposto del principio guida.
 
-Da qui la scelta della macchina Linux con SMB: nessuna estensione sul Mac. Resta aperto come farla girare sui Mac dei colleghi: nello spike è Docker Desktop, troppo pesante da chiedere a un montatore; le candidate sono una VM leggera sul framework di virtualizzazione di Apple, avviata e gestita dall'app.
+Da qui la scelta della macchina Linux con SMB: nessuna estensione sul Mac. Nello spike era Docker Desktop, troppo pesante da chiedere a un montatore; nel pacchetto è una VM Lima (vedi [Pacchetto macOS](#pacchetto-macos)).
+
+## Pacchetto macOS
+
+Il modulo macOS, oggi un comando (`macos/bin/fluix`) e domani il motore dell'app Tauri. Si distribuisce come zip costruito da `scripts/package.sh <config.env>`, senza Homebrew; chi lo riceve lancia `bash install.sh` dal Terminale.
+
+- **VM Lima 2.2.1**, binario ufficiale incluso nello zip e verificato con il checksum della release. Backend `vz` (framework di virtualizzazione di Apple), Debian 13, 2 CPU, 2 GiB di RAM, disco sparso da 200 GiB per la cache. Nessun permesso di amministratore: tutto vive in `~/.fluix`, con le VM in un `LIMA_HOME` proprio che non tocca altre installazioni di Lima.
+- **Rete `vzNAT`**: la VM ha un indirizzo sul Mac (es. `192.168.64.2`) e SMB ci va diretto, senza l'inoltro di porte che nello spike con Docker costava banda. L'inoltro automatico di Lima è spento (`portForwards` con `ignore`), così la VM non espone porte sul Mac.
+- **Dentro la VM**: `vm/guest/guest-install.sh` installa Samba e JuiceFS e due servizi systemd, il mount (`fluix-mount`, che formatta il volume al primo avvio) e `smbd`, che parte solo a mount pronto. Si rilancia senza danni per aggiornare.
+- **Sul Mac**: il volume si monta con `osascript` (`mount volume`) e compare in `/Volumes/Fluix` e nella barra laterale del Finder; Spotlight è spento sul volume; un agente launchd (`dev.esse.fluix`) avvia VM e mount all'accesso.
+- **Timeout SMB**: macOS fa fallire una lettura SMB dopo 30 s senza risposta. Il comando alza il limite a 600 s solo per l'indirizzo della VM, in un blocco suo dentro `~/Library/Preferences/nsmb.conf` (per utente, senza amministratore). Un errore di I/O è comparso una volta a 100 Mbps simulati, con una lettura a freddo lanciata subito dopo un caricamento di 2,7 GB; non si è ripresentato nel confronto A/B, il limite resta come protezione per le linee lente.
+- **Configurazione**: `config.env` (modello in `macos/config.env.example`) con bucket, chiavi, password SMB tra Mac e VM, cache e limiti di banda simulati. Lo zip contiene le chiavi: si passa in privato, con una chiave OVH dedicata al bucket di test, da revocare a fine test.
+- **Metadati del test**: SQLite dentro la VM. Disinstallare il pacchetto o perdere la VM rende illeggibili i file nel bucket; per più persone serve PostgreSQL (`META_URL`).
+- **Peso**: la VM occupa circa 2,5 GB di RAM (buffer di JuiceFS e cache delle pagine di Linux) e sul disco cresce con la cache. Su un Mac da 8 GB va ridotto.
+- **Installazione misurata**: 111 s su questo Mac, compreso il download dell'immagine Debian.
+- **Prestazioni**: come lo spike con Docker a 100 Mbps simulati: lettura a freddo 5,3-7,2 MB/s, salto a freddo in media 0,8 s. A caldo le letture le serve anche la cache del client SMB di macOS.
+- **Da fare**: le Azioni rapide nel Finder ("Rendi disponibile", "Libera spazio"); per ora sono `fluix warmup <percorso>` e `fluix free <percorso>`.
 
 ## Alternative considerate
 

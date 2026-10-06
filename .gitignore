@@ -1,2 +1,5 @@
 .env
 footage/
+dist/
+*.env
+!*.env.example

@@ -1,0 +1,20 @@
+#!/bin/bash
+# Formats the volume on first run, then mounts it in the foreground for systemd.
+set -euo pipefail
+# shellcheck disable=SC1091
+. /etc/fluix/config.env
+export ACCESS_KEY SECRET_KEY
+
+if ! juicefs status "$META_URL" >/dev/null 2>&1; then
+  juicefs format --storage s3 --bucket "$BUCKET_URL" \
+    --compress none --trash-days 7 "$META_URL" "$VOLUME_NAME"
+fi
+
+mkdir -p /mnt/drive
+exec juicefs mount "$META_URL" /mnt/drive \
+  --bucket "$BUCKET_URL" \
+  --cache-dir /var/cache/fluix --cache-size "${CACHE_SIZE_MB:-102400}" \
+  --cache-expire "${CACHE_EXPIRE:-720h}" \
+  --prefetch "${PREFETCH:-8}" --buffer-size "${BUFFER_SIZE_MB:-1024}" \
+  --upload-limit "${UPLOAD_LIMIT_MBPS:-0}" --download-limit "${DOWNLOAD_LIMIT_MBPS:-0}" \
+  --enable-xattr

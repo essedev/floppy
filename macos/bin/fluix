@@ -1,0 +1,166 @@
+#!/bin/bash
+# Fluix for macOS: runs JuiceFS in a small Lima VM and mounts it in the
+# Finder over SMB. Everything lives in ~/.fluix; no admin rights needed.
+set -euo pipefail
+
+FLUIX_HOME="${FLUIX_HOME:-$HOME/.fluix}"
+export LIMA_HOME="$FLUIX_HOME/vms"
+LIMACTL="$FLUIX_HOME/lima/bin/limactl"
+VM=fluix
+SHARE=Fluix
+VOLUME="/Volumes/$SHARE"
+AGENT_LABEL=dev.esse.fluix
+AGENT_PLIST="$HOME/Library/LaunchAgents/$AGENT_LABEL.plist"
+NSMB_CONF="$HOME/Library/Preferences/nsmb.conf"
+LIMA_LOG="$FLUIX_HOME/lima.log"
+
+log() { printf '%s\n' "$*" >&2; }
+die() { log "fluix: $*"; exit 1; }
+lima() { "$LIMACTL" "$@"; }
+vm_status() { lima list --format '{{.Status}}' "$VM" 2>/dev/null || true; }
+in_vm() { lima shell --workdir / "$VM" "$@"; }
+config() { grep "^$1=" "$FLUIX_HOME/config.env" | cut -d= -f2-; }
+is_mounted() { /sbin/mount | grep -q " on $VOLUME (smbfs"; }
+
+vm_ip() {
+  in_vm ip -4 -o addr show lima0 | awk '{print $4}' | cut -d/ -f1
+}
+
+# Maps a path under the Finder volume to the same path inside the VM.
+vm_path() {
+  local p
+  p=$(cd "$(dirname "$1")" && pwd)/$(basename "$1")
+  case "$p" in
+    "$VOLUME"|"$VOLUME"/*) printf '/mnt/drive%s' "${p#"$VOLUME"}" ;;
+    *) die "$1 is not on $VOLUME" ;;
+  esac
+}
+
+start_vm() {
+  case "$(vm_status)" in
+    Running) ;;
+    "") die "VM not set up, run: fluix setup" ;;
+    *) log "Starting the VM..."; lima start --tty=false "$VM" >>"$LIMA_LOG" 2>&1 ;;
+  esac
+}
+
+# macOS fails an SMB read after 30 s without a reply. On a slow link a read
+# can wait longer while JuiceFS fetches blocks, and the Finder would get an
+# I/O error. Raise the limit for the VM's address only, in the user's
+# nsmb.conf, inside a block this script owns.
+set_smb_timeout() {
+  local ip="$1" begin="# fluix begin" end="# fluix end" rest=""
+  [ -f "$NSMB_CONF" ] && rest=$(sed "/^$begin\$/,/^$end\$/d" "$NSMB_CONF")
+  {
+    [ -n "$rest" ] && printf '%s\n' "$rest"
+    printf '%s\n[%s]\nmax_resp_timeout=600\n%s\n' "$begin" "$ip" "$end"
+  } > "$NSMB_CONF.tmp"
+  mv "$NSMB_CONF.tmp" "$NSMB_CONF"
+}
+
+mount_share() {
+  is_mounted && return 0
+  local ip
+  ip=$(vm_ip)
+  [ -n "$ip" ] || die "VM has no network address"
+  set_smb_timeout "$ip"
+  for _ in $(seq 60); do
+    /usr/bin/nc -z -G 1 "$ip" 445 2>/dev/null && break
+    sleep 1
+  done
+  /usr/bin/osascript -e "mount volume \"smb://drive:$(config SMB_PASSWORD)@$ip/$SHARE\"" >/dev/null
+  is_mounted || die "mount failed"
+  # No Spotlight indexing: it would read every file through the network.
+  /usr/bin/mdutil -i off "$VOLUME" >/dev/null 2>&1 || true
+}
+
+install_agent() {
+  mkdir -p "$(dirname "$AGENT_PLIST")"
+  cat > "$AGENT_PLIST" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>$AGENT_LABEL</string>
+  <key>ProgramArguments</key>
+  <array><string>$FLUIX_HOME/bin/fluix</string><string>start</string></array>
+  <key>RunAtLoad</key><true/>
+  <key>StandardOutPath</key><string>$FLUIX_HOME/agent.log</string>
+  <key>StandardErrorPath</key><string>$FLUIX_HOME/agent.log</string>
+</dict>
+</plist>
+EOF
+  /bin/launchctl bootout "gui/$(id -u)/$AGENT_LABEL" 2>/dev/null || true
+  /bin/launchctl bootstrap "gui/$(id -u)" "$AGENT_PLIST"
+}
+
+cmd_setup() {
+  [ -f "$FLUIX_HOME/config.env" ] || die "missing $FLUIX_HOME/config.env"
+  if [ -z "$(vm_status)" ]; then
+    log "Creating the VM (first time: downloads Debian, a few minutes)..."
+    lima create --name="$VM" --tty=false "$FLUIX_HOME/vm/lima.yaml" >>"$LIMA_LOG" 2>&1
+  fi
+  start_vm
+  log "Installing the drive in the VM..."
+  in_vm rm -rf /tmp/fluix-guest
+  lima copy -r "$FLUIX_HOME/vm/guest" "$VM:/tmp/fluix-guest"
+  lima copy "$FLUIX_HOME/config.env" "$VM:/tmp/fluix-guest/config.env"
+  in_vm sudo bash /tmp/fluix-guest/guest-install.sh >/dev/null
+  in_vm rm -rf /tmp/fluix-guest
+  install_agent
+  mount_share
+  log "Ready: $VOLUME"
+}
+
+cmd_start() {
+  start_vm
+  mount_share
+}
+
+cmd_stop() {
+  if is_mounted; then /usr/sbin/diskutil unmount "$VOLUME" >/dev/null; fi
+  [ "$(vm_status)" = Running ] && lima stop "$VM" >>"$LIMA_LOG" 2>&1
+  return 0
+}
+
+cmd_status() {
+  local st
+  st=$(vm_status)
+  printf 'VM:      %s\n' "${st:-not set up}"
+  if is_mounted; then printf 'Disk:    mounted at %s\n' "$VOLUME"; else printf 'Disk:    not mounted\n'; fi
+  if [ "$st" = Running ]; then
+    printf 'Drive:   %s\n' "$(in_vm systemctl is-active fluix-mount || true)"
+    printf 'Cache:   %s\n' "$(in_vm sudo du -sh /var/cache/fluix | cut -f1)"
+  fi
+}
+
+cmd_warmup() {
+  [ $# -ge 1 ] || die "usage: fluix warmup <file or folder on $VOLUME>"
+  for p in "$@"; do in_vm sudo juicefs warmup "$(vm_path "$p")"; done
+}
+
+cmd_free() {
+  [ $# -ge 1 ] || die "usage: fluix free <file or folder on $VOLUME>"
+  for p in "$@"; do in_vm sudo juicefs warmup --evict "$(vm_path "$p")"; done
+}
+
+cmd_uninstall() {
+  log "This deletes the VM and its cache. With the test setup (metadata in the VM)"
+  log "the files in the bucket become unreadable. Type 'delete' to confirm:"
+  read -r answer
+  [ "$answer" = delete ] || die "cancelled"
+  cmd_stop || true
+  /bin/launchctl bootout "gui/$(id -u)/$AGENT_LABEL" 2>/dev/null || true
+  rm -f "$AGENT_PLIST"
+  [ -n "$(vm_status)" ] && lima delete --force "$VM" >>"$LIMA_LOG" 2>&1
+  if [ -f "$NSMB_CONF" ]; then
+    sed -i '' '/^# fluix begin$/,/^# fluix end$/d' "$NSMB_CONF"
+    [ -s "$NSMB_CONF" ] || rm -f "$NSMB_CONF"
+  fi
+  log "Removed. $FLUIX_HOME is left in place; delete it by hand if you want."
+}
+
+case "${1:-}" in
+  setup|start|stop|status|warmup|free|uninstall) cmd="$1"; shift; "cmd_$cmd" "$@" ;;
+  *) log "usage: fluix setup|start|stop|status|warmup <path>|free <path>|uninstall"; exit 2 ;;
+esac
