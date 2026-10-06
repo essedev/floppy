@@ -11,11 +11,14 @@ if ! juicefs status "$META_URL" >/dev/null 2>&1; then
 fi
 
 mkdir -p /mnt/drive
+# The buffer is JuiceFS memory inside a 1 GiB VM. Reads use 32 MB of
+# readahead whatever its size, and copies are bound by the upload link:
+# 256 MB measured as fast as 1024 MB.
 exec juicefs mount "$META_URL" /mnt/drive \
   --bucket "$BUCKET_URL" \
   --cache-dir /var/cache/fluix --cache-size "${CACHE_SIZE_MB:-102400}" \
   --cache-expire "${CACHE_EXPIRE:-720h}" \
   --cache-large-write \
-  --prefetch "${PREFETCH:-8}" --buffer-size "${BUFFER_SIZE_MB:-1024}" \
+  --prefetch "${PREFETCH:-8}" --buffer-size "${BUFFER_SIZE_MB:-256}" \
   --upload-limit "${UPLOAD_LIMIT_MBPS:-0}" --download-limit "${DOWNLOAD_LIMIT_MBPS:-0}" \
   --enable-xattr

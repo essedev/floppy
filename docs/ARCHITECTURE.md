@@ -102,7 +102,7 @@ Misure dello spike del 06/10/2026 (`spike/bench.sh`): Mac con Apple Silicon, Gar
 | `--cache-expire` | 30 giorni | I progetti vecchi si liberano da soli |
 | `--cache-large-write` | attivo | Chi carica un girato di solito lo monta: i blocchi caricati restano in cache. Di default JuiceFS non li tiene |
 | `--prefetch` | 8 | Misurato: il valore migliore a freddo via SMB |
-| `--buffer-size` | 1 GB | Riproduzione e scrubbing |
+| `--buffer-size` | 256 MB | Misurato: veloce quanto 1 GB e lascia margine in una VM da 1 GiB (vedi "Peso") |
 | `--enable-xattr` | attivo | Samba ci salva i metadati del Finder; senza, la cancellazione dal Mac fallisce con "Operation not supported" |
 | Cache dei metadati | timeout più lunghi | Meno giri verso il database dal Finder |
 | Samba | modulo `fruit` (con `samba-vfs-modules`), firma e cifratura spente, I/O asincrono | Compatibilità col Finder; firma spenta e I/O asincrono portano la lettura in cache da 69 a 163 MB/s. Spente solo perché SMB resta su `127.0.0.1` |
@@ -176,7 +176,7 @@ Da qui la scelta della macchina Linux con SMB: nessuna estensione sul Mac. Nello
 
 Il modulo macOS, oggi un comando (`macos/bin/fluix`) e domani il motore dell'app Tauri. Si distribuisce come zip costruito da `scripts/package.sh <config.env>`, senza Homebrew; chi lo riceve lancia `bash install.sh` dal Terminale.
 
-- **VM Lima 2.2.1**, binario ufficiale incluso nello zip e verificato con il checksum della release. Backend `vz` (framework di virtualizzazione di Apple), Debian 13, 2 CPU, 2 GiB di RAM, disco sparso da 200 GiB per la cache. Nessun permesso di amministratore: tutto vive in `~/.fluix`, con le VM in un `LIMA_HOME` proprio che non tocca altre installazioni di Lima.
+- **VM Lima 2.2.1**, binario ufficiale incluso nello zip e verificato con il checksum della release. Backend `vz` (framework di virtualizzazione di Apple), Debian 13, 2 CPU, 1 GiB di RAM, disco sparso da 200 GiB per la cache. Nessun permesso di amministratore: tutto vive in `~/.fluix`, con le VM in un `LIMA_HOME` proprio che non tocca altre installazioni di Lima.
 - **Rete `vzNAT`**: la VM ha un indirizzo sul Mac (es. `192.168.64.2`) e SMB ci va diretto, senza l'inoltro di porte che nello spike con Docker costava banda. L'inoltro automatico di Lima è spento (`portForwards` con `ignore`), così la VM non espone porte sul Mac.
 - **Dentro la VM**: `vm/guest/guest-install.sh` installa Samba e JuiceFS e due servizi systemd, il mount (`fluix-mount`, che formatta il volume al primo avvio) e `smbd`, che parte solo a mount pronto. Si rilancia senza danni per aggiornare.
 - **Sul Mac**: il volume si monta con `osascript` (`mount volume`) e compare in `/Volumes/Fluix` e nella barra laterale del Finder; Spotlight è spento sul volume; un agente launchd (`dev.esse.fluix`) avvia VM e mount all'accesso.
@@ -185,7 +185,7 @@ Il modulo macOS, oggi un comando (`macos/bin/fluix`) e domani il motore dell'app
 - **Configurazione**: `config.env` (modello in `macos/config.env.example`) con bucket, chiavi, password SMB tra Mac e VM, cache e limiti di banda simulati. Lo zip contiene le chiavi: si passa in privato, con una chiave OVH dedicata al bucket di test, da revocare a fine test.
 - **Un volume per Mac**: con `VOLUME_NAME` vuoto, `install.sh` genera `fluix-<utente>-<codice>`, così lo stesso zip va a più persone sullo stesso bucket, ognuna col suo disco. Una reinstallazione sopra un'installazione esistente tiene la configurazione; `uninstall` cancella tutto, perché il volume è perso con la VM.
 - **Metadati del test**: SQLite dentro la VM. Disinstallare il pacchetto o perdere la VM rende illeggibili i file nel bucket; per più persone serve PostgreSQL (`META_URL`).
-- **Peso**: la VM occupa circa 2,5 GB di RAM (buffer di JuiceFS e cache delle pagine di Linux) e sul disco cresce con la cache. Su un Mac da 8 GB va ridotto.
+- **Peso**: sul Mac la VM occupa al massimo 1 GB di RAM (1.035 MB misurati, 670 MB appena avviata), contro i 2.060 MB della prima versione con 2 GiB. Il tetto è la memoria assegnata, non il buffer di JuiceFS: Linux riempie la RAM libera con la cache delle pagine, il framework di Apple tiene ogni pagina toccata e Lima non usa il balloon per restituirla, quindi dopo la prima lettura di un clip la VM pesa tutta la sua `memory`. Dentro la VM JuiceFS arriva a 420 MB copiando 2,7 GB con `--buffer-size` a 256 MB (era 1 GB), senza processi chiusi per memoria esaurita. Le prestazioni restano quelle con 2 GiB: lettura a freddo 11,6-13 MB/s, salto a freddo 0,8-1 s, warmup di un clip 27-33 s, copia di 2,7 GB 129 s (133 s con la configurazione di prima, nello stesso momento). Cambia solo la rilettura dopo uno smontaggio, 0,5 s invece di 0,2, perché arriva dalla cache su disco invece che dalla RAM. Sul disco la VM cresce con la cache.
 - **Installazione misurata**: 84-111 s, compreso il download dell'immagine Debian.
 - **Prestazioni**: come lo spike con Docker a 100 Mbps simulati: lettura a freddo 5,3-7,2 MB/s, salto a freddo in media 0,8 s. A caldo le letture le serve anche la cache del client SMB di macOS.
 - **Da fare**: le Azioni rapide nel Finder ("Rendi disponibile", "Libera spazio"); per ora sono `fluix warmup <percorso>` e `fluix free <percorso>`.

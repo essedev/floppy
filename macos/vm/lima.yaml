@@ -6,7 +6,11 @@ base:
 
 vmType: vz
 cpus: 2
-memory: 2GiB
+# The VM holds on to every page the guest has touched (Lima sets no balloon
+# target), and Linux fills spare RAM with page cache: the host pays the whole
+# `memory`. 1 GiB measured: JuiceFS peaks near 420 MB copying 2.7 GB, no OOM,
+# same speeds as 2 GiB.
+memory: 1GiB
 # Sparse: the file grows with the JuiceFS cache, capped by CACHE_SIZE_MB.
 disk: 200GiB
 
