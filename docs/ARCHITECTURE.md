@@ -115,7 +115,17 @@ JuiceFS Community non ha alcuna interfaccia per l'utente finale: è un programma
 | Credenziali in chiaro su ogni Mac | Accesso con SSO e credenziali personali revocabili |
 | Non va e nessuno sa perché | "Invia diagnostica" con log e stato |
 
-Forma prevista: **app Tauri** nella barra dei menu, sullo scheletro di Portsage (`~/Development/Projects/portsage`), che ha già icona e pannello nella barra dei menu, avvio all'accesso e un binario esterno incluso nell'app (`externalBin`). Swift scartato: non è nello stack di Acme e nessuno nel team lo manterrebbe; servirebbe solo per badge e menu nativi del Finder, che un'estensione Swift potrebbe aggiungere accanto all'app senza riscriverla. JuiceFS gira anche su Windows, e Tauri copre anche quel caso.
+Forma prevista: **app Tauri** nella barra dei menu, sullo scheletro di Portsage (`~/Development/Projects/portsage`), che ha già icona e pannello nella barra dei menu, avvio all'accesso e un binario esterno incluso nell'app (`externalBin`). Swift scartato: non è nello stack di Acme e nessuno nel team lo manterrebbe; servirebbe solo per badge e menu nativi del Finder, che un'estensione Swift potrebbe aggiungere accanto all'app senza riscriverla. 
+
+**Solo macOS per ora, con lo strato del sistema isolato.** L'interfaccia (stato, cache, warmup) è comune; cambia solo come gira JuiceFS, dietro un'interfaccia unica (monta, smonta, stato, warmup, libera spazio) con un modulo per sistema selezionato da `#[cfg(target_os)]`, come lo scanner di Portsage:
+
+| Sistema | JuiceFS | Macchina Linux |
+|---|---|---|
+| macOS | in una VM Linux leggera, condiviso via SMB | sì, è l'unico modo senza estensione del kernel |
+| Windows | `juicefs.exe` nativo con WinFsp, una lettera di unità | no |
+| Linux | nativo con FUSE | no |
+
+Il team lavora su Mac, quindi si costruisce solo quel modulo; Windows si aggiunge come modulo, non come riscrittura, quando serve. Da verificare allora la maturità del client Windows di JuiceFS e un canale di distribuzione al posto di Homebrew (installer o winget).
 
 **Distribuzione con Homebrew**, come Portsage: un cask in un tap nostro, senza Apple Developer ID, con `xattr -cr` in postflight. Limiti: Homebrew va installato sui Mac dei colleghi (lo facciamo noi), gli aggiornamenti richiedono `brew upgrade`, e il trucco su app non firmate dipende dalle regole di Homebrew, che si stanno stringendo. L'accesso con SSO viene dopo.
 
