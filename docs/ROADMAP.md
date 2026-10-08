@@ -20,7 +20,7 @@ Tester prova sul suo Mac (macOS 27) lo zip di `scripts/package.sh` rifatto l'08/
 - **Stato**: in corso, di base funzionante. La lista dei test: installazione, CapCut con export sul Mac e su Fluix, riapertura del progetto, stop e riavvio del Mac, progetto più grande della cache, cambio di rete, `fluix free`. Lo stop l'aveva già provato Simone, ed è da lì che è nato il fix di `Fluix-1`; riavvio vero e cambio di rete li prova lei.
 - **Da annotare con lei**: cosa scatta, cosa va in errore, quanto ci mette a caricare.
 - **Salti a freddo**: provare blocchi da 1 MB invece che da 4 su un secondo volume nello stesso bucket. Se conviene, si rifà lo zip.
-- **A fine test**: revocare la chiave dell'utente di test e cancellare dal bucket il volume di prova di Simone (`fluix-doppia-<codice>`, con `bench/` e `test/`). I volumi orfani delle installazioni fallite (`fluix-tester-883398/`, `fluix/`) sono già cancellati.
+- **A fine test**: revocare la chiave dell'utente di test e cancellare dal bucket il volume di prova di Simone (`fluix-doppia-<codice>`, con `bench/` e `test/`) e quello di Tester (`fluix-tester-<codice>`); in tutto il bucket si svuota, perché è solo di test. I volumi orfani delle installazioni fallite (`fluix-tester-883398/`, `fluix/`) sono già cancellati.
 
 Aperti, da chiudere prima del pilota:
 
