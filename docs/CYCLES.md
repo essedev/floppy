@@ -5,9 +5,10 @@ Log del lavoro fatto, il più recente in cima. I piani stanno in [ROADMAP.md](RO
 ## 3. Seconda installazione della tester: DNS e log (08/10/2026)
 
 - **Cosa è successo**: la creazione della VM è fallita perché il DNS dell'ufficio risponde SERVFAIL per `cloud.debian.org` (già causa del fallimento silenzioso del 6/10). Rilanciando, `install.sh` ha detto "Updating" su una VM mai finita, l'avvio si è bloccato e `lima.log` ha superato i 50 GB riempiendo il disco. Diagnosi della tester, verificata: i blocchi di errore finivano nel log. La copia di 9,7 GB del 6/10 era andata a 14 MB/s, il suo upload.
-- **Correzioni**: immagine Debian e JuiceFS dentro lo zip (406 MB), VM creata dal file locale (verificato nel log di Lima); segnale di installazione completata, con VM a metà cancellata e ricreata; messaggi solo sul terminale, trap che scatta una volta, log accorciato oltre 50 MB, timeout di 5 minuti all'avvio; tetto della cache dello zip a 25 GB.
+- **Correzioni**: immagine Debian e JuiceFS dentro lo zip (406 MB), VM creata dal file locale (verificato nel log di Lima); segnale di installazione completata, con VM a metà cancellata e ricreata; messaggi solo sul terminale, trap che scatta una volta, log accorciato oltre 50 MB, timeout di 5 minuti all'avvio.
 - **Provato**: lo stato della tester riprodotto con il Lima vero e un'immagine irraggiungibile (VM a metà riconosciuta e ricreata, log senza blocchi di errore); installazione pulita dallo zip nuovo in circa 90 s, disco della VM di 35 GiB.
 - **Trovato provando**: fd 3 ereditato dall'host agent di Lima teneva aperto il terminale dell'installazione; chiuso per limactl.
+- **Consegna**: zip rifatto con `CACHE_SIZE_MB=15360` (cache fino a 15 GB, VM fino a circa 25 GB sul Mac) e passato alla tester, che ha reinstallato; il test è in corso ([ROADMAP.md](ROADMAP.md)). Cancellati dal bucket i volumi orfani `fluix-tester-883398/` e `fluix/`.
 
 ## 2. Il primo test di una collega e le difese sullo spazio (06/10/2026)
 
@@ -15,7 +16,7 @@ Log del lavoro fatto, il più recente in cima. I piani stanno in [ROADMAP.md](RO
 - **Causa**: il controllo di spazio di JuiceFS guarda la VM, non il Mac.
 - **Correzioni**: tetto della cache calcolato sullo spazio del Mac e disco della VM dimensionato su quel tetto; agente ogni 2 minuti che riavvia VM e servizi, libera la cache col Mac quasi pieno e monta il disco se manca; `fstrim` dopo `free`; `status` che vede una VM rotta; errori che mostrano il log; aggiornamento esplicito in `install.sh`.
 - **Trovati provando le correzioni**: dopo uno stop del Mac l'agente rimontava il disco come `Fluix-1`, che rompe i progetti CapCut; un agente impaziente smontava a forza un disco occupato da una copia; `systemctl is-active` su due unità non vedeva Samba fermo. Corretti e riprovati: 3 clip copiati con 5 controlli dell'agente in parallelo, identici byte per byte.
-- **Per la tester**: reinstallazione pulita dopo aver liberato spazio; il volume orfano va cancellato dal bucket.
+- **Per la tester**: reinstallazione pulita dopo aver liberato spazio; il volume orfano va cancellato dal bucket (fatto nel ciclo 3).
 
 ## 1. Dall'analisi al pacchetto di test (06/10/2026)
 

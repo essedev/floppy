@@ -13,14 +13,20 @@ Da chiudere prima del pilota, perché cambiano la scelta:
 - **Versioning del bucket di produzione**: spento nel test, da decidere ([ARCHITECTURE.md](ARCHITECTURE.md#soluzione-juicefs-su-ovh)).
 - Da verificare: PostgreSQL gestito OVH a Milano; regione 1-AZ o 3-AZ per la produzione; prezzo dello spazio extra SpaceFS sul piano Teams.
 
-## 2. Test sul Mac della collega (in corso)
+## 2. Test sul Mac della tester (in corso)
 
-Lo zip di `scripts/package.sh` con il bucket `fluix-test` e la VM da 1 GiB, passato in privato. Ogni installazione ha il suo disco, con i metadati nella VM: si prova il disco sul suo Mac, con CapCut e la sua linea, non la condivisione.
+Tester prova sul suo Mac (macOS 27) lo zip di `scripts/package.sh` rifatto l'08/10/2026: bucket `fluix-test`, VM da 1 GiB, `CACHE_SIZE_MB=15360`, quindi cache fino a 15 GB e VM fino a circa 25 GB sul Mac. Il disco della VM si fissa alla creazione: alzare il tetto della cache oltre quella misura vuol dire reinstallare. Ogni installazione ha il suo disco, con i metadati nella VM: si prova il disco sul suo Mac, con CapCut e la sua linea, non la condivisione.
 
-- **Prima di mandarlo**: Simone riavvia il Mac, lo mette in stop e cambia rete, e verifica che Fluix torni da solo (mai provato); prova CapCut sul disco.
+- **Stato**: in corso, di base funzionante. La lista dei test: installazione, CapCut con export sul Mac e su Fluix, riapertura del progetto, stop e riavvio del Mac, progetto più grande della cache, cambio di rete, `fluix free`. Lo stop l'aveva già provato Simone, ed è da lì che è nato il fix di `Fluix-1`; riavvio vero e cambio di rete li prova lei.
+- **Da annotare con lei**: cosa scatta, cosa va in errore, quanto ci mette a caricare.
 - **Salti a freddo**: provare blocchi da 1 MB invece che da 4 su un secondo volume nello stesso bucket. Se conviene, si rifà lo zip.
-- **Cosa chiederle**: copiare il girato di un progetto vero, montarlo in CapCut, esportare, e annotare cosa scatta, cosa va in errore e quanto ci mette a caricare.
-- **A fine test**: revocare la chiave dell'utente di test e cancellare dal bucket i dati di prova (`bench/`, `bench2/`, `memtest-*`).
+- **A fine test**: revocare la chiave dell'utente di test e cancellare dal bucket il volume di prova di Simone (`fluix-doppia-<codice>`, con `bench/` e `test/`). I volumi orfani delle installazioni fallite (`fluix-tester-883398/`, `fluix/`) sono già cancellati.
+
+Aperti, da chiudere prima del pilota:
+
+- **Pacchetti Debian scaricati all'installazione**: dentro la VM `guest-install.sh` scarica Samba e FUSE da `deb.debian.org`. È l'ultimo download rimasto, con lo stesso rischio del DNS d'ufficio che ha già fatto fallire `cloud.debian.org` ([CYCLES.md](CYCLES.md)). Strada probabile: i `.deb` nello zip, come l'immagine e JuiceFS.
+- **Password SMB nell'URL di montaggio**: passa in `mount volume` ed è visibile in `ps` per un istante ([CONVENTIONS.md](CONVENTIONS.md#segreti)). Va spostata nel Portachiavi di macOS.
+- **macOS 27**: non ancora validato, lo dice la fine del test di Tester.
 
 ## 3. Pilota
 

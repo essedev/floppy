@@ -32,7 +32,7 @@ JuiceFS (Community Edition, open source) ha la stessa architettura di LucidLink:
 |---|---|---|
 | Dati | Bucket OVH Object Storage Standard, versioning da decidere (vedi sotto) | I blocchi dei file |
 | Metadati | PostgreSQL, preferibilmente gestito da OVH, nella stessa regione | Albero di file e cartelle, lock |
-| Client | `juicefs` in una piccola macchina Linux su ogni Mac, condiviso al Mac via SMB su `localhost` | Il volume nel Finder e la cache |
+| Client | `juicefs` in una piccola macchina Linux su ogni Mac, condiviso al Mac via SMB sul collegamento privato Mac-VM | Il volume nel Finder e la cache |
 
 **Perché una macchina Linux e non `juicefs` direttamente sul Mac**: vedi [macFUSE](#macfuse). Il Mac monta una cartella di rete SMB, cosa che sa fare da sé senza estensioni; JuiceFS gira in Linux, dove FUSE è nativo. Il prezzo è un componente in più su ogni Mac.
 
@@ -50,7 +50,8 @@ La cache sta sull'SSD di ogni Mac, dentro il disco della macchina Linux, gestita
 
 - JuiceFS divide ogni file in blocchi da 4 MB. Quando un programma legge un punto di un video, scarica solo i blocchi di quel punto e ne tiene una copia in cache. La volta dopo arrivano dall'SSD.
 - **Come ci entrano i blocchi**: leggendo, con il prefetch che scarica in avanti durante la riproduzione, con `juicefs warmup <cartella>` che precarica un progetto intero, e scrivendo, ma solo con `--cache-large-write`, che di default è spento: chi carica il girato lo ha già in cache, i colleghi no.
-- **Restano anche dopo il riavvio**, finché: la cache raggiunge `--cache-size` (si eliminano i blocchi usati meno di recente), lo spazio libero del Mac scende sotto `--free-space-ratio` (default 10%, la cache non riempie mai il disco), scade `--cache-expire` se impostato, oppure si liberano a mano con `juicefs warmup --evict <cartella>`. I blocchi di un file cancellato spariscono subito sul Mac che lo cancella; sugli altri diventano orfani e vengono eliminati per primi.
+- **Restano anche dopo il riavvio**, finché: la cache raggiunge `--cache-size` (si eliminano i blocchi usati meno di recente), lo spazio libero scende sotto `--free-space-ratio` (default 10%), scade `--cache-expire` se impostato, oppure si liberano a mano con `juicefs warmup --evict <cartella>`. I blocchi di un file cancellato spariscono subito sul Mac che lo cancella; sugli altri diventano orfani e vengono eliminati per primi.
+- **`--free-space-ratio` non protegge il Mac**: guarda il disco della macchina Linux, non quello del Mac. Nel pacchetto il tetto della cache e lo svuotamento d'emergenza si calcolano dal lato Mac (vedi [Pacchetto macOS](#pacchetto-macos)).
 - **Ogni Mac ha la sua cache**: ciò che ha visto un collega non aiuta gli altri.
 - **Non funziona offline**: anche con i blocchi in cache, l'albero dei file sta nel database. Senza rete il disco non si usa. Fa eccezione la configurazione di test, con i metadati in SQLite dentro la VM: lì i file già in cache dovrebbero restare leggibili, ma non è provato.
 - **Mai dati vecchi**: un file modificato viene scritto in blocchi nuovi, quelli in cache restano solo inutilizzati.
@@ -100,14 +101,14 @@ Misure dello spike del 06/10/2026 (`spike/bench.sh`): Mac con Apple Silicon, Gar
 | Dimensione blocchi | 4 MB (default) | Bilancia letture sequenziali e salti |
 | Cestino | 7 giorni | Recupero di cancellazioni accidentali |
 | `writeback` | spento | Un file risulta salvato solo quando è su S3. Copie più lente, ma nessun file rimasto solo su un Mac chiuso a metà caricamento |
-| `--cache-size` | 100-200 GB | Ragionevole su un Mac da 512 GB |
+| `--cache-size` | calcolato a ogni `setup`, al massimo `CACHE_SIZE_MB` (100 GB di default) | Metà di quello che il Mac può cedere sopra una riserva (vedi [Pacchetto macOS](#pacchetto-macos)) |
 | `--cache-expire` | 30 giorni | I progetti vecchi si liberano da soli |
 | `--cache-large-write` | attivo | Chi carica un girato di solito lo monta: i blocchi caricati restano in cache. Di default JuiceFS non li tiene |
 | `--prefetch` | 8 | Misurato: il valore migliore a freddo via SMB |
 | `--buffer-size` | 256 MB | Misurato: veloce quanto 1 GB e lascia margine in una VM da 1 GiB (vedi "Peso") |
 | `--enable-xattr` | attivo | Samba ci salva i metadati del Finder; senza, la cancellazione dal Mac fallisce con "Operation not supported" |
-| Cache dei metadati | timeout più lunghi | Meno giri verso il database dal Finder |
-| Samba | modulo `fruit` (con `samba-vfs-modules`), firma e cifratura spente, I/O asincrono | Compatibilità col Finder; firma spenta e I/O asincrono portano la lettura in cache da 69 a 163 MB/s. Spente solo perché SMB resta su `127.0.0.1` |
+| Cache dei metadati | default di JuiceFS | Timeout più lunghi, per fare meno giri verso il database dal Finder, da valutare con PostgreSQL condiviso: con SQLite nella VM il giro è locale |
+| Samba | modulo `fruit` (con `samba-vfs-modules`), firma e cifratura spente, I/O asincrono | Compatibilità col Finder; firma spenta e I/O asincrono portano la lettura in cache da 69 a 163 MB/s. Spente solo perché SMB resta sul collegamento privato Mac-VM |
 | Samba, file nascosti | `veto files` su `.accesslog`, `.config`, `.stats`, `.trash` | I file interni di JuiceFS non compaiono nel Finder |
 | Spotlight | `mdutil -i off` sul volume | Niente indicizzazione che legge tutto |
 
@@ -149,7 +150,7 @@ Decisioni che il mockup lascia aperte:
 
 - **Testo quando il disco non è raggiungibile**: il mockup dice che i file non si aprono finché il disco non torna. Vale con PostgreSQL condiviso, non del tutto con i metadati nella VM (vedi [La cache](#la-cache)). Si sceglie con la configurazione finale.
 - **Cache piena**: il mockup blocca con "Serve spazio" un progetto che non ci sta. L'alternativa è avvisare e lasciare che JuiceFS liberi i blocchi usati meno di recente.
-- **Riconnessione automatica**: il pannello promette un nuovo tentativo ogni 30 secondi, che oggi nessun componente fa.
+- **Riconnessione automatica**: il pannello promette un nuovo tentativo ogni 30 secondi; oggi l'agente rimonta il disco se manca ogni 2 minuti (vedi "Agente").
 - **"Spegni" o "Espelli"**: le varianti usano parole diverse per la stessa azione; l'app ne usa una.
 - Nomi dei progetti, versione e date sono inventati.
 
@@ -208,16 +209,16 @@ Il modulo macOS, oggi un comando (`macos/bin/fluix`) e domani il motore dell'app
 - **`status`**: distingue una VM accesa ma rotta (ogni comando dentro dà errore di I/O, ma Lima la dà "Running"), un disco montato ma che non risponde, lo spazio libero del Mac e il tetto della cache in uso.
 - **Errori visibili**: un errore inatteso dice dove è avvenuto e mostra le ultime righe di `lima.log`. Prima l'installazione poteva tornare al prompt senza dire niente, ed è successo al primo tentativo della tester.
 - **Aggiornare e ricominciare**: `install.sh` sopra un'installazione esistente aggiorna (tiene configurazione, VM e volume) e lo dice; ricominciare da zero è `fluix uninstall` e poi `install.sh`. Memoria e disco della VM restano quelli della creazione.
-- **Niente download all'installazione**: lo zip contiene l'immagine Debian (la stessa che fissa il template di Lima, verificata con il suo SHA-512) e il binario di JuiceFS (verificato con il checksum della release), e la VM nasce dal file locale. Il DNS dell'ufficio di una tester non risolve `cloud.debian.org`: è stata la causa del fallimento di entrambe le sue installazioni. Lo zip passa da 38 a 406 MB. Dentro la VM restano da scaricare solo i pacchetti Debian di Samba e FUSE.
+- **Niente download all'installazione**: lo zip contiene l'immagine Debian (la stessa che fissa il template di Lima, verificata con il suo SHA-512) e il binario di JuiceFS (verificato con il checksum della release), e la VM nasce dal file locale. Il DNS dell'ufficio di una tester non risolve `cloud.debian.org`: è stata la causa del fallimento di entrambe le sue installazioni. Lo zip passa da 38 a 406 MB. Dentro la VM restano da scaricare solo i pacchetti Debian di Samba e FUSE, da `deb.debian.org`: è l'ultimo punto esposto al DNS dell'ufficio ([ROADMAP.md](ROADMAP.md)).
 - **Installazioni fallite**: `setup` scrive `~/.fluix/installed` solo a installazione completata. Una VM senza quel segnale è un avanzo senza dati: `setup` la cancella e la ricrea, con un nome di volume nuovo; una VM sana di prima del segnale viene riconosciuta e tenuta. `install.sh` dice "Updating" solo se il segnale c'è.
 - **Il log non cresce senza limite**: i messaggi dello script vanno sul terminale da cui è partito (fd 3), mai nel log, e la gestione degli errori scatta una volta sola; `lima.log` viene accorciato oltre i 50 MB e `install.sh` lo svuota se è enorme. Sul Mac della tester il log è arrivato a 50 GB e ha riempito il disco: confermato che i blocchi di errore finivano nel log, una volta per ogni livello di funzione; la crescita a 50 GB non è stata riprodotta (da lei l'avvio della VM restava appeso), quindi le difese valgono per qualunque cosa scriva. L'avvio della VM ha un timeout di 5 minuti.
 - **Configurazione**: `config.env` (modello in `macos/config.env.example`) con bucket, chiavi, password SMB tra Mac e VM, cache e limiti di banda simulati. Lo zip contiene le chiavi: si passa in privato, con una chiave OVH dedicata al bucket di test, da revocare a fine test.
 - **Un volume per Mac**: con `VOLUME_NAME` vuoto, `install.sh` genera `fluix-<utente>-<codice>`, così lo stesso zip va a più persone sullo stesso bucket, ognuna col suo disco. Una reinstallazione sopra un'installazione esistente tiene la configurazione; `uninstall` cancella tutto, perché il volume è perso con la VM.
 - **Metadati del test**: SQLite dentro la VM. Disinstallare il pacchetto o perdere la VM rende illeggibili i file nel bucket; per più persone serve PostgreSQL (`META_URL`).
 - **Peso**: sul Mac la VM occupa al massimo 1 GB di RAM (1.035 MB misurati, 670 MB appena avviata), contro i 2.060 MB della prima versione con 2 GiB. Il tetto è la memoria assegnata, non il buffer di JuiceFS: Linux riempie la RAM libera con la cache delle pagine, il framework di Apple tiene ogni pagina toccata e Lima non usa il balloon per restituirla, quindi dopo la prima lettura di un clip la VM pesa tutta la sua `memory`. Dentro la VM JuiceFS arriva a 420 MB copiando 2,7 GB con `--buffer-size` a 256 MB (era 1 GB), senza processi chiusi per memoria esaurita. Le prestazioni restano quelle con 2 GiB: lettura a freddo 11,6-13 MB/s, salto a freddo 0,8-1 s, warmup di un clip 27-33 s, copia di 2,7 GB 129 s (133 s con la configurazione di prima, nello stesso momento). Cambia solo la rilettura dopo uno smontaggio, 0,5 s invece di 0,2, perché arriva dalla cache su disco invece che dalla RAM. Sul disco la VM cresce con la cache. La `memory` vale per le VM create da qui in poi: `setup` non la cambia su una VM esistente, che va aggiornata a mano o reinstallata.
-- **Installazione misurata**: 84-111 s, compreso il download dell'immagine Debian. Serve un Mac con Apple Silicon e macOS 13 o successivo, che `install.sh` controlla.
+- **Installazione misurata**: circa 90 s dallo zip con immagine e JuiceFS inclusi (84-111 s con la versione che scaricava l'immagine). Serve un Mac con Apple Silicon e macOS 13 o successivo, che `install.sh` controlla.
 - **Prestazioni**: come lo spike con Docker a 100 Mbps simulati: lettura a freddo 5,3-7,2 MB/s, salto a freddo in media 0,8 s. A caldo le letture le serve anche la cache del client SMB di macOS.
-- **Da fare**: le Azioni rapide nel Finder ("Rendi disponibile", "Libera spazio"); per ora sono `fluix warmup <percorso>` e `fluix free <percorso>`. Provato uno stop del Mac (il disco è tornato, ma la prima versione dell'agente lo ha rimontato come `Fluix-1`, corretto); mai provati un riavvio vero e un cambio di rete. Mai provato macOS 27, che ha la tester.
+- **Da fare**: le Azioni rapide nel Finder ("Rendi disponibile", "Libera spazio"); per ora sono `fluix warmup <percorso>` e `fluix free <percorso>`. Provato uno stop del Mac (il disco è tornato, ma la prima versione dell'agente lo ha rimontato come `Fluix-1`, corretto). Riavvio vero, cambio di rete e macOS 27 sono nel test in corso della tester, non ancora chiuso ([ROADMAP.md](ROADMAP.md)). Password SMB da spostare dall'URL di montaggio al Portachiavi.
 
 ## Alternative considerate
 
