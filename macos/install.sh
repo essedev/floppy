@@ -12,7 +12,7 @@ major=$(sw_vers -productVersion | cut -d. -f1)
 FLUIX_HOME="$HOME/.fluix"
 # Over an existing install this is an update: it keeps the config, the VM and
 # the volume. A fresh start is `fluix uninstall` first.
-if [ -f "$FLUIX_HOME/config.env" ]; then
+if [ -f "$FLUIX_HOME/installed" ]; then
   echo "Updating the existing Fluix install (your files stay as they are)."
 else
   echo "New Fluix install."
@@ -20,6 +20,10 @@ fi
 mkdir -p "$FLUIX_HOME"
 rm -rf "$FLUIX_HOME/lima" "$FLUIX_HOME/bin" "$FLUIX_HOME/vm"
 cp -R lima bin vm "$FLUIX_HOME/"
+# A log grown by an earlier failed attempt is of no use and can be huge.
+if [ -f "$FLUIX_HOME/lima.log" ] && [ "$(du -m "$FLUIX_HOME/lima.log" | cut -f1)" -gt 100 ]; then
+  : > "$FLUIX_HOME/lima.log"
+fi
 # Keep the config of a previous install: it names the volume this Mac uses.
 if [ ! -f "$FLUIX_HOME/config.env" ]; then
   install -m 600 config.env "$FLUIX_HOME/config.env"

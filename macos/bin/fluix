@@ -12,22 +12,42 @@ AGENT_LABEL=dev.esse.fluix
 AGENT_PLIST="$HOME/Library/LaunchAgents/$AGENT_LABEL.plist"
 NSMB_CONF="$HOME/Library/Preferences/nsmb.conf"
 LIMA_LOG="$FLUIX_HOME/lima.log"
+# Written once setup has completed; a VM without it is a leftover of a failed
+# install and holds no data.
+INSTALLED_MARK="$FLUIX_HOME/installed"
+IMAGE="$FLUIX_HOME/vm/debian.qcow2"
 STOPPED_FLAG="$FLUIX_HOME/stopped"
 RESTART_STAMP="$FLUIX_HOME/last-vm-restart"
 # How often the agent checks the VM, the share and the Mac's free space.
 TICK_SECONDS=120
 
-log() { printf '%s\n' "$*" >&2; }
+# fd 3 is the terminal (or launchd's log) the script started with. Messages go
+# there, never to whatever a command's stderr points at: the error handler runs
+# inside redirected calls like `lima start >>lima.log`, and once it appended
+# lima.log to itself with tail, which never reaches the end of a file it is
+# growing. It filled a tester's disk with 50 GB of log.
+exec 3>&2
+log() { printf '%s\n' "$*" >&3; }
 die() { log "fluix: $*"; exit 1; }
 # Any unexpected failure says where it happened and shows the end of the log,
 # instead of dropping back to the prompt in silence.
 on_error() {
+  trap - ERR
   log "fluix: failed (exit $1, line $2). Last lines of $LIMA_LOG:"
-  [ -f "$LIMA_LOG" ] && tail -15 "$LIMA_LOG" >&2
+  if [ -f "$LIMA_LOG" ]; then tail -15 "$LIMA_LOG" >&3; fi
 }
 trap 'on_error $? $LINENO' ERR
 
-lima() { "$LIMACTL" "$@"; }
+# Whatever writes into lima.log, it stays small: a tester's log reached 50 GB.
+trim_log() {
+  [ -f "$LIMA_LOG" ] || return 0
+  if [ "$(du -m "$LIMA_LOG" | cut -f1)" -gt 50 ]; then
+    /usr/bin/tail -n 2000 "$LIMA_LOG" > "$LIMA_LOG.tmp" && mv "$LIMA_LOG.tmp" "$LIMA_LOG"
+  fi
+}
+# fd 3 is closed for limactl: `lima start` leaves a host agent running in the
+# background, which would keep the terminal of the install open forever.
+lima() { trim_log; "$LIMACTL" "$@" 3>&-; }
 vm_status() { lima list --format '{{.Status}}' "$VM" 2>/dev/null || true; }
 in_vm() { lima shell --workdir / "$VM" "$@"; }
 config() { grep "^$1=" "$FLUIX_HOME/config.env" | cut -d= -f2- || true; }
@@ -99,7 +119,10 @@ start_vm() {
   case "$(vm_status)" in
     Running) ;;
     "") die "VM not set up, run: fluix setup" ;;
-    *) log "Starting the VM..."; lima start --tty=false "$VM" >>"$LIMA_LOG" 2>&1 ;;
+    *) log "Starting the VM..."
+       # A start that cannot finish (a download that never resolves) gives up
+       # instead of hanging the install.
+       lima start --tty=false --timeout=5m "$VM" >>"$LIMA_LOG" 2>&1 ;;
   esac
 }
 
@@ -195,9 +218,41 @@ EOF
   /bin/launchctl bootstrap "gui/$(id -u)" "$AGENT_PLIST"
 }
 
+# A VM from a setup that never completed (download failed, disk full) is
+# thrown away and created again. A working VM from before the marker existed is
+# adopted instead: it holds the volume's metadata.
+discard_failed_vm() {
+  [ -n "$(vm_status)" ] || return 0
+  [ -f "$INSTALLED_MARK" ] && return 0
+  if [ "$(vm_status)" = Running ] && vm_healthy && in_vm test -f /etc/fluix/config.env; then
+    touch "$INSTALLED_MARK"
+    return 0
+  fi
+  log "Removing the VM left by an install that did not complete..."
+  lima stop --force "$VM" >>"$LIMA_LOG" 2>&1 || true
+  lima delete --force "$VM" >>"$LIMA_LOG" 2>&1 || true
+  # The failed attempt may have formatted its volume in the bucket: start
+  # from a new name so the new metadata does not meet the old data.
+  if grep -qE '^VOLUME_NAME=fluix-.+-[0-9a-f]{6}$' "$FLUIX_HOME/config.env"; then
+    sed -i '' -E "s/^(VOLUME_NAME=fluix-.+-)[0-9a-f]{6}\$/\1$(openssl rand -hex 3)/" "$FLUIX_HOME/config.env"
+  fi
+}
+
+# Debian ships inside the package: some office DNS servers do not resolve
+# cloud.debian.org, and the download was the first thing to fail for a tester.
+create_vm() {
+  local disk_gib="$1" set_image=()
+  if [ -f "$IMAGE" ]; then
+    set_image=(--set ".images = [{\"location\": \"$IMAGE\", \"arch\": \"aarch64\", \"digest\": \"$(cat "$IMAGE.digest")\"}]")
+  fi
+  log "Creating the VM (first time, a few minutes)..."
+  lima create --name="$VM" --tty=false --disk="$disk_gib" ${set_image[@]+"${set_image[@]}"} "$FLUIX_HOME/vm/lima.yaml" >>"$LIMA_LOG" 2>&1
+}
+
 cmd_setup() {
   [ -f "$FLUIX_HOME/config.env" ] || die "missing $FLUIX_HOME/config.env"
   local used=0 limit disk_gib conf
+  discard_failed_vm
   if [ -n "$(vm_status)" ]; then
     start_vm
     used=$(cache_used_mb)
@@ -210,8 +265,7 @@ cmd_setup() {
     # The VM's disk only needs to hold the cache plus Debian. Its size is fixed
     # here, at creation: later setups change the cache limit, not the disk.
     disk_gib=$(( limit / 1024 + 10 ))
-    log "Creating the VM (first time: downloads Debian, a few minutes)..."
-    lima create --name="$VM" --tty=false --disk="$disk_gib" "$FLUIX_HOME/vm/lima.yaml" >>"$LIMA_LOG" 2>&1
+    create_vm "$disk_gib"
     start_vm
   fi
   log "Installing the drive in the VM (cache up to $(( limit / 1024 )) GB)..."
@@ -227,6 +281,7 @@ cmd_setup() {
   rm -f "$STOPPED_FLAG"
   install_agent
   mount_share
+  touch "$INSTALLED_MARK"
   log "Ready: $(mount_point)"
 }
 

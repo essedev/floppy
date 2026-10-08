@@ -12,7 +12,11 @@ if ! command -v smbd >/dev/null || ! command -v fusermount3 >/dev/null; then
   apt-get install -y -q --no-install-recommends samba samba-vfs-modules fuse3 ca-certificates curl
 fi
 
-if ! juicefs version 2>/dev/null | grep -q "$JUICEFS_VERSION"; then
+# The package ships the binary (no GitHub download from an office network);
+# the download stays as a fallback for a package without it.
+if [ -f juicefs ]; then
+  install -m 755 juicefs /usr/local/bin/juicefs
+elif ! juicefs version 2>/dev/null | grep -q "$JUICEFS_VERSION"; then
   arch=$(dpkg --print-architecture)
   curl -fsSL "https://github.com/juicedata/juicefs/releases/download/v${JUICEFS_VERSION}/juicefs-${JUICEFS_VERSION}-linux-${arch}.tar.gz" \
     | tar -xz -C /usr/local/bin juicefs

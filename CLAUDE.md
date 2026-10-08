@@ -45,6 +45,12 @@ Non ci sono comandi di qualità: gli script si controllano almeno con `bash -n`.
 
 **La VM non vede il disco del Mac.** Il controllo di spazio di JuiceFS (`--free-space-ratio`) guarda il disco della VM, che si crede grande; sul Mac di una tester la cache ha riempito il disco e il filesystem della VM è andato in errore. I limiti di spazio si calcolano dal lato Mac (`cache_limit_mb`, `RESERVE_MB`, il controllo nel `tick`), e una VM "Running" per Lima può essere rotta dentro (`vm_healthy`).
 
+**Nessun messaggio dello script nel log, e fd 3 chiuso per limactl.** Le funzioni girano spesso con l'output rediretto (`lima start >>lima.log`) e la trap di errore eredita quella redirezione: scriveva i suoi blocchi dentro `lima.log`, una volta per livello di funzione, e da una tester il log ha riempito il disco. I messaggi vanno su fd 3, il terminale salvato all'avvio. Ma `lima start` lascia un host agent in background che eredita fd 3 e tiene aperto per sempre il terminale dell'installazione: `lima()` lo chiude (`3>&-`).
+
+**`/bin/bash` di macOS è la 3.2**: con `set -u` un array vuoto espanso con `"${a[@]}"` è un errore. Si scrive `${a[@]+"${a[@]}"}`.
+
+**Niente rete esterna durante l'installazione oltre ai pacchetti Debian.** Il DNS di un ufficio non risolveva `cloud.debian.org`: immagine Debian e JuiceFS stanno nello zip (`scripts/package.sh`).
+
 **`systemctl is-active` con più unità risponde sì se almeno una è attiva.** Un controllo su `fluix-mount smbd` insieme non ha visto Samba fermo. Una unità per chiamata.
 
 **Percorsi assoluti per gli strumenti di sistema.** In alcuni shell e sotto launchd `/usr/sbin` non è nel PATH: `diskutil` "non trovato" ha fatto fallire in silenzio i rimontaggi di un benchmark. Si scrive `/usr/sbin/diskutil`, `/usr/bin/osascript`, `/sbin/mount`.

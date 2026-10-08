@@ -25,6 +25,23 @@ curl -fsSL -o "$work/$tarball" "$base/$tarball"
 tar -xzf "$work/$tarball" -C "$pkg/lima" bin/limactl libexec share/lima
 
 cp -R macos/bin macos/vm macos/install.sh "$pkg/"
+
+# Debian image: the one Lima's own template pins, verified with its digest.
+template="$pkg/lima/share/lima/templates/_images/debian-13.yaml"
+image_url=$(grep -oE 'https://[^"]*genericcloud-arm64[^"]*\.qcow2' "$template" | head -1)
+image_digest=$(grep -A2 "$image_url" "$template" | grep -oE 'sha512:[0-9a-f]+')
+[ -n "$image_url" ] && [ -n "$image_digest" ] || { echo "Debian image not found in $template" >&2; exit 1; }
+curl -fsSL -o "$pkg/vm/debian.qcow2" "$image_url"
+echo "${image_digest#sha512:}  $pkg/vm/debian.qcow2" | shasum -a 512 -c - >/dev/null
+echo "$image_digest" > "$pkg/vm/debian.qcow2.digest"
+
+# JuiceFS for the VM, from the release the guest install expects.
+juicefs_version=$(sed -n 's/^JUICEFS_VERSION=//p' macos/vm/guest/guest-install.sh)
+jfs="juicefs-${juicefs_version}-linux-arm64.tar.gz"
+jbase="https://github.com/juicedata/juicefs/releases/download/v${juicefs_version}"
+curl -fsSL -o "$work/$jfs" "$jbase/$jfs"
+(cd "$work" && curl -fsSL "$jbase/checksums.txt" | grep " $jfs\$" | shasum -a 256 -c - >/dev/null)
+tar -xzf "$work/$jfs" -C "$pkg/vm/guest" juicefs
 install -m 600 "$config" "$pkg/config.env"
 
 mkdir -p "$out"
