@@ -12,7 +12,7 @@ Stato: pacchetto di test per macOS sul bucket OVH di Milano, in prova sul Mac di
 
 ```bash
 cp macos/config.env.example my-test.env   # compila bucket, chiavi, SMB_PASSWORD
-scripts/package.sh my-test.env            # crea dist/fluix.zip
+scripts/package.sh my-test.env            # crea dist/fluix.zip (serve Docker acceso)
 ```
 
-Chi lo riceve scompatta lo zip e lancia `bash fluix/install.sh` dal Terminale: il disco compare nel Finder come Fluix. Comandi: `~/.fluix/bin/fluix status|start|stop|warmup|free|uninstall`. Lo zip (circa 400 MB, con dentro l'immagine Debian e JuiceFS) contiene le chiavi del bucket: si passa in privato. Il disco della VM si dimensiona alla creazione sul tetto della cache (`CACHE_SIZE_MB`, ridotto se il Mac ha poco spazio) e poi non cambia.
+Chi lo riceve scompatta lo zip e lancia `bash fluix/install.sh` dal Terminale: il disco compare nel Finder come Fluix. Comandi: `~/.fluix/bin/fluix status|start|stop|warmup|free|uninstall`. Lo zip (circa 445 MB, con dentro l'immagine Debian, JuiceFS e i pacchetti Debian di Samba e FUSE, così l'installazione non scarica niente) contiene le chiavi del bucket: si passa in privato. Il disco della VM si dimensiona alla creazione sul tetto della cache (`CACHE_SIZE_MB`, ridotto se il Mac ha poco spazio) e poi non cambia.

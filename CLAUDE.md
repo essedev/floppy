@@ -16,7 +16,7 @@ Repo privato. Prosa dei doc in italiano; codice, commenti e commit in inglese.
 ## Comandi
 
 ```bash
-scripts/package.sh my-test.env [dist]    # zip per un tester: Lima + comando + VM + config (contiene le chiavi)
+scripts/package.sh my-test.env [dist]    # zip per un tester: Lima + comando + VM + config (contiene le chiavi); vuole Docker acceso
 bash fluix/install.sh             # dal pacchetto scompattato: installa in ~/.fluix e monta
 ~/.fluix/bin/fluix status  # setup|start|stop|status|warmup <path>|free <path>|uninstall
 
@@ -49,7 +49,7 @@ Non ci sono comandi di qualità: gli script si controllano almeno con `bash -n`.
 
 **`/bin/bash` di macOS è la 3.2**: con `set -u` un array vuoto espanso con `"${a[@]}"` è un errore. Si scrive `${a[@]+"${a[@]}"}`.
 
-**Niente rete esterna durante l'installazione oltre ai pacchetti Debian.** Il DNS di un ufficio non risolveva `cloud.debian.org`: immagine Debian e JuiceFS stanno nello zip (`scripts/package.sh`).
+**Niente rete esterna durante l'installazione.** Il DNS di un ufficio non risolveva `cloud.debian.org`: immagine Debian, JuiceFS e i `.deb` di Samba e FUSE stanno nello zip (`scripts/package.sh`). I `.deb` sono l'intera chiusura delle dipendenze, presa in un container `debian:trixie` con uno stato di dpkg vuoto: scaricati solo con `--download-only` normale mancherebbero le librerie che il container ha già e l'immagine magari in una versione più vecchia. La lista sta in `PACKAGES` di `guest-install.sh`, che `package.sh` legge; `deb.debian.org` resta come riserva se il repository locale fallisce.
 
 **`systemctl is-active` con più unità risponde sì se almeno una è attiva.** Un controllo su `fluix-mount smbd` insieme non ha visto Samba fermo. Una unità per chiamata.
 

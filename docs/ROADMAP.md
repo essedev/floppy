@@ -24,7 +24,7 @@ Tester prova sul suo Mac (macOS 27) lo zip di `scripts/package.sh` rifatto l'08/
 
 Aperti, da chiudere prima del pilota:
 
-- **Pacchetti Debian scaricati all'installazione**: dentro la VM `guest-install.sh` scarica Samba e FUSE da `deb.debian.org`. È l'ultimo download rimasto, con lo stesso rischio del DNS d'ufficio che ha già fatto fallire `cloud.debian.org` ([CYCLES.md](CYCLES.md)). Strada probabile: i `.deb` nello zip, come l'immagine e JuiceFS.
+- **Prossimo zip per Tester**: i pacchetti Debian di Samba e FUSE ora sono nello zip e l'installazione non scarica più niente ([ARCHITECTURE.md](ARCHITECTURE.md#pacchetto-macos)). Lo zip che ha lei li scarica ancora da `deb.debian.org`: le modifiche si raccolgono e le si manda uno zip solo dopo il suo feedback, invece di farla reinstallare a metà test.
 - **Password SMB nell'URL di montaggio**: passa in `mount volume` ed è visibile in `ps` per un istante ([CONVENTIONS.md](CONVENTIONS.md#segreti)). Va spostata nel Portachiavi di macOS.
 - **macOS 27**: non ancora validato, lo dice la fine del test di Tester.
 

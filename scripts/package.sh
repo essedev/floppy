@@ -42,6 +42,25 @@ jbase="https://github.com/juicedata/juicefs/releases/download/v${juicefs_version
 curl -fsSL -o "$work/$jfs" "$jbase/$jfs"
 (cd "$work" && curl -fsSL "$jbase/checksums.txt" | grep " $jfs\$" | shasum -a 256 -c - >/dev/null)
 tar -xzf "$work/$jfs" -C "$pkg/vm/guest" juicefs
+
+# Debian packages for the VM as a flat local repository. An empty dpkg status
+# makes apt fetch the whole dependency closure, not only what the container
+# lacks: in the VM apt then takes just what the image is missing.
+packages=$(sed -n 's/^PACKAGES=(\(.*\))$/\1/p' macos/vm/guest/guest-install.sh)
+[ -n "$packages" ] || { echo "PACKAGES not found in guest-install.sh" >&2; exit 1; }
+docker info >/dev/null 2>&1 || { echo "Docker is needed to fetch the Debian packages" >&2; exit 1; }
+mkdir -p "$pkg/vm/guest/debs"
+docker run --rm --platform linux/arm64 -e PACKAGES="$packages" \
+  -v "$pkg/vm/guest/debs:/out" debian:trixie bash -euc '
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update -qq
+    apt-get install -y -qq --no-install-recommends apt-utils >/dev/null
+    : > /tmp/empty-status
+    mkdir -p /tmp/archives/partial
+    apt-get install -y -qq --download-only --no-install-recommends \
+      -o Dir::State::status=/tmp/empty-status -o Dir::Cache::archives=/tmp/archives $PACKAGES >/dev/null
+    cp /tmp/archives/*.deb /out/
+    cd /out && apt-ftparchive packages . > Packages' >/dev/null
 install -m 600 "$config" "$pkg/config.env"
 
 mkdir -p "$out"

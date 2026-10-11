@@ -6,10 +6,32 @@ cd "$(dirname "$0")"
 
 JUICEFS_VERSION=1.4.1
 
+PACKAGES=(samba samba-vfs-modules fuse3)
+
 export DEBIAN_FRONTEND=noninteractive
 if ! command -v smbd >/dev/null || ! command -v fusermount3 >/dev/null; then
-  apt-get update -q
-  apt-get install -y -q --no-install-recommends samba samba-vfs-modules fuse3 ca-certificates curl
+  # The package ships the .debs as a local repository (an office DNS already
+  # failed on a Debian host), so apt resolves against what the image has and
+  # downloads nothing. deb.debian.org stays as a fallback.
+  local_ok=false
+  if [ -f debs/Packages ]; then
+    echo "deb [trusted=yes] file:$PWD/debs ./" > /tmp/fluix-local.list
+    # The copied files are private to the VM user (the zip is built with umask
+    # 077): apt's _apt sandbox user could not read them.
+    local_apt=(-o Dir::Etc::SourceList=/tmp/fluix-local.list -o Dir::Etc::SourceParts=-
+      -o APT::Sandbox::User=root -o Acquire::Languages=none)
+    if apt-get update -q "${local_apt[@]}" \
+      && apt-get install -y -q --no-install-recommends "${local_apt[@]}" "${PACKAGES[@]}"; then
+      local_ok=true
+    else
+      echo "guest-install: bundled packages failed, trying deb.debian.org" >&2
+    fi
+    rm -f /tmp/fluix-local.list
+  fi
+  if [ "$local_ok" = false ]; then
+    apt-get update -q
+    apt-get install -y -q --no-install-recommends "${PACKAGES[@]}" ca-certificates curl
+  fi
 fi
 
 # The package ships the binary (no GitHub download from an office network);
