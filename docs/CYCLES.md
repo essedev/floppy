@@ -5,7 +5,8 @@ Log of the work done, most recent first. Plans are in [ROADMAP.md](ROADMAP.md), 
 ## 4. Offline install and open source (16/10/2026)
 
 - **Debian packages in the zip**: Samba, FUSE and their whole dependency closure (94 `.deb`, 38 MB) ship as a local apt repository, fetched by `package.sh` from a `debian:trixie` container with an empty dpkg status. The install no longer reaches any external host; `deb.debian.org` stays as a fallback. Tested on a VM from the zip's image with `deb.debian.org` blocked (18 packages installed from the zip) and with a corrupted `.deb` (fallback taken, same 18 packages).
-- **Renamed to Fluix** and prepared as a public repository: command, disk, VM, services and data folder carry the new name, the documentation is in English with an Italian README, MIT license.
+- **Renamed to Fluix** and prepared as a public repository: command, disk, VM, services and data folder carry the new name, the documentation is in English with an Italian README, MIT license. The git history was rewritten to drop the old name and private references.
+- **`make check`**: `bash -n`, `shellcheck` and the prose language check on every script; shellcheck found an unguarded `rm -rf` in `install.sh`, fixed.
 
 ## 3. A tester's second install: DNS and log (08/10/2026)
 
