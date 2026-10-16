@@ -18,7 +18,7 @@ else
   echo "New Fluix install."
 fi
 mkdir -p "$FLUIX_HOME"
-rm -rf "$FLUIX_HOME/lima" "$FLUIX_HOME/bin" "$FLUIX_HOME/vm"
+rm -rf "${FLUIX_HOME:?}/lima" "${FLUIX_HOME:?}/bin" "${FLUIX_HOME:?}/vm"
 cp -R lima bin vm "$FLUIX_HOME/"
 # A log grown by an earlier failed attempt is of no use and can be huge.
 if [ -f "$FLUIX_HOME/lima.log" ] && [ "$(du -m "$FLUIX_HOME/lima.log" | cut -f1)" -gt 100 ]; then
@@ -30,7 +30,7 @@ if [ ! -f "$FLUIX_HOME/config.env" ]; then
   # Empty VOLUME_NAME: one volume per Mac, named after the user plus a random
   # suffix, so the same package can go to several people on one bucket.
   if grep -q '^VOLUME_NAME=$' "$FLUIX_HOME/config.env"; then
-    user=$(id -un | tr 'A-Z' 'a-z' | tr -c 'a-z0-9\n' '-' | cut -c1-30)
+    user=$(id -un | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9\n' '-' | cut -c1-30)
     name="fluix-${user}-$(openssl rand -hex 3)"
     sed -i '' "s/^VOLUME_NAME=$/VOLUME_NAME=$name/" "$FLUIX_HOME/config.env"
   fi

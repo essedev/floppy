@@ -347,10 +347,12 @@ cmd_status() {
   else
     printf 'Disk:    not mounted\n'
   fi
+  # shellcheck disable=SC2016 # literal backticks around the command name
   [ -f "$STOPPED_FLAG" ] && printf 'Stopped: by the user, `fluix start` brings it back\n'
   printf 'Mac:     %s GB free\n' "$(( $(mac_free_mb) / 1024 ))"
   if [ "$st" = Running ]; then
     printf 'Drive:   %s\n' "$(in_vm systemctl is-active fluix-mount || true)"
+    # shellcheck disable=SC2016 # $CACHE_SIZE_MB expands inside the VM
     printf 'Cache:   %s MB of %s MB\n' "$(cache_used_mb)" \
       "$(in_vm sudo sh -c '. /etc/fluix/config.env; echo $CACHE_SIZE_MB' 2>/dev/null || echo '?')"
   fi
