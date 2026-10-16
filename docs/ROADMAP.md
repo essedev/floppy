@@ -1,51 +1,51 @@
 # Roadmap
 
-Il principio è quello di [ARCHITECTURE.md](ARCHITECTURE.md#principio-guida): si costruisce solo ciò che il passo precedente ha dimostrato necessario. Il lavoro già fatto sta in [CYCLES.md](CYCLES.md).
+The principle is the one in [ARCHITECTURE.md](ARCHITECTURE.md#guiding-principle): build only what the previous step proved necessary. Work already done is in [CYCLES.md](CYCLES.md).
 
-## 1. Domande aperte
+## 1. Open questions
 
-Da chiudere prima del pilota, perché cambiano la scelta:
+To settle before a pilot, because they change the choice:
 
-- **Quante persone montano e quanti TB attivi**: decidono tra SpaceFS e Fluix.
-- **Dove lavorano**: stesso ufficio (allora NAS + sync su S3) o da posti diversi (filesystem in streaming).
-- **Che connessione hanno**: con FTTC il progetto non regge, con FTTH sì.
-- **Requisiti sui dati**: se il girato è di clienti, regione e GDPR decidono anche SpaceFS (regione non dichiarata).
-- **Versioning del bucket di produzione**: spento nel test, da decidere ([ARCHITECTURE.md](ARCHITECTURE.md#soluzione-juicefs-su-ovh)).
-- Da verificare: PostgreSQL gestito OVH a Milano; regione 1-AZ o 3-AZ per la produzione; prezzo dello spazio extra SpaceFS sul piano Teams.
+- **How many people edit and how many active TB**: they decide between SpaceFS and Fluix.
+- **Where they work**: same office (then NAS + sync to S3) or from different places (streaming filesystem).
+- **What connection they have**: on FTTC the project does not hold up, on FTTH it does.
+- **Data requirements**: if the footage belongs to clients, region and GDPR also decide on SpaceFS (region not stated).
+- **Versioning of the production bucket**: off in the test, to be decided ([ARCHITECTURE.md](ARCHITECTURE.md#solution-juicefs-on-ovh)).
+- To check: OVH managed PostgreSQL in Milan; 1-AZ or 3-AZ region for production; price of SpaceFS extra space on the Teams plan.
 
-## 2. Test sul Mac della tester (in corso)
+## 2. Test on a tester's Mac (in progress)
 
-Tester prova sul suo Mac (macOS 27) lo zip di `scripts/package.sh` rifatto l'08/10/2026: bucket `fluix-test`, VM da 1 GiB, `CACHE_SIZE_MB=15360`, quindi cache fino a 15 GB e VM fino a circa 25 GB sul Mac. Il disco della VM si fissa alla creazione: alzare il tetto della cache oltre quella misura vuol dire reinstallare. Ogni installazione ha il suo disco, con i metadati nella VM: si prova il disco sul suo Mac, con CapCut e la sua linea, non la condivisione.
+A tester runs on their Mac (macOS 27) the zip from `scripts/package.sh` rebuilt on 08/10/2026: a test bucket, a 1 GiB VM, `CACHE_SIZE_MB=15360`, so a cache up to 15 GB and a VM up to about 25 GB on the Mac. The VM's disk is fixed at creation: raising the cache ceiling beyond that size means reinstalling. Every install has its own disk, with the metadata in the VM: the test covers the disk on that Mac, with CapCut and that line, not sharing.
 
-- **Stato**: in corso, di base funzionante. La lista dei test: installazione, CapCut con export sul Mac e su Fluix, riapertura del progetto, stop e riavvio del Mac, progetto più grande della cache, cambio di rete, `fluix free`. Lo stop l'aveva già provato Simone, ed è da lì che è nato il fix di `Fluix-1`; riavvio vero e cambio di rete li prova lei.
-- **Da annotare con lei**: cosa scatta, cosa va in errore, quanto ci mette a caricare.
-- **Salti a freddo**: provare blocchi da 1 MB invece che da 4 su un secondo volume nello stesso bucket. Se conviene, si rifà lo zip.
-- **A fine test**: revocare la chiave dell'utente di test e cancellare dal bucket il volume di prova di Simone (`fluix-doppia-<codice>`, con `bench/` e `test/`) e quello di Tester (`fluix-tester-<codice>`); in tutto il bucket si svuota, perché è solo di test. I volumi orfani delle installazioni fallite (`fluix-tester-883398/`, `fluix/`) sono già cancellati.
+- **Status**: in progress, basically working. The test list: install, CapCut with an export to the Mac and to Fluix, reopening the project, sleep and restart of the Mac, a project larger than the cache, a network change, `fluix free`. Sleep was already tested during development, and that is where the `Fluix-1` fix came from; a real restart and a network change are on the tester.
+- **To note with the tester**: what stutters, what errors out, how long uploads take.
+- **Cold seeks**: try 1 MB blocks instead of 4 on a second volume in the same bucket. If it pays off, rebuild the zip.
+- **At the end of the test**: revoke the test user's key and empty the test bucket, which holds only test volumes.
 
-Aperti, da chiudere prima del pilota:
+Open, to close before a pilot:
 
-- **Prossimo zip per Tester**: i pacchetti Debian di Samba e FUSE ora sono nello zip e l'installazione non scarica più niente ([ARCHITECTURE.md](ARCHITECTURE.md#pacchetto-macos)). Lo zip che ha lei li scarica ancora da `deb.debian.org`: le modifiche si raccolgono e le si manda uno zip solo dopo il suo feedback, invece di farla reinstallare a metà test.
-- **Password SMB nell'URL di montaggio**: passa in `mount volume` ed è visibile in `ps` per un istante ([CONVENTIONS.md](CONVENTIONS.md#segreti)). Va spostata nel Portachiavi di macOS.
-- **macOS 27**: non ancora validato, lo dice la fine del test di Tester.
+- **Next zip for the tester**: the Debian packages for Samba and FUSE are now in the zip and the install downloads nothing ([ARCHITECTURE.md](ARCHITECTURE.md#macos-package)). The tester's current zip still downloads them from `deb.debian.org`, and it predates the rename: the next one installs as Fluix, so the disk becomes `/Volumes/Fluix` and CapCut projects pointing at the old disk need their media relinked. Changes are batched into a single zip after the tester's feedback, instead of a reinstall halfway through the test.
+- **SMB password in the mount URL**: it goes through `mount volume` and is visible in `ps` for a moment ([CONVENTIONS.md](CONVENTIONS.md#secrets)). It has to move to the macOS Keychain.
+- **macOS 27**: not validated yet, the end of the tester's run will tell.
 
-## 3. Pilota
+## 3. Pilot
 
-Un disco condiviso, una o due settimane di lavoro reale in CapCut. Setup stimato in circa un giorno (congettura).
+One shared disk, one or two weeks of real work in CapCut. Setup estimated at about a day (a guess).
 
-- PostgreSQL gestito in `META_URL`: lo zip diventa unico per tutti e chi lo installa vede lo stesso disco.
-- Le due Azioni rapide nel Finder al posto di `fluix warmup` e `fluix free`.
-- Da misurare: scrubbing su clip non in cache, caricamento del girato, comportamento di CapCut con file lenti, prima apertura di una cartella con molti video.
-- Da annotare: ogni volta che qualcosa va storto, cosa e quando. È l'input della fase 6.
+- Managed PostgreSQL in `META_URL`: the zip becomes the same for everyone, and whoever installs it sees the same disk.
+- The two Finder Quick Actions instead of `fluix warmup` and `fluix free`.
+- To measure: scrubbing on uncached clips, uploading footage, how CapCut behaves with slow files, first opening of a folder with many videos.
+- To note: every time something goes wrong, what and when. It is the input for phase 6.
 
-## 4. Confronto con SpaceFS
+## 4. Comparison with SpaceFS
 
-In parallelo al pilota, la prova di 7 giorni di SpaceFS Teams sullo stesso progetto e lo stesso test. Se SpaceFS regge, la differenza di prezzo va pesata contro il tempo di gestione di Fluix.
+Alongside the pilot, the 7-day trial of SpaceFS Teams on the same project and the same test. If SpaceFS holds up, the price difference has to be weighed against the time it takes to run Fluix.
 
-## 5. Rollout al team
+## 5. Team rollout
 
-Solo se il pilota regge e il confronto premia Fluix: installazione sui Mac in uno script, backup (dump giornaliero, replica su Backblaze), avviso se database o bucket non rispondono, una pagina di procedure per chi gestisce.
+Only if the pilot holds and the comparison favors Fluix: install on the Macs in one script, backups (daily dump, replica on Backblaze), an alert if the database or the bucket stop answering, a page of procedures for whoever runs it.
 
-## 6. App nella barra dei menu
+## 6. Menu bar app
 
-- **Subito, senza aspettare il pilota**: scegliere la variante del [mockup](ARCHITECTURE.md#interfaccia) e chiudere le decisioni che lascia aperte, poi lo scheletro Tauri da Portsage con il pannello collegato al comando `fluix`.
-- **Dopo il pilota**: solo le funzioni per i problemi osservati, scelte dalla lista in [ARCHITECTURE.md](ARCHITECTURE.md#interfaccia).
+- **Now, without waiting for the pilot**: pick the [mockup](ARCHITECTURE.md#interface) variant and close the decisions it leaves open, then the Tauri skeleton from Portsage with the panel wired to the `fluix` command.
+- **After the pilot**: only the features for observed problems, picked from the list in [ARCHITECTURE.md](ARCHITECTURE.md#interface).

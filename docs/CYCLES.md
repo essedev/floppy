@@ -1,36 +1,41 @@
-# Cicli
+# Cycles
 
-Log del lavoro fatto, il più recente in cima. I piani stanno in [ROADMAP.md](ROADMAP.md), il perché delle scelte in [ARCHITECTURE.md](ARCHITECTURE.md).
+Log of the work done, most recent first. Plans are in [ROADMAP.md](ROADMAP.md), the reasons behind the choices in [ARCHITECTURE.md](ARCHITECTURE.md).
 
-## 3. Seconda installazione della tester: DNS e log (08/10/2026)
+## 4. Offline install and open source (16/10/2026)
 
-- **Cosa è successo**: la creazione della VM è fallita perché il DNS dell'ufficio risponde SERVFAIL per `cloud.debian.org` (già causa del fallimento silenzioso del 6/10). Rilanciando, `install.sh` ha detto "Updating" su una VM mai finita, l'avvio si è bloccato e `lima.log` ha superato i 50 GB riempiendo il disco. Diagnosi della tester, verificata: i blocchi di errore finivano nel log. La copia di 9,7 GB del 6/10 era andata a 14 MB/s, il suo upload.
-- **Correzioni**: immagine Debian e JuiceFS dentro lo zip (406 MB), VM creata dal file locale (verificato nel log di Lima); segnale di installazione completata, con VM a metà cancellata e ricreata; messaggi solo sul terminale, trap che scatta una volta, log accorciato oltre 50 MB, timeout di 5 minuti all'avvio.
-- **Provato**: lo stato della tester riprodotto con il Lima vero e un'immagine irraggiungibile (VM a metà riconosciuta e ricreata, log senza blocchi di errore); installazione pulita dallo zip nuovo in circa 90 s, disco della VM di 35 GiB.
-- **Trovato provando**: fd 3 ereditato dall'host agent di Lima teneva aperto il terminale dell'installazione; chiuso per limactl.
-- **Consegna**: zip rifatto con `CACHE_SIZE_MB=15360` (cache fino a 15 GB, VM fino a circa 25 GB sul Mac) e passato alla tester, che ha reinstallato; il test è in corso ([ROADMAP.md](ROADMAP.md)). Cancellati dal bucket i volumi orfani `fluix-tester-883398/` e `fluix/`.
+- **Debian packages in the zip**: Samba, FUSE and their whole dependency closure (94 `.deb`, 38 MB) ship as a local apt repository, fetched by `package.sh` from a `debian:trixie` container with an empty dpkg status. The install no longer reaches any external host; `deb.debian.org` stays as a fallback. Tested on a VM from the zip's image with `deb.debian.org` blocked (18 packages installed from the zip) and with a corrupted `.deb` (fallback taken, same 18 packages).
+- **Renamed to Fluix** and prepared as a public repository: command, disk, VM, services and data folder carry the new name, the documentation is in English with an Italian README, MIT license.
 
-## 2. Il primo test di una collega e le difese sullo spazio (06/10/2026)
+## 3. A tester's second install: DNS and log (08/10/2026)
 
-- **Incidente**: sul Mac della tester (macOS 27.0.1, 16 GB di RAM, 10 GB liberi su 228) il caricamento di 9,9 GB e l'uso di CapCut hanno riempito il disco del Mac. Il file della VM non è più cresciuto, il filesystem della VM è andato in errore, CapCut ha visto "disconnessione dal server" e ogni comando nella VM rispondeva `Input/output error`. I 9,9 GB erano già tutti su OVH. Anche la prima installazione era fallita in silenzio.
-- **Causa**: il controllo di spazio di JuiceFS guarda la VM, non il Mac.
-- **Correzioni**: tetto della cache calcolato sullo spazio del Mac e disco della VM dimensionato su quel tetto; agente ogni 2 minuti che riavvia VM e servizi, libera la cache col Mac quasi pieno e monta il disco se manca; `fstrim` dopo `free`; `status` che vede una VM rotta; errori che mostrano il log; aggiornamento esplicito in `install.sh`.
-- **Trovati provando le correzioni**: dopo uno stop del Mac l'agente rimontava il disco come `Fluix-1`, che rompe i progetti CapCut; un agente impaziente smontava a forza un disco occupato da una copia; `systemctl is-active` su due unità non vedeva Samba fermo. Corretti e riprovati: 3 clip copiati con 5 controlli dell'agente in parallelo, identici byte per byte.
-- **Per la tester**: reinstallazione pulita dopo aver liberato spazio; il volume orfano va cancellato dal bucket (fatto nel ciclo 3).
+- **What happened**: creating the VM failed because the office DNS answers SERVFAIL for `cloud.debian.org` (already the cause of the silent failure on 6/10). On the rerun, `install.sh` said "Updating" on a VM that never finished, the start hung and `lima.log` went past 50 GB, filling the disk. The tester's diagnosis, verified: the error blocks ended up in the log. The 9.7 GB copy on 6/10 had run at 14 MB/s, the tester's upload.
+- **Fixes**: Debian image and JuiceFS inside the zip (406 MB), VM created from the local file (verified in Lima's log); a completed-install marker, with a half-made VM deleted and recreated; messages only on the terminal, a trap that fires once, the log trimmed past 50 MB, a 5-minute start timeout.
+- **Tested**: the tester's state reproduced with the real Lima and an unreachable image (half-made VM recognized and recreated, log without error blocks); a clean install from the new zip in about 90 s, a 35 GiB VM disk.
+- **Found while testing**: fd 3, inherited by Lima's host agent, kept the install's terminal open; closed for limactl.
+- **Delivery**: zip rebuilt with `CACHE_SIZE_MB=15360` (cache up to 15 GB, VM up to about 25 GB on the Mac) and handed to the tester, who reinstalled; the test is in progress ([ROADMAP.md](ROADMAP.md)). The orphan volumes of the failed installs were deleted from the bucket.
 
-## 1. Dall'analisi al pacchetto di test (06/10/2026)
+## 2. A tester's first run and the space guards (06/10/2026)
 
-**Obiettivo**: capire se un disco remoto su S3 regge il montaggio video da Mac, e arrivare a qualcosa da far provare a una collega.
+- **Incident**: on the tester's Mac (macOS 27.0.1, 16 GB of RAM, 10 GB free out of 228) uploading 9.9 GB and using CapCut filled the Mac's disk. The VM's file could not grow any more, the VM's filesystem failed, CapCut saw "disconnected from server" and every command in the VM answered `Input/output error`. The 9.9 GB were already all on OVH. The first install had also failed silently.
+- **Cause**: JuiceFS's space check looks at the VM, not the Mac.
+- **Fixes**: a cache ceiling computed from the Mac's space and a VM disk sized on that ceiling; an agent every 2 minutes that restarts the VM and services, frees the cache when the Mac is nearly full and mounts the disk if it is missing; `fstrim` after `free`; a `status` that sees a broken VM; errors that show the log; an explicit update in `install.sh`.
+- **Found while testing the fixes**: after the Mac slept the agent remounted the disk as `Fluix-1`, which breaks CapCut projects; an impatient agent force-unmounted a disk busy with a copy; `systemctl is-active` on two units missed a stopped Samba. Fixed and retested: 3 clips copied with 5 agent checks in parallel, identical byte for byte.
+- **For the tester**: a clean reinstall after freeing space; the orphan volume to delete from the bucket (done in cycle 3).
 
-**Fatto**:
+## 1. From the analysis to the test package (06/10/2026)
 
-- **Analisi**: categoria dei filesystem in streaming (LucidLink, SpaceFS), scelta di JuiceFS su OVH, costi e alternative ([ARCHITECTURE.md](ARCHITECTURE.md)).
-- **Spike locale** (`spike/`): Garage in Docker come S3, latenza e banda simulate con Toxiproxy, JuiceFS in un container Linux condiviso al Mac via SMB. JuiceFS direttamente sul Mac richiede l'estensione del kernel di macFUSE (FUSE-T e FSKit non bastano), la macchina Linux con SMB no.
-- **Pacchetto macOS** (`macos/`, `scripts/package.sh`): VM Lima con backend `vz`, comando `fluix`, zip con `install.sh`, nessun permesso di amministratore. Un volume per Mac generato all'installazione, così lo stesso zip va a più persone.
-- **Test su OVH Milano**: bucket `fluix-test` con un utente dedicato. Riproduzione fuori cache a 12 MB/s sulla linea di Simone, salto a freddo intorno al secondo, in cache come un disco locale. Corretti lungo la strada il punto di montaggio `Fluix-1` e la cache dei file caricati (`--cache-large-write`).
-- **RAM della VM**: da 2.060 a 1.035 MB sul Mac, con `memory` a 1 GiB e `--buffer-size` a 256 MB, a parità di prestazioni.
-- **Mockup del pannello** nella barra dei menu (`mockups/panel.html`), tre varianti A, B e C.
+**Goal**: find out whether a remote disk on S3 holds up for video editing on a Mac, and get to something a tester can try.
 
-**Decisioni**: macchina Linux con SMB invece di macFUSE; solo macOS con lo strato del sistema isolato; zip privato invece di Homebrew per il test; app Tauri da Portsage invece di Swift, con una prima versione limitata a ciò che fa il comando. Motivi in [ARCHITECTURE.md](ARCHITECTURE.md).
+**Done**:
 
-**Prossimo passo**: il test sul Mac della collega ([ROADMAP.md](ROADMAP.md)).
+- **Analysis**: the streaming filesystem category (LucidLink, SpaceFS), the choice of JuiceFS on OVH, costs and alternatives ([ARCHITECTURE.md](ARCHITECTURE.md)).
+- **Local spike** (`spike/`): Garage in Docker as S3, latency and bandwidth simulated with Toxiproxy, JuiceFS in a Linux container shared to the Mac over SMB. JuiceFS directly on the Mac needs macFUSE's kernel extension (FUSE-T and FSKit are not enough), the Linux machine with SMB does not.
+- **macOS package** (`macos/`, `scripts/package.sh`): a Lima VM with the `vz` backend, the `fluix` command, a zip with `install.sh`, no administrator rights. One volume per Mac generated at install time, so the same zip goes to several people.
+- **Test on OVH Milan**: a test bucket with a dedicated user. Uncached playback at 12 MB/s on a 170 Mbps home line, cold seeks around a second, cached like a local disk. Fixed along the way: the `Fluix-1` mount point and caching of uploaded files (`--cache-large-write`).
+- **VM RAM**: from 2,060 to 1,035 MB on the Mac, with `memory` at 1 GiB and `--buffer-size` at 256 MB, with the same performance.
+- **Panel mockup** for the menu bar (`mockups/panel.html`), three variants A, B and C.
+
+**Decisions**: a Linux machine with SMB instead of macFUSE; macOS only with the system layer isolated; a private zip instead of Homebrew for the test; a Tauri app from Portsage instead of Swift, with a first version limited to what the command does. Reasons in [ARCHITECTURE.md](ARCHITECTURE.md).
+
+**Next step**: the test on a tester's Mac ([ROADMAP.md](ROADMAP.md)).

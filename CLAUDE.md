@@ -1,107 +1,107 @@
 # CLAUDE.md
 
-Fluix è il disco remoto condiviso del team video di Acme: su un Mac compare nel Finder come **Fluix**, i file stanno su object storage S3 (OVH) attraverso JuiceFS. Su macOS JuiceFS gira in una VM Lima (Debian) e arriva al Mac via SMB, perché montato direttamente richiederebbe l'estensione del kernel di macFUSE. Oggi il prodotto è un comando bash (`macos/bin/fluix`) distribuito in uno zip privato; l'app Tauri nella barra dei menu è in progetto (`mockups/panel.html`).
+Fluix is a shared remote disk for video teams on macOS: it shows up in the Finder as **Fluix**, and the files live on S3 object storage (OVH) through JuiceFS. On macOS JuiceFS runs in a Lima VM (Debian) and reaches the Mac over SMB, because mounting it directly would need macFUSE's kernel extension. The engine is a bash command (`macos/bin/fluix`) shipped in a private zip; the menu bar app is designed in `mockups/panel.html`.
 
-Repo privato. Prosa dei doc in italiano; codice, commenti e commit in inglese.
+Public repository: code, comments, docs and commits in English; README.md is mirrored in README.it.md in the same commit.
 
-## Glossario
+## Glossary
 
-- **Disco / Fluix**: quello che l'utente vede nel Finder. **Volume**: il filesystem JuiceFS dietro, con un nome (`VOLUME_NAME`) e i suoi metadati. Un volume per Mac nel test, uno condiviso con PostgreSQL dopo.
-- **Metadati**: albero di file e cartelle di JuiceFS. Nel test stanno in SQLite **dentro la VM** (`/var/lib/fluix/meta.db`): perdere la VM rende illeggibili i dati nel bucket.
-- **Cache**: i blocchi già scaricati, sul disco della VM. Nella UI si chiama "disponibile su questo Mac"; **warmup** = "Rendi disponibile" (`fluix warmup`), **evict** = "Libera spazio" (`fluix free`).
-- **A freddo / a caldo**: letture di blocchi non in cache (passano dalla rete) o già in cache.
-- **Spike**: lo stack Docker in `spike/` (Garage come S3 locale, Toxiproxy per la latenza, JuiceFS in un container). Serve a misurare senza rete vera; non è il prodotto.
-- **L'utente**: chi monta video con CapCut, non tecnico. **Simone**: chi sviluppa e decide.
+The full glossary is in [docs/CONVENTIONS.md](docs/CONVENTIONS.md#glossary). The terms that matter most when changing code:
 
-## Comandi
+- **Disk / Fluix**: what the user sees in the Finder. **Volume**: the JuiceFS filesystem behind it, with a name (`VOLUME_NAME`) and its metadata.
+- **Metadata**: in the test they live in SQLite **inside the VM** (`/var/lib/fluix/meta.db`): losing the VM makes the data in the bucket unreadable.
+- **Cache**: blocks already downloaded, on the VM's disk. **Warmup** is "Make available" (`fluix warmup`), **evict** is "Free up space" (`fluix free`).
+- **The user**: someone editing with CapCut, not technical. **Simone**: who develops and decides.
+
+## Commands
 
 ```bash
-scripts/package.sh my-test.env [dist]    # zip per un tester: Lima + comando + VM + config (contiene le chiavi); vuole Docker acceso
-bash fluix/install.sh             # dal pacchetto scompattato: installa in ~/.fluix e monta
-~/.fluix/bin/fluix status  # setup|start|stop|status|warmup <path>|free <path>|uninstall
+make check                               # bash -n, shellcheck, prose language
+scripts/package.sh my-test.env [dist]    # zip for a tester: Lima + command + VM + config (holds the keys); needs Docker running
+bash fluix/install.sh                    # from the unpacked package: installs into ~/.fluix and mounts
+~/.fluix/bin/fluix status                # setup|start|stop|status|warmup <path>|free <path>|uninstall
 
-# Applicare modifiche del repo all'installazione di questo Mac (tiene VM e volume)
+# Apply repo changes to this Mac's install (keeps VM and volume)
 cp macos/bin/fluix ~/.fluix/bin/ && cp macos/vm/guest/* ~/.fluix/vm/guest/ \
   && ~/.fluix/bin/fluix setup
 
-# Dentro la VM
+# Inside the VM
 export LIMA_HOME=~/.fluix/vms
-~/.fluix/lima/bin/limactl shell --workdir / fluix <cmd>   # es. sudo journalctl -u fluix-mount
+~/.fluix/lima/bin/limactl shell --workdir / fluix <cmd>   # e.g. sudo journalctl -u fluix-mount
 
-# Spike locale
-spike/setup.sh                 # Garage + Toxiproxy + container drive, segreti in spike/.env
-spike/bench.sh                 # upload, letture a freddo/caldo, salti, warmup
+# Local spike
+spike/setup.sh                 # Garage + Toxiproxy + drive container, secrets in spike/.env
+spike/bench.sh                 # upload, cold/warm reads, seeks, warmup
 ```
 
-Non ci sono comandi di qualità: gli script si controllano almeno con `bash -n`.
+## Gotchas
 
-## Gotcha
+**Never `juicefs mount` directly on macOS.** With FUSE-T it fails (`no FUSE mount utility found`), with macFUSE's FSKit backend it hangs, and the only working path is the kernel extension, which makes every Mac go through recovery mode. JuiceFS runs in Linux (the VM), the Mac mounts SMB.
 
-**Mai `juicefs mount` direttamente su macOS.** Con FUSE-T fallisce (`no FUSE mount utility found`), con il backend FSKit di macFUSE resta appeso, e l'unica via che funziona è l'estensione del kernel, che obbliga ogni Mac a passare dalla modalità di recupero. JuiceFS gira in Linux (la VM), il Mac monta SMB.
+**The mount point must stay `/Volumes/Fluix`, but it is never assumed.** CapCut references videos by full path: with `Fluix-1` projects lose their files. macOS picks `-1` when the folder of a previous mount is still there, and it happened after the Mac slept. Mount only on a free name (`mount_share`), and read the mount point from `/sbin/mount` (`mount_point`), never `VOLUME=/Volumes/Fluix`.
 
-**Il punto di montaggio deve restare `/Volumes/Fluix`, ma non si dà per scontato.** CapCut richiama i video col percorso completo: con `Fluix-1` i progetti perdono i file. macOS sceglie `-1` quando la cartella di un montaggio precedente c'è ancora, ed è successo dopo uno stop del Mac. Si monta solo a nome libero (`mount_share`), e si legge il punto di montaggio da `/sbin/mount` (`mount_point`), mai `VOLUME=/Volumes/Fluix`.
+**Never unmount or remount a mounted disk automatically.** A disk busy with a large copy answers slowly and looks dead: the agent force-unmounted it halfway through a `cp` and the copy failed. `tick` mounts only if the disk is missing (`mount_share keep`); remounting is only in `fluix start`, asked for by the user, and never with `force`.
 
-**Mai smontare o rimontare in automatico un disco montato.** Un disco occupato da una copia grande risponde lento e sembra morto: l'agente lo ha smontato a forza a metà di un `cp` e la copia è fallita. Il `tick` monta solo se il disco manca (`mount_share keep`); il rimontaggio sta solo in `fluix start`, chiesto dall'utente, e mai con `force`.
+**The VM does not see the Mac's disk.** JuiceFS's space check (`--free-space-ratio`) looks at the VM's disk, which believes it is large; on a tester's Mac the cache filled the disk and the VM's filesystem failed. Space limits are computed on the Mac side (`cache_limit_mb`, `RESERVE_MB`, the check in `tick`), and a VM that Lima calls "Running" can be broken inside (`vm_healthy`).
 
-**La VM non vede il disco del Mac.** Il controllo di spazio di JuiceFS (`--free-space-ratio`) guarda il disco della VM, che si crede grande; sul Mac di una tester la cache ha riempito il disco e il filesystem della VM è andato in errore. I limiti di spazio si calcolano dal lato Mac (`cache_limit_mb`, `RESERVE_MB`, il controllo nel `tick`), e una VM "Running" per Lima può essere rotta dentro (`vm_healthy`).
+**No script messages in the log, and fd 3 closed for limactl.** Functions often run with redirected output (`lima start >>lima.log`) and the error trap inherits that redirection: it wrote its blocks into `lima.log`, once per function level, and on a tester's Mac the log filled the disk. Messages go to fd 3, the terminal saved at startup. But `lima start` leaves a host agent in the background that inherits fd 3 and keeps the install's terminal open forever: `lima()` closes it (`3>&-`).
 
-**Nessun messaggio dello script nel log, e fd 3 chiuso per limactl.** Le funzioni girano spesso con l'output rediretto (`lima start >>lima.log`) e la trap di errore eredita quella redirezione: scriveva i suoi blocchi dentro `lima.log`, una volta per livello di funzione, e da una tester il log ha riempito il disco. I messaggi vanno su fd 3, il terminale salvato all'avvio. Ma `lima start` lascia un host agent in background che eredita fd 3 e tiene aperto per sempre il terminale dell'installazione: `lima()` lo chiude (`3>&-`).
+**macOS `/bin/bash` is 3.2**: with `set -u` an empty array expanded as `"${a[@]}"` is an error. Write `${a[@]+"${a[@]}"}`.
 
-**`/bin/bash` di macOS è la 3.2**: con `set -u` un array vuoto espanso con `"${a[@]}"` è un errore. Si scrive `${a[@]+"${a[@]}"}`.
+**No external network during install.** An office DNS did not resolve `cloud.debian.org`: the Debian image, JuiceFS and the Samba and FUSE `.deb` files are in the zip (`scripts/package.sh`). The `.deb` files are the whole dependency closure, taken in a `debian:trixie` container with an empty dpkg status: a plain `--download-only` would miss the libraries the container already has and the image may have in an older version. The list is `PACKAGES` in `guest-install.sh`, which `package.sh` reads; `deb.debian.org` stays as a fallback if the local repository fails.
 
-**Niente rete esterna durante l'installazione.** Il DNS di un ufficio non risolveva `cloud.debian.org`: immagine Debian, JuiceFS e i `.deb` di Samba e FUSE stanno nello zip (`scripts/package.sh`). I `.deb` sono l'intera chiusura delle dipendenze, presa in un container `debian:trixie` con uno stato di dpkg vuoto: scaricati solo con `--download-only` normale mancherebbero le librerie che il container ha già e l'immagine magari in una versione più vecchia. La lista sta in `PACKAGES` di `guest-install.sh`, che `package.sh` legge; `deb.debian.org` resta come riserva se il repository locale fallisce.
+**`systemctl is-active` with several units says yes if at least one is active.** A check on `fluix-mount smbd` together missed a stopped Samba. One unit per call.
 
-**`systemctl is-active` con più unità risponde sì se almeno una è attiva.** Un controllo su `fluix-mount smbd` insieme non ha visto Samba fermo. Una unità per chiamata.
+**Absolute paths for system tools.** In some shells and under launchd `/usr/sbin` is not in the PATH: `diskutil` "not found" made a benchmark's remounts fail silently. Write `/usr/sbin/diskutil`, `/usr/bin/osascript`, `/sbin/mount`.
 
-**Percorsi assoluti per gli strumenti di sistema.** In alcuni shell e sotto launchd `/usr/sbin` non è nel PATH: `diskutil` "non trovato" ha fatto fallire in silenzio i rimontaggi di un benchmark. Si scrive `/usr/sbin/diskutil`, `/usr/bin/osascript`, `/sbin/mount`.
+**Do not uninstall or delete the VM to "start clean".** `fluix uninstall` and `limactl delete` throw away the metadata: the data in the bucket stays but can no longer be read, and a reinstall with the same `VOLUME_NAME` on the same bucket collides with the old one. To apply changes, rerun `setup`.
 
-**Non disinstallare né cancellare la VM per "ripartire puliti".** `fluix uninstall` e `limactl delete` buttano i metadati: i dati nel bucket restano ma non si leggono più, e una reinstallazione con lo stesso `VOLUME_NAME` sullo stesso bucket si scontra con quelli vecchi. Per applicare modifiche si rilancia `setup`.
+**`setup` does not change the RAM of an existing VM.** `memory` in `lima.yaml` applies only at creation; an existing VM needs `limactl edit --memory <GiB> fluix` while stopped. The rest (`vm/guest/`, config) `setup` reapplies.
 
-**`setup` non cambia la RAM di una VM già creata.** `memory` in `lima.yaml` vale solo alla creazione; su una VM esistente serve `limactl edit --memory <GiB> fluix` a VM ferma. Il resto (`vm/guest/`, config) `setup` lo riapplica.
+**JuiceFS behind Samba needs `--enable-xattr`.** Without it, Samba (`fruit` module, which needs the `samba-vfs-modules` package) cannot store the Finder's metadata and deleting a file from the Mac gives `Operation not supported`.
 
-**JuiceFS dietro Samba vuole `--enable-xattr`.** Senza, Samba (modulo `fruit`, che richiede il pacchetto `samba-vfs-modules`) non salva i metadati del Finder e cancellare un file dal Mac dà `Operation not supported`.
+**JuiceFS does not cache uploaded blocks** unless `--cache-large-write` is on (off by default). The docs assumed it and it was false.
 
-**JuiceFS non tiene in cache i blocchi caricati** se non con `--cache-large-write` (default spento). I doc lo davano per scontato ed era falso.
+**macOS gives up on an SMB read after 30 s** and the Finder gets an I/O error. The command raises `max_resp_timeout` only for the VM's address, in a `# fluix begin/end` block of `~/Library/Preferences/nsmb.conf`: never rewrite that file whole, it holds the user's configuration.
 
-**macOS abbandona una lettura SMB dopo 30 s** e il Finder riceve un errore di I/O. Il comando alza `max_resp_timeout` solo per l'indirizzo della VM, in un blocco `# fluix begin/end` di `~/Library/Preferences/nsmb.conf`: non riscrivere quel file per intero, contiene configurazione dell'utente.
+**Simulate bandwidth with JuiceFS's limits, not Toxiproxy.** Toxiproxy's `bandwidth` is per connection and JuiceFS opens many: 2.7 GB "went through" at 150 MB/s with a 37 MB/s limit. Toxiproxy is only for latency; bandwidth is `--download-limit`/`--upload-limit` (`DOWNLOAD_LIMIT_MBPS`, `UPLOAD_LIMIT_MBPS`).
 
-**Simulare la banda con i limiti di JuiceFS, non con Toxiproxy.** Il `bandwidth` di Toxiproxy vale per connessione e JuiceFS ne apre molte: 2,7 GB sono "passati" a 150 MB/s con un limite di 37 MB/s. Toxiproxy serve solo per la latenza; la banda è `--download-limit`/`--upload-limit` (`DOWNLOAD_LIMIT_MBPS`, `UPLOAD_LIMIT_MBPS`).
+**Docker ran out of default subnets** on the development Mac (many compose projects): the spike pins an explicit subnet in `spike/docker-compose.yml`. Never `docker network prune`, the networks belong to other projects.
 
-**Docker ha esaurito le subnet predefinite** su questo Mac (molti progetti compose): lo spike fissa una subnet esplicita in `spike/docker-compose.yml`. Non si fa `docker network prune`, le reti sono di altri progetti.
+**A UI is verified in a real browser.** The mockup passed checks in node and in the browser drew one variant out of three because of a JavaScript error. Load it in headless Chrome (Playwright with Chrome's `executablePath`) and look at the screenshot.
 
-**Una UI si verifica in un browser vero.** Il mockup passava i controlli in node e nel browser disegnava una variante su tre per un errore JavaScript. Si carica in Chrome headless (Playwright con `executablePath` di Chrome) e si guarda lo screenshot.
+## Secrets
 
-## Segreti
+`spike/.env`, `my-test.env`, `~/.fluix/config.env` and every `dist/*.zip` hold S3 keys and the SMB password: they are outside git (`*.env`, `dist/`) and are never printed, not even in a debug log. To check a file, show the key names, not the values. `package.sh` builds the zip with `umask 077`. OVH S3 keys open every bucket in the project: a tester needs a dedicated user.
 
-`spike/.env`, `my-test.env`, `~/.fluix/config.env` e ogni `dist/*.zip` contengono chiavi S3 e password SMB: sono fuori da git (`*.env`, `dist/`) e non si stampano mai, nemmeno in un log di debug. Per controllare un file si mostrano i nomi delle chiavi, non i valori. `package.sh` crea lo zip con `umask 077`. Le chiavi S3 di OVH aprono ogni bucket del progetto: per un tester serve un utente dedicato.
+## Touch every surface
 
-## Tocca tutte le superfici
+A change to how the disk behaves almost always goes through several files:
 
-Una modifica al comportamento del disco passa quasi sempre da più file:
+- `macos/bin/fluix` (Mac side) and `macos/vm/guest/` (VM side: `fluix-mount`, `guest-install.sh`, `smb.conf`, the systemd service).
+- `macos/vm/lima.yaml` if the VM changes, and then the `setup` gotcha above.
+- `macos/config.env.example` if `config.env` gets a new option.
+- `macos/install.sh` and `scripts/package.sh` if what goes into the zip changes.
+- `docs/ARCHITECTURE.md`: the "Configuration" and "macOS package" sections, and "Measured performance" if a number changes.
+- `README.md` and `README.it.md` together.
+- A zip already handed out does not update itself: it has to be rebuilt and sent again.
 
-- `macos/bin/fluix` (lato Mac) e `macos/vm/guest/` (lato VM: `fluix-mount`, `guest-install.sh`, `smb.conf`, il servizio systemd).
-- `macos/vm/lima.yaml` se cambia la VM, e allora il gotcha su `setup` qui sopra.
-- `macos/config.env.example` se nasce un'opzione nuova in `config.env`.
-- `macos/install.sh` e `scripts/package.sh` se cambia cosa finisce nello zip.
-- `docs/ARCHITECTURE.md`: sezioni "Configurazione" e "Pacchetto macOS", e "Prestazioni misurate" se cambia un numero.
-- Lo zip già consegnato non si aggiorna da solo: va ricostruito e rimandato.
+Inverse states: `setup` writes the `nsmb.conf` block and the launchd agent, `uninstall` removes them; `warmup` has `free`; `start` has `stop`. Whoever adds an effect on the user's Mac adds its removal to `uninstall`.
 
-Stati inversi: `setup` scrive il blocco in `nsmb.conf` e l'agente launchd, `uninstall` li toglie; `warmup` ha `free`; `start` ha `stop`. Chi aggiunge un effetto sul Mac dell'utente aggiunge la sua rimozione in `uninstall`.
+## Never compromise
 
-## Da non compromettere
+- **No administrator rights** to install and use the disk, and no kernel extension: it is the reason the VM exists.
+- **SMB only on the private Mac-VM link** (vzNAT address), with Lima's port forwarding off: SMB signing and encryption are off because the traffic never leaves the Mac.
+- **No user data deleted without confirmation**: `uninstall` asks to type `delete`, and data in the bucket is touched only on explicit request.
 
-- **Nessun permesso di amministratore** per installare e usare il disco, e nessuna estensione del kernel: è il motivo per cui esiste la VM.
-- **SMB solo sul collegamento privato Mac-VM** (indirizzo vzNAT), con l'inoltro porte di Lima spento: firma e cifratura SMB sono disattivate perché il traffico non esce dal Mac.
-- **Niente dati dell'utente cancellati senza conferma**: `uninstall` chiede di scrivere `delete`, e i dati nel bucket si toccano solo su richiesta esplicita.
+## Precedence
 
-## Precedenza
+These are default rules for this repo: the global instructions sit below, and what Simone says in chat sits above everything.
 
-Queste sono regole di default per questo repo: il `CLAUDE.md` globale vale sotto, quello che Simone dice in chat vale sopra tutto.
+## Where to find the rest
 
-## Dove trovare il resto
-
-- [README.md](README.md): cos'è e come si costruisce e consegna lo zip.
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): perché JuiceFS, VM e SMB, configurazione, prestazioni misurate, alternative scartate, costi.
-- [docs/CONVENTIONS.md](docs/CONVENTIONS.md): convenzioni di codice, delta sul canone Acme.
-- [docs/ROADMAP.md](docs/ROADMAP.md): domande aperte e prossimi passi.
-- [docs/CYCLES.md](docs/CYCLES.md): cosa è stato fatto e quando.
+- [README.md](README.md): what it is, how to build and hand out the zip.
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): why JuiceFS, VM and SMB, configuration, measured performance, alternatives, costs.
+- [docs/CONVENTIONS.md](docs/CONVENTIONS.md): language, glossary, code conventions.
+- [docs/ROADMAP.md](docs/ROADMAP.md): open questions and next steps.
+- [docs/CYCLES.md](docs/CYCLES.md): what was done and when.
