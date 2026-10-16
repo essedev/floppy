@@ -1,26 +1,54 @@
-# Convenzioni
+# Conventions
 
-Questo file è il **delta** sul canone Acme: le regole trasversali stanno in `CONVENTIONS.md` e valgono anche qui. Il canone non è ancora copiato in `docs/canon/`: il target va aggiunto in `canon/scripts/canon_targets.toml` e riallineato con `make sync-canon`.
+The code today is bash and configuration (Lima, systemd, Samba). The Tauri app, when it arrives, follows the TypeScript and Rust layout of [Portsage](https://github.com/essedev/portsage).
 
-Il canone è scritto per Python e TypeScript. Il codice di oggi è bash e configurazione (Lima, systemd, Samba): le regole sotto ne sono la traduzione. L'app Tauri, quando arriva, segue il canone per TypeScript e lo scheletro di Portsage per Rust.
+## Language
 
-## Script bash
+Public repository: code, comments, docs and commits are in English.
 
-- **`set -euo pipefail`** in testa a ogni script. Un comando che può fallire legittimamente si scrive esplicito (`|| true` con un commento sul perché), mai lasciato ingoiare l'errore in silenzio.
-- **Errori con `die`**: un messaggio che dice cosa fare, sullo stderr, e uscita diversa da zero. Niente stack di `echo` di debug lasciati nel codice.
-- **Idempotenti**: `setup`, `guest-install.sh` e `spike/setup.sh` si rilanciano senza danni. Un passo che crea qualcosa controlla prima se c'è già.
-- **Percorsi assoluti per gli strumenti di sistema** macOS (`/usr/sbin/diskutil`, `/usr/bin/osascript`, `/sbin/mount`): sotto launchd il PATH è ridotto.
-- **Nessuno stato dato per scontato**: punto di montaggio, indirizzo della VM e stato della VM si leggono dal sistema a ogni uso, non si salvano in variabili globali.
-- **Le funzioni prima, il dispatch in fondo**: `cmd_<nome>` per ogni sottocomando, un `case` finale che li chiama.
-- Controllo minimo: `bash -n <script>`. Il repo non ha ancora `shellcheck` né un `make check`.
+| Layer | Language |
+|---|---|
+| Identifiers, file names, comments, commit messages | English |
+| `README.md` | English, canonical |
+| `README.it.md` | Italian, a translation of `README.md`, updated in the same commit |
+| `docs/*`, `CLAUDE.md` | English |
+| `mockups/panel.html` | Italian, the language of the UI it shows (declared in `.prose-allow`) |
+| Git history before the rename | stays as it is |
 
-## Configurazione
+`make lint` runs `scripts/check-prose.py`, which fails on Italian prose outside the allowed paths and on a README pair out of step.
 
-- **Ogni opzione nuova** di `config.env` va in `macos/config.env.example` con un commento, e ha un default sensato nello script che la legge (`${NOME:-default}`).
-- **I valori misurati** (memoria della VM, buffer, prefetch) portano nel commento accanto il numero che li giustifica e rimandano a `docs/ARCHITECTURE.md`.
+## Glossary
 
-## Segreti
+| Term | Meaning |
+|---|---|
+| Disk, Fluix | What the user sees in the Finder, mounted at `/Volumes/Fluix`. |
+| Volume | The JuiceFS filesystem behind the disk, with a name (`VOLUME_NAME`) and its metadata. One per Mac in the test, one shared with PostgreSQL later. |
+| Metadata | JuiceFS's tree of files and folders. In the test it lives in SQLite inside the VM. |
+| Cache | Blocks already downloaded, on the VM's disk. |
+| Warmup, "Make available" | Preloading a folder into the cache (`fluix warmup`). "Rendi disponibile" in the Italian UI. |
+| Evict, "Free up space" | Dropping a folder from the cache (`fluix free`). "Libera spazio" in the Italian UI. |
+| Cold, warm | Reads of blocks not in the cache (over the network) or already in it. |
+| Spike | The Docker stack in `spike/`, for measuring without a real network. Not the product. |
+| Tester | Someone running a test zip on their own Mac. |
+| Pilot | One shared disk used for real work for one or two weeks (see [ROADMAP.md](ROADMAP.md)). |
 
-Mai un segreto in un file tracciato, in un argomento di riga di comando visibile in `ps` o in un output. Si passano via file con permessi `600` o via stdin (es. `curl -K -`).
+## Bash scripts
 
-Eccezione nota, da chiudere: la password SMB tra Mac e VM passa nell'URL di `mount volume` (`macos/bin/fluix`, `mount_share`) e nello spike in quello di `mount_smbfs`, visibile in `ps` per un istante. Vale solo sul collegamento privato Mac-VM; la strada è il Portachiavi di macOS.
+- **`set -euo pipefail`** at the top of every script. A command that can legitimately fail is written explicitly (`|| true` with a comment on why), never left to swallow the error silently.
+- **Errors with `die`**: a message that says what to do, on stderr, and a non-zero exit. No debug `echo` left in the code.
+- **Idempotent**: `setup`, `guest-install.sh` and `spike/setup.sh` can be rerun safely. A step that creates something first checks whether it is already there.
+- **Absolute paths for macOS system tools** (`/usr/sbin/diskutil`, `/usr/bin/osascript`, `/sbin/mount`): under launchd the PATH is reduced.
+- **No assumed state**: mount point, VM address and VM status are read from the system at every use, not saved in global variables.
+- **Functions first, dispatch at the bottom**: `cmd_<name>` for every subcommand, a final `case` that calls them.
+- **Checks**: `make check` runs `bash -n` and `shellcheck` on every script, and the prose check.
+
+## Configuration
+
+- **Every new option** in `config.env` goes into `macos/config.env.example` with a comment, and has a sensible default in the script that reads it (`${NAME:-default}`).
+- **Measured values** (VM memory, buffer, prefetch) carry the number that justifies them in the comment next to them and point to `docs/ARCHITECTURE.md`.
+
+## Secrets
+
+Never a secret in a tracked file, in a command-line argument visible in `ps`, or in output. They go through files with `600` permissions or through stdin (e.g. `curl -K -`).
+
+Known exception, to close: the SMB password between Mac and VM goes through the `mount volume` URL (`macos/bin/fluix`, `mount_share`) and in the spike through the `mount_smbfs` one, visible in `ps` for a moment. It holds only on the private Mac-VM link; the way out is the macOS Keychain.
