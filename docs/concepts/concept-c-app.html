@@ -1,0 +1,630 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Concept C - app</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<!--
+  Concept C: l'app di Fluix per macOS nell'identità D Drive (scelta in concept-b-identity),
+  superficie per superficie. Non è un file a varianti: è uno storyboard con ogni schermata e
+  ogni stato a grandezza vera, e le decisioni aperte affiancate come A e B.
+  Tasti: t tema, p nasconde barra e didascalie per guardare pulito. L'indice in alto porta ai gruppi.
+
+  Il problema: concept-a-panel ha scelto la struttura (variante B, prima lo stato) e concept-b
+  l'identità, ma mancano gli stati veri del prodotto: avvio, revoca, Mac quasi pieno,
+  aggiornamento, il menu di riga, le impostazioni, le notifiche, l'icona nella barra dei menu.
+
+  Superfici:
+  1. Pannello: Collegato, Download in corso con la coda, Avvio, Non raggiungibile, Spento,
+     Revocato, Mac quasi pieno, Aggiornamento disponibile.
+  2. Menu di riga: Rendi disponibile, Libera spazio con conferma, progetto più grande della cache.
+  3. Finestra Impostazioni: account, questo Mac, spazio, avvio al login, versione, diagnostica.
+  4. Notifiche di macOS: download finito, disco ricollegato, spazio liberato da solo.
+  5. Icona nella barra dei menu: collegato, download, avvio, non raggiungibile, spento.
+
+  Mappatura sul codice di oggi (fattibilità, non piano): pannello e finestre sono React nella
+  webview Tauri (scheletro di Portsage). Ogni stato del pannello viene da `fluix status --json`
+  (da aggiungere: oggi status stampa testo) più il token del control plane per Revocato.
+  Rendi disponibile e Libera spazio sono `fluix warmup` e `fluix free` per cartella; l'ETA usa
+  la velocità misurata. "Mac quasi pieno" è la soglia che `tick` già usa (metà di RESERVE_MB,
+  10 GB): sotto, l'agente libera tutta la cache. Il limite della cache in Impostazioni non
+  può superare il disco della VM, fissato alla creazione: oltre serve reinstallare, e lo slider
+  si ferma lì. Le notifiche sono quelle di sistema (plugin notification di Tauri). L'icona
+  nella barra dei menu è un'immagine template monocromatica: il lampeggio sono due immagini
+  alternate. Invia diagnostica manda al control plane stato, ultimi log di fluix e della VM,
+  versione di macOS: è un endpoint nuovo.
+
+  Dati: progetti, limite di 100 GB e velocità di 14,5 MB/s da concept-a-panel (nomi inventati
+  lì e dichiarati). Inventati qui: l'organizzazione "Studio Esempio", la persona Giulia Ferri,
+  il nome del Mac, il codice della diagnostica, la versione 0.2.0.
+
+  Decisioni aperte e raccomandazione:
+  1. Parola dell'azione: Spegni o Espelli. Consigliata Spegni: ferma anche la VM e fa coppia con
+     Accendi; in macOS Espelli vuol dire solo smontare, e il disco tornerebbe da solo al tick.
+  2. Cache piena: bloccare con "Serve spazio" o lasciare a JuiceFS di liberare i blocchi usati
+     meno di recente, con un avviso. Consigliata la seconda: è quello che JuiceFS fa già al
+     raggiungimento di --cache-size, e i blocchi che escono sono per definizione quelli non in uso.
+  3. Riconnessione: automatica ogni 30 secondi con conto alla rovescia, o solo il pulsante.
+     Consigliata l'automatica: chi monta non deve fare niente, il pulsante resta per riprovare subito.
+  4. Impostazioni: finestra separata o seconda pagina del pannello. Consigliata la finestra:
+     si apre di rado, è la convenzione del Mac (Cmd+,) e lascia il pannello a una cosa sola.
+-->
+<style>
+@font-face { font-family: "Departure Mono"; src: url("https://cdn.jsdelivr.net/gh/rektdeckard/departure-mono@v1.500/public/assets/DepartureMono-Regular.woff2") format("woff2"); font-display: swap; }
+:root {
+  color-scheme: light;
+  --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+  --f-ui: "Schibsted Grotesk", var(--sans); --f-ro: "Departure Mono", ui-monospace, Menlo, monospace;
+  --page: #e6e3dc; --surface: #f4f2ed; --raised: #fbfaf7; --sunken: #ebe8e1; --line: #dcd8cf; --ink: #1d1c1a; --ink-2: #625f58; --ink-3: #706c64;
+  --brand: #ff5b1f; --good: #2b9d4b; --bad: #e0402a; --track: #e2ded6; --idle: #c9c5bb;
+  --good-text: #1a6c31; --brand-text: #a3370a; --bad-text: #b3311e;
+  --face-hi: #fdfcfa; --face-lo: #e9e6df; --face-edge: #d3cfc5; --slot: #2a2927; --slot-fill: #8e897f;
+  --led-ok: #2fbf57; --led-dl: #ff5b1f; --led-err: #ff3b24; --led-idle: #cfcbc2;
+  --wall: radial-gradient(70% 60% at 15% 20%, #f2c9a8 0, transparent 60%), radial-gradient(60% 60% at 85% 80%, #c9cfc4 0, transparent 60%), linear-gradient(160deg, #ddd5c8, #c8c3b8);
+  --pop-shadow: 0 0 0 0.5px rgba(40, 30, 20, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.7), 0 34px 70px -24px rgba(50, 35, 20, 0.5);
+  --win-shadow: 0 0 0 0.5px rgba(40, 30, 20, 0.22), 0 30px 70px -20px rgba(50, 35, 20, 0.45);
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #121211; --surface: #1d1c1a; --raised: #262522; --sunken: #161514; --line: #2f2d29; --ink: #efece5; --ink-2: #a29e95; --ink-3: #8f8b83;
+  --brand: #ff6a2e; --good: #3cc864; --bad: #ff5a43; --track: #2a2926; --idle: #44423d;
+  --good-text: #4fd476; --brand-text: #ff7a42; --bad-text: #ff6e5a;
+  --face-hi: #2c2b28; --face-lo: #201f1d; --face-edge: #393733; --slot: #0b0b0a; --slot-fill: #6f6b63;
+  --led-ok: #3fdc6c; --led-dl: #ff6a2e; --led-err: #ff4b33; --led-idle: #3a3834;
+  --wall: radial-gradient(70% 60% at 15% 20%, #5a3320 0, transparent 60%), radial-gradient(60% 60% at 85% 80%, #24302c 0, transparent 60%), linear-gradient(160deg, #1c1a17, #0e0e0d);
+  --pop-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.8), inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 34px 70px -24px rgba(0, 0, 0, 0.8);
+  --win-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.9), 0 30px 70px -20px rgba(0, 0, 0, 0.8);
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; scroll-padding-top: 64px; }
+html, body { margin: 0; }
+body { min-height: 100vh; background: var(--page); color: var(--ink); font: 15px/1.5 var(--f-ui); -webkit-font-smoothing: antialiased; }
+[hidden] { display: none !important; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+
+/* Concept chrome, not part of the design */
+.switch { position: sticky; top: 0; z-index: 100; display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; padding: 8px 12px; background: #111; color: #aaa; font: 12px/1.4 ui-monospace, Menlo, monospace; }
+.switch b { color: #eee; font-weight: 500; }
+.switch nav { display: flex; flex-wrap: wrap; gap: 4px; flex: 1 1 300px; }
+.switch a { color: #ddd; text-decoration: none; padding: 5px 9px; border-radius: 6px; background: #262626; }
+.switch a:hover { background: #333; }
+.switch button { font: inherit; border: 0; padding: 5px 9px; border-radius: 6px; background: #262626; color: #eee; cursor: pointer; }
+body[data-chrome="off"] .switch, body[data-chrome="off"] .cap, body[data-chrome="off"] .group-h p, body[data-chrome="off"] .why { display: none; }
+
+/* Storyboard */
+.stage { max-width: 1400px; margin: 0 auto; padding: 32px 28px 80px; }
+.group { margin-bottom: 56px; }
+.group-h { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; margin: 0 0 18px; }
+.group-h h2 { margin: 0; font: 800 30px/1.1 var(--f-ui); letter-spacing: -0.03em; }
+.group-h .num { font: 13px var(--f-ro); color: var(--brand-text); }
+.group-h p { margin: 0; flex: 1 1 360px; color: var(--ink-2); max-width: 70ch; }
+.frames { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(420px, 100%), 1fr)); gap: 22px; align-items: start; }
+.frame { margin: 0; min-width: 0; }
+.cap { display: flex; flex-wrap: wrap; gap: 2px 10px; align-items: baseline; margin: 0 0 10px; }
+.cap .id { font: 12px var(--f-ro); color: var(--ink-2); }
+.cap b { font-weight: 700; font-size: 15px; white-space: nowrap; }
+.cap span:last-child { flex-basis: 100%; color: var(--ink-2); font-size: 13.5px; }
+
+/* Desktop strip */
+.desk { position: relative; border-radius: 16px; background: var(--wall); overflow-x: auto; overflow-y: hidden; padding: 34px 12px 24px; display: flex; justify-content: flex-end; }
+.desk.left { justify-content: flex-start; }
+.desk.center { justify-content: center; }
+.menubar { position: absolute; left: 0; right: 0; top: 0; height: 26px; display: flex; align-items: center; justify-content: space-between; padding: 0 12px; font: 13px var(--sans); color: #1d1d1f; background: rgba(246, 246, 248, 0.55); backdrop-filter: blur(24px) saturate(1.4); -webkit-backdrop-filter: blur(24px) saturate(1.4); white-space: nowrap; min-width: 380px; }
+:root[data-theme="dark"] .menubar { color: #f1f1f1; background: rgba(24, 24, 28, 0.5); }
+.menubar .l { display: flex; gap: 16px; } .menubar .r { display: flex; gap: 12px; align-items: center; }
+.mb-icon { height: 20px; padding: 0 6px; border-radius: 5px; display: grid; place-items: center; background: rgba(0, 0, 0, 0.1); }
+:root[data-theme="dark"] .mb-icon { background: rgba(255, 255, 255, 0.18); }
+.blink { animation: blink 1.1s steps(2, jump-none) infinite; }
+@keyframes blink { 50% { opacity: 0.15; } }
+@media (prefers-reduced-motion: reduce) { .blink { animation: none; } }
+
+/* Panel */
+.pop { position: relative; width: 352px; flex-shrink: 0; display: flex; flex-direction: column; overflow: hidden; background: var(--surface); color: var(--ink); font: 13px/1.45 var(--f-ui); border-radius: 20px; box-shadow: var(--pop-shadow); }
+.face { margin: 8px 8px 0; }
+.face svg { display: block; width: 100%; height: auto; }
+.led-ok { fill: var(--led-ok); } .led-dl { fill: var(--led-dl); } .led-err { fill: var(--led-err); } .led-idle { fill: var(--led-idle); }
+.status { display: flex; flex-direction: column; gap: 16px; padding: 20px 20px 22px; }
+.status h3 { margin: 0; font: 700 20px/1.2 var(--f-ui); letter-spacing: -0.02em; }
+.status p { margin: 4px 0 0; font-size: 13.5px; color: var(--ink-2); }
+.status ol { margin: 6px 0 0; padding-left: 18px; color: var(--ink-2); font-size: 13.5px; }
+.meta-line { font: 12px var(--f-ro); color: var(--ink-2); letter-spacing: 0.02em; }
+.btns { display: flex; gap: 8px; }
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; border: 0; background: transparent; color: var(--ink); cursor: pointer; white-space: nowrap; font: 600 14px var(--f-ui); border-radius: 12px; }
+.btn:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+.btn[disabled] { opacity: 0.45; cursor: default; }
+.btn-primary { flex: 1; height: 44px; background: var(--ink); color: var(--surface); }
+.btn-ghost { height: 44px; padding: 0 14px; color: var(--ink-2); font-weight: 500; }
+.btn-soft { height: 36px; padding: 0 14px; background: var(--sunken); font-size: 13px; }
+.btn-small { height: 32px; padding: 0 12px; font-size: 13px; border-radius: 9px; }
+.btn-danger { background: var(--bad-text); color: #fff; }
+.notice { display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px; border-radius: 12px; font-size: 13px; line-height: 1.45; }
+.notice b { display: block; font-weight: 700; }
+.notice.warn { background: color-mix(in srgb, var(--bad) 11%, var(--surface)); color: var(--ink); }
+.notice.info { background: color-mix(in srgb, var(--brand) 11%, var(--surface)); color: var(--ink); }
+.notice.calm { background: var(--sunken); color: var(--ink); }
+.notice .ic { flex-shrink: 0; margin-top: 1px; }
+.notice.warn .ic { color: var(--bad-text); } .notice.info .ic { color: var(--brand-text); }
+.notice .btn { margin-top: 8px; }
+.space { padding: 0 20px 18px; }
+.sec-h { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 12px; font-size: 11px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-3); }
+.sec-h b { font: 12px var(--f-ro); letter-spacing: 0.02em; color: var(--ink); text-transform: none; }
+.legend { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.legend li { display: flex; align-items: center; gap: 10px; font-size: 12.5px; }
+.legend .sw { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.legend .n { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); }
+.legend .v { font: 12px var(--f-ro); color: var(--ink); }
+.projects { margin: 0 8px; padding: 14px 4px 6px; background: var(--sunken); border-radius: 14px; }
+.projects .sec-h { padding: 0 12px; margin-bottom: 4px; color: var(--ink-2); }
+.projects.dim { opacity: 0.55; }
+.prow { display: flex; align-items: center; gap: 10px; min-height: 36px; padding: 0 4px 0 12px; border-radius: 10px; }
+.prow:hover, .prow.open { background: var(--raised); }
+.prow .n { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.chip { font: 11px var(--f-ro); letter-spacing: 0.04em; color: var(--ink-2); text-transform: uppercase; }
+.chip.ready { color: var(--good-text); } .chip.dl { color: var(--brand-text); }
+.icon-btn { width: 30px; height: 30px; border: 0; background: transparent; color: var(--ink-2); border-radius: 8px; display: grid; place-items: center; cursor: pointer; }
+.icon-btn:hover { background: var(--sunken); color: var(--ink); }
+.dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; box-shadow: inset 0 0 0 1.5px var(--ink-3); }
+.dot.full { background: var(--led-ok); box-shadow: 0 0 6px var(--led-ok); }
+.dot.part { background: conic-gradient(var(--ink-2) var(--p), transparent 0); }
+.dot.dl { background: var(--led-dl); box-shadow: 0 0 6px var(--led-dl); }
+.menu { margin: 4px 4px 8px; padding: 6px; background: var(--raised); border-radius: 12px; box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.12), 0 12px 28px -12px rgba(40, 30, 20, 0.35); display: flex; flex-direction: column; }
+:root[data-theme="dark"] .menu { box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.8), 0 12px 28px -12px rgba(0, 0, 0, 0.8); }
+.menu .mi { display: flex; align-items: center; justify-content: space-between; gap: 10px; height: 36px; padding: 0 10px; border-radius: 8px; border: 0; background: transparent; color: var(--ink); font: 500 13px var(--f-ui); cursor: pointer; text-align: left; }
+.menu .mi:hover, .menu .mi.hl { background: var(--sunken); }
+.menu .mi .aside { font: 11.5px var(--f-ro); color: var(--ink-2); }
+.menu .mnote { padding: 8px 10px 10px; font-size: 13px; color: var(--ink-2); line-height: 1.45; }
+.menu .sep { height: 1px; background: var(--line); margin: 4px 6px; }
+.confirm { margin: 4px 4px 8px; padding: 14px; background: var(--raised); border-radius: 12px; box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.12), 0 12px 28px -12px rgba(40, 30, 20, 0.35); }
+:root[data-theme="dark"] .confirm { box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.8), 0 12px 28px -12px rgba(0, 0, 0, 0.8); }
+.confirm b { display: block; font-size: 14px; margin-bottom: 4px; }
+.confirm p { margin: 0 0 12px; color: var(--ink-2); font-size: 13px; }
+.confirm .btns .btn { flex: 1; height: 36px; font-size: 13px; border-radius: 9px; }
+.foot { display: flex; justify-content: space-between; align-items: center; gap: 6px; padding: 10px 10px 10px 20px; font-size: 12px; color: var(--ink-3); }
+.foot .ver { font: 12px var(--f-ro); margin-right: auto; }
+.foot .btn { font-size: 13px; font-weight: 500; color: var(--ink-2); gap: 6px; height: 32px; padding: 0 10px; border-radius: 9px; }
+.foot .btn:hover, .foot .icon-btn:hover { background: var(--sunken); }
+.banner { margin: 8px 8px 0; display: flex; align-items: center; gap: 10px; padding: 10px 10px 10px 14px; border-radius: 12px; background: var(--sunken); font-size: 13px; }
+.banner .t { flex: 1; min-width: 0; }
+.banner .t b { font-weight: 700; }
+.pagehead { display: flex; align-items: center; gap: 6px; padding: 12px 12px 4px; }
+.pagehead b { font-size: 15px; }
+.plist { padding: 4px 20px 16px; display: flex; flex-direction: column; gap: 2px; }
+.plist .r { display: flex; justify-content: space-between; align-items: center; min-height: 40px; gap: 10px; font-size: 13px; }
+.plist .r + .r { border-top: 1px solid var(--line); }
+.plist .r span:last-child { color: var(--ink-2); }
+
+/* Toggle and slider */
+.toggle { width: 38px; height: 22px; border-radius: 11px; background: var(--track); position: relative; flex-shrink: 0; border: 0; cursor: pointer; }
+.toggle::after { content: ""; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3); transition: transform 0.2s ease-out; }
+.toggle[aria-checked="true"] { background: var(--good); }
+.toggle[aria-checked="true"]::after { transform: translateX(16px); }
+input[type="range"] { width: 100%; accent-color: var(--ink); }
+
+/* Settings window */
+.win { width: 620px; flex-shrink: 0; background: var(--surface); border-radius: 12px; box-shadow: var(--win-shadow); overflow: hidden; color: var(--ink); font: 13px/1.45 var(--f-ui); }
+.win-bar { height: 52px; display: flex; align-items: center; gap: 8px; padding: 0 16px; background: var(--sunken); }
+.lights { display: flex; gap: 8px; }
+.lights i { width: 12px; height: 12px; border-radius: 50%; display: block; }
+.lights i:nth-child(1) { background: #ff5f57; } .lights i:nth-child(2) { background: #febc2e; } .lights i:nth-child(3) { background: #28c840; }
+.win-bar b { flex: 1; text-align: center; font-size: 13px; font-weight: 700; margin-right: 52px; }
+.win-body { padding: 18px 22px 24px; display: flex; flex-direction: column; gap: 18px; max-height: none; }
+.grp-t { margin: 0 0 8px 4px; font-size: 11px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-3); }
+.well { background: var(--raised); border-radius: 12px; box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.1); }
+:root[data-theme="dark"] .well { box-shadow: 0 0 0 0.5px rgba(255, 255, 255, 0.06); }
+.row { display: flex; align-items: center; gap: 14px; padding: 12px 16px; min-height: 52px; }
+.row + .row { border-top: 1px solid var(--line); }
+.row .lbl { flex: 1; min-width: 0; }
+.row .lbl b { display: block; font-weight: 600; font-size: 13.5px; }
+.row .lbl span { display: block; color: var(--ink-2); font-size: 13px; }
+.row .val { color: var(--ink-2); font-size: 13px; }
+.row .ro { font: 12.5px var(--f-ro); color: var(--ink); }
+.avatar { width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; background: var(--ink); color: var(--surface); font-weight: 700; font-size: 13px; flex-shrink: 0; }
+.slider-row { flex-direction: column; align-items: stretch; gap: 10px; }
+.slider-top { display: flex; justify-content: space-between; align-items: baseline; }
+.slider-top .ro { font-size: 15px; }
+.scale { display: flex; justify-content: space-between; font: 11.5px var(--f-ro); color: var(--ink-2); }
+.usebar { height: 8px; border-radius: 4px; background: var(--track); overflow: hidden; display: flex; }
+.usebar i { display: block; height: 100%; }
+.sent { display: flex; gap: 10px; align-items: center; padding: 12px 16px; border-radius: 12px; background: color-mix(in srgb, var(--good) 12%, var(--raised)); font-size: 13px; }
+.sent .code { font: 13px var(--f-ro); padding: 2px 8px; border-radius: 6px; background: var(--raised); }
+
+/* Notifications */
+.notifs { display: flex; flex-direction: column; gap: 10px; width: 356px; flex-shrink: 0; }
+.ntf { display: flex; gap: 12px; padding: 12px 14px; border-radius: 18px; background: rgba(250, 249, 246, 0.82); backdrop-filter: blur(30px) saturate(1.6); -webkit-backdrop-filter: blur(30px) saturate(1.6); box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.12), 0 10px 30px -12px rgba(40, 30, 20, 0.35); color: #1d1c1a; font: 13px/1.38 var(--sans); }
+:root[data-theme="dark"] .ntf { background: rgba(40, 39, 36, 0.8); color: #f1efe9; box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.8), 0 10px 30px -12px rgba(0, 0, 0, 0.8); }
+.ntf svg.app { flex-shrink: 0; width: 38px; height: 38px; }
+.ntf .tx { flex: 1; min-width: 0; }
+.ntf .top { display: flex; justify-content: space-between; gap: 8px; }
+.ntf b { font-weight: 600; }
+.ntf .when { opacity: 0.6; font-size: 12px; }
+.ntf p { margin: 1px 0 0; }
+
+/* Menu bar icon strip */
+.mbgrid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; }
+.mbs { border-radius: 14px; overflow: hidden; background: var(--surface); box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.12); }
+:root[data-theme="dark"] .mbs { box-shadow: 0 0 0 0.5px rgba(255, 255, 255, 0.08); }
+.mbs .bars { display: grid; grid-template-columns: 1fr 1fr; }
+.mbs .bl, .mbs .bd { height: 40px; display: flex; align-items: center; justify-content: center; }
+.mbs .bl { background: #f3f3f5; color: #1d1d1f; } .mbs .bd { background: #26262a; color: #f1f1f1; }
+.mbs .cap2 { padding: 10px 14px 12px; font-size: 13px; }
+.mbs .cap2 b { display: block; font-weight: 700; }
+.mbs .cap2 span { color: var(--ink-2); }
+
+/* Decisions */
+.decision { margin: 6px 0 26px; padding: 20px; border-radius: 20px; background: var(--surface); box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.1); }
+:root[data-theme="dark"] .decision { box-shadow: 0 0 0 0.5px rgba(255, 255, 255, 0.07); }
+.decision > header { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+.decision > header .num { font: 12px var(--f-ro); color: var(--brand-text); }
+.decision > header h3 { margin: 0; font: 800 20px/1.2 var(--f-ui); letter-spacing: -0.02em; }
+.decision > header p { margin: 0; color: var(--ink-2); flex: 1 1 320px; }
+.opts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(380px, 100%), 1fr)); gap: 16px; }
+.opt { min-width: 0; }
+.opt-h { display: flex; align-items: center; gap: 10px; margin: 0 0 10px; }
+.opt-h .k { font: 13px var(--f-ro); width: 24px; height: 24px; border-radius: 7px; display: grid; place-items: center; background: var(--sunken); }
+.opt-h b { font-size: 15px; }
+.rec { font-size: 12px; font-weight: 700; padding: 3px 10px; border-radius: 99px; background: color-mix(in srgb, var(--good) 15%, transparent); color: var(--good-text); }
+.why { margin: 10px 2px 0; font-size: 13.5px; color: var(--ink-2); max-width: 60ch; }
+.opt .desk { background: var(--sunken); }
+
+@media (max-width: 700px) {
+  .stage { padding: 20px 16px 60px; }
+  .mbgrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .group-h h2 { font-size: 24px; }
+}
+</style>
+</head>
+<body>
+<div class="switch">
+  <b>Concept C · app</b>
+  <nav aria-label="Indice">
+    <a href="#stati">Stati del pannello</a><a href="#riga">Menu di riga</a><a href="#impostazioni">Impostazioni</a><a href="#notifiche">Notifiche</a><a href="#icona">Icona</a><a href="#decisioni">Decisioni</a>
+  </nav>
+  <button data-theme-toggle>t tema</button>
+  <button data-chrome-toggle>p pulito</button>
+</div>
+
+<main class="stage" id="stage"></main>
+
+<script>
+"use strict";
+const LIMIT = 100, OTHER = 3.1, RATE = 14.5;
+const BASE = [
+  { id: "moretti", name: "Pastificio Moretti - Spot Natale", size: 38.2, avail: 38.2 },
+  { id: "arnaldi", name: "Cantine Arnaldi - Vendemmia", size: 24.6, avail: 6.9 },
+  { id: "showreel", name: "Showreel 2026", size: 11.4, avail: 0 },
+  { id: "lirica", name: "Fondazione Lirica - Backstage", size: 31.5, avail: 0 },
+  { id: "archivio", name: "Archivio 2025", size: 412, avail: 0 }
+];
+const nf1 = new Intl.NumberFormat("it-IT", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+const nf0 = new Intl.NumberFormat("it-IT", { maximumFractionDigits: 0 });
+const num = (n) => (n >= 100 || n === 0 ? nf0.format(n) : nf1.format(n));
+const gb = (n) => num(n) + " GB";
+const eta = (gbLeft) => { const m = Math.ceil((gbLeft * 1000) / RATE / 60); return m < 60 ? `circa ${m} min` : `circa ${Math.floor(m / 60)} h ${m % 60} min`; };
+const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;");
+
+const ICONS = {
+  open: '<path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>',
+  refresh: '<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/>',
+  power: '<path d="M12 2v10"/><path d="M18.4 6.6a9 9 0 1 1-12.77.04"/>',
+  dots: '<circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/>',
+  gear: '<path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/>',
+  eject: '<path d="M12 5 5 13h14z"/><path d="M5 18h14"/>',
+  back: '<path d="m15 18-6-6 6-6"/>',
+  alert: '<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
+  info: '<circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>',
+  lock: '<rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
+  check: '<path d="M20 6 9 17l-5-5"/>',
+  folder: '<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>',
+  down: '<path d="M12 13v8l-4-4"/><path d="m12 21 4-4"/><path d="M4.393 15.269A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.436 8.284"/>',
+  cloud: '<path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/>'
+};
+const icon = (n, s = 16) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[n]}</svg>`;
+
+// Menu bar template icon, monochrome: the state lives in the shape
+function mbIcon(s) {
+  const c = "currentColor";
+  const op = s === "stop" ? ' opacity=".45"' : "";
+  let led = `<circle cx="17.5" cy="11.5" r="2.1" fill="${c}"/>`;
+  if (s === "dl") led = `<circle cx="17.5" cy="11.5" r="2.1" fill="${c}" class="blink"/>`;
+  if (s === "off") led = `<circle cx="17.5" cy="11.5" r="1.9" fill="none" stroke="${c}" stroke-width="1.4"/>`;
+  if (s === "stop") led = "";
+  if (s === "starting") led = `<circle cx="17.5" cy="11.5" r="1.9" fill="none" stroke="${c}" stroke-width="1.4" class="blink"/>`;
+  const slot = s === "starting" ? `<rect x="5.5" y="5.5" width="10" height="1.6" rx=".8" fill="none" stroke="${c}" stroke-width="1"/>` : `<rect x="5" y="5" width="11" height="2.4" rx="1.2" fill="${c}"/>`;
+  return `<svg width="24" height="16" viewBox="0 0 24 16"${op} aria-hidden="true"><rect x="1.5" y="1.5" width="21" height="13" rx="3.6" fill="none" stroke="${c}" stroke-width="1.5"/>${slot}${led}</svg>`;
+}
+
+// App icon, the drive on putty
+let uid = 0;
+function appIcon(size) {
+  const k = "ai" + uid++;
+  return `<svg class="app" width="${size}" height="${size}" viewBox="0 0 124 124" aria-hidden="true"><defs><linearGradient id="${k}a" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f7f5f0"/><stop offset="1" stop-color="#dcd7cc"/></linearGradient><linearGradient id="${k}b" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3a3835"/><stop offset="1" stop-color="#1c1b19"/></linearGradient></defs><rect x="4" y="4" width="116" height="116" rx="27" fill="url(#${k}a)"/><rect x="20" y="40" width="84" height="48" rx="12" fill="url(#${k}b)"/><rect x="32" y="55" width="44" height="7" rx="3.5" fill="#0d0d0c"/><rect x="33" y="56" width="21" height="5" rx="2.5" fill="#8e897f"/><circle cx="90" cy="73" r="5" fill="#ff5b1f"/></svg>`;
+}
+
+// Faceplate: the slot fills with the cache, the LED is the state
+const LED = { ok: "led-ok", dl: "led-dl", starting: "led-dl", off: "led-err", stop: "led-idle", revoked: "led-idle", low: "led-ok" };
+function face(o) {
+  const k = "fd" + uid++;
+  const used = o.used;
+  const w = o.state === "revoked" ? 0 : Math.max(6, (used / LIMIT) * 206);
+  const ro = { ok: "COLLEGATO", dl: o.pct + "%", starting: "AVVIO", off: "SCOLLEGATO", stop: "SPENTO", revoked: "RIMOSSO", low: "MAC PIENO" }[o.state];
+  const blink = o.state === "dl" || o.state === "starting";
+  const lit = o.state !== "stop" && o.state !== "revoked";
+  const head = o.state === "dl" ? `<rect x="${27 + w - 14}" y="37" width="14" height="6" rx="3" fill="var(--led-dl)" class="blink"/>` : "";
+  const fillOp = o.state === "stop" ? ' opacity=".45"' : "";
+  return `<div class="face"><svg viewBox="0 0 336 112" aria-hidden="true">
+    <defs><linearGradient id="${k}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--face-hi)"/><stop offset="1" stop-color="var(--face-lo)"/></linearGradient></defs>
+    <rect x=".5" y=".5" width="335" height="111" rx="12" fill="url(#${k})" stroke="var(--face-edge)"/>
+    <rect x="1.5" y="1.5" width="333" height="109" rx="11" fill="none" stroke="#fff" stroke-opacity=".45"/>
+    <rect x="24" y="34" width="212" height="12" rx="6" fill="var(--slot)"/>
+    ${w ? `<rect x="27" y="37" width="${w}" height="6" rx="3" fill="var(--slot-fill)"${fillOp}/>` : ""}${head}
+    <text x="24" y="76" font-family="Schibsted Grotesk" font-weight="800" font-size="15" letter-spacing="-.4" fill="var(--ink-3)">fluix</text>
+    <text x="236" y="76" text-anchor="end" font-family="Departure Mono" font-size="11" fill="var(--ink-2)">${o.state === "revoked" ? "0" : num(used)} / ${LIMIT} GB</text>
+    <circle cx="290" cy="40" r="10" fill="var(--slot)" opacity=".9"/>
+    <circle cx="290" cy="40" r="5.5" class="${LED[o.state]}${blink ? " blink" : ""}" style="${lit ? `filter:drop-shadow(0 0 6px var(--${LED[o.state]}))` : ""}"/>
+    <text x="290" y="76" text-anchor="middle" font-family="Departure Mono" font-size="10" letter-spacing=".5" fill="var(--ink-2)">${ro}</text>
+    <path d="M24 94H312" stroke="var(--face-edge)"/><path d="M24 95H312" stroke="#fff" stroke-opacity=".45"/>
+  </svg></div>`;
+}
+
+function marker(p, o) {
+  const pct = (p.avail / p.size) * 100;
+  if (o.state === "dl" && p.id === o.target) return `<span class="dot dl blink"></span>`;
+  if (pct >= 100) return `<span class="dot full"></span>`;
+  if (pct > 0) return `<span class="dot part" style="--p:${pct}%"></span>`;
+  return `<span class="dot"></span>`;
+}
+function chip(p, o) {
+  if (o.state === "dl" && p.id === o.target) return `<span class="chip dl">${Math.floor((p.avail / p.size) * 100)}%</span>`;
+  if (o.queue && o.queue.includes(p.id)) return `<span class="chip">In coda</span>`;
+  if (p.avail >= p.size) return `<span class="chip ready">Pronto</span>`;
+  if (p.avail > 0) return `<span class="chip">${Math.round((p.avail / p.size) * 100)}%</span>`;
+  return `<span class="chip">Online</span>`;
+}
+
+function rowMenu(p, o) {
+  const cacheFree = LIMIT - o.used;
+  const missing = p.size - p.avail;
+  const items = [];
+  if (p.size > LIMIT) {
+    items.push(`<div class="mnote">Con ${gb(p.size)} è più grande dello spazio di Fluix su questo Mac (${LIMIT} GB). Si apre lo stesso dal Finder: ogni salto nel video aspetta circa un secondo.</div><div class="sep"></div>`);
+  } else if (missing > 0) {
+    if (missing > cacheFree && o.fullMode === "block") {
+      items.push(`<button class="mi" disabled style="opacity:.5">Rendi disponibile<span class="aside">${gb(missing)}</span></button><div class="mnote">Serve spazio: su questo Mac restano ${gb(cacheFree)} per Fluix. Libera prima un progetto che non stai montando.</div>`);
+    } else if (missing > cacheFree) {
+      items.push(`<button class="mi hl">Rendi disponibile<span class="aside">${eta(missing)}</span></button><div class="mnote">Per fare posto Fluix libererà i file aperti meno di recente su questo Mac. Restano su Fluix e si riscaricano quando li apri.</div>`);
+    } else {
+      items.push(`<button class="mi hl">Rendi disponibile<span class="aside">${eta(missing)}</span></button>`);
+    }
+  }
+  if (p.avail > 0) items.push(`<button class="mi">Libera spazio<span class="aside">${gb(p.avail)}</span></button>`);
+  items.push(`<button class="mi">Mostra nel Finder<span class="aside">${icon("folder", 14)}</span></button>`);
+  return `<div class="menu" role="menu">${items.join("")}</div>`;
+}
+
+function panel(o) {
+  const P = o.projects || BASE;
+  o.used = o.used ?? P.reduce((s, p) => s + p.avail, 0) + OTHER;
+  const tgt = P.find((p) => p.id === o.target);
+  if (tgt) o.pct = Math.floor((tgt.avail / tgt.size) * 100);
+  const word = o.word || "Spegni";
+  let h, p = "", extra = "", btns;
+  const prim = (ic, t, dis) => `<button class="btn btn-primary"${dis ? " disabled" : ""}>${icon(ic, 16)}${t}</button>`;
+  switch (o.state) {
+    case "dl": {
+      h = `Download di ${tgt.name}`; p = "Puoi già montare: i file arrivano mentre lavori.";
+      const q = (o.queue || []).map((id) => P.find((x) => x.id === id).name);
+      extra = `<div class="meta-line">${num(tgt.avail)} di ${gb(tgt.size)} · ${eta(tgt.size - tgt.avail)}</div>${q.length ? `<div class="meta-line">Poi: ${esc(q[0])}${q.length > 1 ? ` e altri ${q.length - 1}` : ""}</div>` : ""}`;
+      btns = `<div class="btns">${prim("open", "Apri nel Finder")}<button class="btn btn-ghost">Interrompi</button></div>`; break;
+    }
+    case "starting":
+      h = "Fluix si sta avviando"; p = "Pochi secondi e i progetti tornano nel Finder.";
+      btns = `<div class="btns">${prim("open", "Apri nel Finder", true)}</div>`; break;
+    case "off":
+      h = "Fluix non è raggiungibile";
+      if (o.reconnect === "manual") {
+        extra = `<ol><li>Salva il progetto in CapCut.</li><li>Controlla che il Mac sia connesso a internet.</li><li>Premi Riconnetti.</li></ol>`;
+        btns = `<div class="btns">${prim("refresh", "Riconnetti")}</div>`;
+      } else {
+        p = "Riprovo da solo tra <span class=\"meta-line\" data-countdown>24 s</span>. Intanto salva il progetto in CapCut.";
+        extra = `<div class="notice calm"><span class="ic">${icon("info", 16)}</span><span>Se non torna, controlla che il Mac sia connesso a internet. I file già aperti restano in CapCut.</span></div>`;
+        btns = `<div class="btns">${prim("refresh", "Riprova ora")}</div>`;
+      }
+      break;
+    case "stop":
+      h = word === "Espelli" ? "Fluix è espulso" : "Fluix è spento"; p = "Accendilo per ritrovare i progetti nel Finder.";
+      btns = `<div class="btns">${prim("power", "Accendi Fluix")}</div>`; break;
+    case "revoked":
+      h = "Questo Mac non ha più accesso"; p = "Un amministratore di Studio Esempio lo ha rimosso il 16 ottobre. Il disco è scollegato e i file scaricati su questo Mac sono stati cancellati.";
+      extra = `<div class="notice calm"><span class="ic">${icon("lock", 16)}</span><span>I progetti sono al sicuro su Fluix. Se è un errore, scrivi a chi gestisce il team.</span></div>`;
+      btns = `<div class="btns">${prim("refresh", "Accedi di nuovo")}</div>`; break;
+    case "low":
+      h = "Fluix è collegato"; p = "I progetti sono nel Finder, sotto Fluix.";
+      extra = `<div class="notice warn"><span class="ic">${icon("alert", 16)}</span><span><b>Il Mac ha quasi finito lo spazio</b>Restano 12 GB liberi. Sotto i 10 GB Fluix libera da solo tutti i file scaricati, per non riempire il disco.<br><button class="btn btn-soft">Libera spazio ora</button></span></div>`;
+      btns = `<div class="btns">${prim("open", "Apri nel Finder")}</div>`; break;
+    default:
+      h = "Fluix è collegato"; p = "I progetti sono nel Finder, sotto Fluix.";
+      btns = `<div class="btns">${prim("open", "Apri nel Finder")}</div>`;
+  }
+  const banner = o.update ? `<div class="banner"><span class="t"><b>Fluix 0.2.0 è pronto.</b> Si installa quando riavvii l'app.</span><button class="btn btn-soft btn-small" style="background:var(--raised)">Riavvia</button></div>` : "";
+  const faceState = o.state === "ok" && o.update ? "ok" : o.state;
+
+  const showSpace = ["ok", "dl", "low"].includes(o.state) && !o.hideSpace;
+  const parts = P.filter((x) => x.avail > 0).map((x, i) => ({ n: x.name, g: x.avail, c: ["var(--ink)", "var(--ink-2)", "var(--slot-fill)"][i % 3] }));
+  parts.push({ n: "Altri file aperti di recente", g: OTHER, c: "var(--idle)" });
+  const space = showSpace ? `<section class="space"><div class="sec-h"><span>Su questo Mac</span><b>${num(o.used)} di ${LIMIT} GB</b></div><ul class="legend">${parts.map((x) => `<li><span class="sw" style="background:${x.c}"></span><span class="n">${esc(x.n)}</span><span class="v">${gb(x.g)}</span></li>`).join("")}<li><span class="sw" style="background:var(--track)"></span><span class="n">Ancora libero</span><span class="v">${gb(Math.max(0, LIMIT - o.used))}</span></li></ul></section>` : "";
+
+  const showList = ["ok", "dl", "low", "off"].includes(o.state);
+  const rows = P.map((x) => {
+    const open = o.menu === x.id;
+    const conf = o.confirm === x.id ? `<div class="confirm"><b>Liberare ${gb(x.avail)} di ${esc(x.name)}?</b><p>I file restano nel Finder e su Fluix: si riscaricano quando li apri, e fino ad allora ogni salto nel video aspetta circa un secondo.</p><div class="btns"><button class="btn btn-primary">Libera spazio</button><button class="btn btn-soft">Annulla</button></div></div>` : "";
+    return `<div class="prow${open || o.confirm === x.id ? " open" : ""}">${marker(x, o)}<span class="n">${esc(x.name)}</span>${chip(x, o)}<button class="icon-btn" aria-label="Azioni per ${esc(x.name)}" aria-expanded="${open}">${icon("dots", 16)}</button></div>${open ? rowMenu(x, o) : ""}${conf}`;
+  }).join("");
+  const list = showList ? `<section class="projects${o.state === "off" ? " dim" : ""}"><div class="sec-h"><span>Progetti</span><b>${P.length}</b></div>${rows}</section>` : "";
+
+  const stopConfirm = o.stopConfirm ? `<div class="confirm" style="margin:8px 8px 0"><b>${word === "Espelli" ? "Espellere Fluix?" : "Spegnere Fluix?"}</b><p>${word === "Espelli" ? "Il disco sparisce dal Finder. La macchina virtuale resta accesa." : "Il disco sparisce dal Finder e CapCut non vede più i file finché non lo riaccendi. Si libera anche la memoria che Fluix usa."}</p><div class="btns"><button class="btn btn-primary">${word}</button><button class="btn btn-soft">Annulla</button></div></div>` : "";
+  const offIcon = word === "Espelli" ? "eject" : "power";
+  const footAction = ["stop", "revoked"].includes(o.state) ? "" : `<button class="btn">${icon(offIcon, 14)}${word}</button>`;
+  const foot = `<footer class="foot"><span class="ver">Fluix 0.1.0</span><button class="icon-btn" aria-label="Impostazioni">${icon("gear", 16)}</button>${footAction}</footer>`;
+
+  return `<div class="pop" role="dialog" aria-label="Pannello di Fluix">${banner}${face({ state: faceState, used: o.used, pct: o.pct })}<section class="status"><div><h3>${esc(h)}</h3>${p ? `<p>${p}</p>` : ""}</div>${extra}${btns}</section>${space}${list}${stopConfirm}${foot}</div>`;
+}
+
+function settingsPage() {
+  return `<div class="pop" role="dialog" aria-label="Impostazioni nel pannello">
+    <div class="pagehead"><button class="icon-btn" aria-label="Indietro">${icon("back", 18)}</button><b>Impostazioni</b></div>
+    <div class="plist">
+      <div class="r"><span>Account</span><span>giulia.ferri@studio.example</span></div>
+      <div class="r"><span>Questo Mac</span><span>MacBook Pro di Giulia</span></div>
+      <div class="r"><span>Spazio massimo</span><span class="meta-line">100 GB</span></div>
+      <div class="r"><span>Avvio al login</span><button class="toggle" role="switch" aria-checked="true" aria-label="Avvio al login"></button></div>
+      <div class="r"><span>Versione</span><span class="meta-line">0.1.0</span></div>
+      <div class="r"><span>Diagnostica</span><button class="btn btn-soft btn-small">Invia</button></div>
+      <div class="r"><span>Esci da Studio Esempio</span><button class="btn btn-soft btn-small">Esci</button></div>
+    </div>
+  </div>`;
+}
+
+function settingsWindow(sent) {
+  return `<div class="win" role="dialog" aria-label="Impostazioni di Fluix">
+    <div class="win-bar"><span class="lights"><i></i><i></i><i></i></span><b>Impostazioni</b></div>
+    <div class="win-body">
+      <section><p class="grp-t">Account</p><div class="well">
+        <div class="row"><span class="avatar">GF</span><span class="lbl"><b>Giulia Ferri</b><span>giulia.ferri@studio.example · Studio Esempio, membro</span></span><button class="btn btn-soft">Esci</button></div>
+      </div></section>
+      <section><p class="grp-t">Questo Mac</p><div class="well">
+        <div class="row"><span class="lbl"><b>MacBook Pro di Giulia</b><span>Registrato il 16 ottobre 2026. Chi gestisce il team lo vede con questo nome.</span></span><button class="btn btn-soft">Rinomina</button></div>
+      </div></section>
+      <section><p class="grp-t">Spazio</p><div class="well">
+        <div class="row slider-row">
+          <div class="slider-top"><span class="lbl"><b>Spazio massimo per Fluix</b><span>I file scaricati restano qui finché non serve posto.</span></span><span class="ro" data-cap>100 GB</span></div>
+          <input type="range" min="20" max="100" step="5" value="100" aria-label="Spazio massimo per Fluix" data-cap-range>
+          <div class="scale"><span>20 GB</span><span>100 GB, il massimo di questa installazione</span></div>
+        </div>
+        <div class="row slider-row">
+          <div class="slider-top"><span class="lbl"><b>In uso</b><span>Fluix lascia sempre almeno 20 GB liberi sul Mac.</span></span><span class="ro">48,2 di 100 GB</span></div>
+          <div class="usebar"><i style="width:48.2%;background:var(--ink)"></i></div>
+          <div class="scale"><span>Liberi sul Mac: 214 GB</span><span>Riserva: 20 GB</span></div>
+        </div>
+      </div></section>
+      <section><p class="grp-t">Generale</p><div class="well">
+        <div class="row"><span class="lbl"><b>Avvia Fluix al login</b><span>Il disco torna nel Finder ogni volta che accendi il Mac.</span></span><button class="toggle" role="switch" aria-checked="true" aria-label="Avvia Fluix al login" data-toggle></button></div>
+        <div class="row"><span class="lbl"><b>Versione</b><span>Fluix 0.1.0, aggiornato</span></span><button class="btn btn-soft">Cerca aggiornamenti</button></div>
+      </div></section>
+      <section><p class="grp-t">Assistenza</p><div class="well">
+        <div class="row"><span class="lbl"><b>Invia diagnostica</b><span>Manda a chi gestisce Fluix lo stato del disco, gli ultimi log di Fluix e della macchina virtuale e la versione di macOS. Nessun file dei progetti, nessuna password.</span></span>${sent ? "" : `<button class="btn btn-soft" data-send>Invia</button>`}</div>
+        ${sent ? `<div class="row"><div class="sent" style="flex:1">${icon("check", 16)}<span>Inviata alle 10:42. Comunica il codice a chi ti aiuta:</span><span class="code">FX-7Q2K</span></div></div>` : ""}
+      </div></section>
+    </div>
+  </div>`;
+}
+
+function notifs() {
+  const n = (t, b, w) => `<div class="ntf">${appIcon(38)}<div class="tx"><div class="top"><b>${t}</b><span class="when">${w}</span></div><p>${b}</p></div></div>`;
+  return `<div class="notifs">
+    ${n("Cantine Arnaldi - Vendemmia è pronto", "24,6 GB su questo Mac: scorre in timeline senza attese.", "ora")}
+    ${n("Fluix è di nuovo collegato", "I progetti sono tornati nel Finder.", "2 min fa")}
+    ${n("Fluix ha liberato 48,2 GB", "Il Mac aveva meno di 10 GB liberi. I progetti restano nel Finder e si riscaricano quando li apri.", "10:12")}
+  </div>`;
+}
+
+function desk(inner, opts = {}) {
+  return `<div class="desk${opts.align ? " " + opts.align : ""}">${opts.bar === false ? "" : `<div class="menubar"><div class="l"><b>CapCut</b><span>File</span><span>Modifica</span><span>Vista</span></div><div class="r"><span class="mb-icon">${mbIcon(opts.mb || "ok")}</span><span>ven 16 ott 10:42</span></div></div>`}${inner}</div>`;
+}
+function frame(id, title, line, body) {
+  return `<figure class="frame" id="${id}"><figcaption class="cap"><span class="id">${id.toUpperCase()}</span><b>${title}</b><span>${line}</span></figcaption>${body}</figure>`;
+}
+function group(id, n, title, line, inner) {
+  return `<section class="group" id="${id}"><header class="group-h"><span class="num">${n}</span><h2>${title}</h2><p>${line}</p></header>${inner}</section>`;
+}
+function decision(n, title, line, a, b, rec, why) {
+  const opt = (k, o) => `<div class="opt"><div class="opt-h"><span class="k">${k}</span><b>${o.t}</b>${rec === k ? '<span class="rec">Consigliata</span>' : ""}</div>${o.body}</div>`;
+  return `<article class="decision" id="d${n}"><header><span class="num">Decisione ${n}</span><h3>${title}</h3><p>${line}</p></header><div class="opts">${opt("A", a)}${opt("B", b)}</div><p class="why">${why}</p></article>`;
+}
+
+// Scenario for the full cache decision: three projects already on the Mac
+const FULL = [
+  { id: "moretti", name: "Pastificio Moretti - Spot Natale", size: 38.2, avail: 38.2 },
+  { id: "arnaldi", name: "Cantine Arnaldi - Vendemmia", size: 24.6, avail: 24.6 },
+  { id: "lirica", name: "Fondazione Lirica - Backstage", size: 31.5, avail: 31.5 },
+  { id: "showreel", name: "Showreel 2026", size: 11.4, avail: 0 },
+  { id: "archivio", name: "Archivio 2025", size: 412, avail: 0 }
+];
+
+const html = [
+  group("stati", "01", "Stati del pannello", "Il frontale dice lo stato con il LED e la fessura; sotto, una frase e un'azione sola.", `<div class="frames">
+    ${frame("p1", "Collegato", "Lo stato di tutti i giorni.", desk(panel({ state: "ok" })))}
+    ${frame("p2", "Download in corso", "Rendi disponibile su un progetto, con la coda.", desk(panel({ state: "dl", target: "arnaldi", queue: ["showreel", "lirica"] }), { mb: "dl" }))}
+    ${frame("p3", "Avvio", "Dopo il login o dopo Accendi.", desk(panel({ state: "starting" }), { mb: "starting" }))}
+    ${frame("p4", "Non raggiungibile", "Rete persa: riprova da solo.", desk(panel({ state: "off" }), { mb: "off" }))}
+    ${frame("p5", "Spento", "Spento dall'utente, non torna da solo.", desk(panel({ state: "stop" }), { mb: "stop" }))}
+    ${frame("p6", "Revocato", "Un amministratore ha rimosso questo Mac.", desk(panel({ state: "revoked" }), { mb: "stop" }))}
+    ${frame("p7", "Mac quasi pieno", "Sotto la riserva: avviso prima che liberi da solo.", desk(panel({ state: "low" })))}
+    ${frame("p8", "Aggiornamento disponibile", "Una riga in alto, non uno stato.", desk(panel({ state: "ok", update: true })))}
+  </div>`),
+  group("riga", "02", "Menu di riga", "Le azioni sui singoli progetti stanno nel menu della riga; Libera spazio chiede conferma.", `<div class="frames">
+    ${frame("r1", "Menu aperto", "Rendi disponibile con il tempo stimato, Libera spazio con i GB.", desk(panel({ state: "ok", menu: "arnaldi", hideSpace: true })))}
+    ${frame("r2", "Conferma Libera spazio", "Dice cosa succede ai file, non solo se sei sicuro.", desk(panel({ state: "ok", confirm: "arnaldi", hideSpace: true })))}
+    ${frame("r3", "Progetto troppo grande", "Archivio 2025, 412 GB: spiegazione al posto dell'azione.", desk(panel({ state: "ok", menu: "archivio", hideSpace: true })))}
+  </div>`),
+  group("impostazioni", "03", "Impostazioni", "Una finestra vera, aperta dall'ingranaggio del pannello o con Cmd+virgola.", `<div class="frames" style="grid-template-columns:minmax(0,1fr)">
+    ${frame("s1", "Finestra Impostazioni", "Account, questo Mac, spazio, generale, assistenza.", desk(settingsWindow(false), { align: "center" }))}
+    ${frame("s2", "Diagnostica inviata", "Il codice da dare a chi aiuta.", desk(settingsWindow(true), { align: "center" }))}
+  </div>`),
+  group("notifiche", "04", "Notifiche", "Notifiche di macOS, solo per quello che succede mentre il pannello è chiuso.", `<div class="frames">
+    ${frame("n1", "Tre notifiche", "Download finito, disco ricollegato, spazio liberato da solo.", desk(notifs()))}
+  </div>`),
+  group("icona", "05", "Icona nella barra dei menu", "Immagine template: macOS la colora, lo stato passa dalla forma. Il lampeggio sono due immagini alternate.", `<div class="mbgrid">
+    ${[["ok", "Collegato", "fessura piena, LED pieno"], ["dl", "Download", "LED che lampeggia"], ["starting", "Avvio", "fessura vuota, LED vuoto che lampeggia"], ["off", "Non raggiungibile", "LED vuoto"], ["stop", "Spento", "icona attenuata, senza LED"]].map(([s, t, d]) => `<div class="mbs"><div class="bars"><div class="bl">${mbIcon(s)}</div><div class="bd">${mbIcon(s)}</div></div><div class="cap2"><b>${t}</b><span>${d}</span></div></div>`).join("")}
+  </div>`),
+  group("decisioni", "06", "Decisioni aperte", "Quattro scelte che cambiano il prodotto. Per ognuna la mia raccomandazione e perché.", `
+    ${decision(1, "Spegni o Espelli", "La parola dell'azione nel piede del pannello e nella sua conferma.",
+      { t: "Spegni", body: desk(panel({ state: "ok", stopConfirm: true, hideSpace: true, word: "Spegni" }), { align: "center" }) },
+      { t: "Espelli", body: desk(panel({ state: "ok", stopConfirm: true, hideSpace: true, word: "Espelli" }), { align: "center" }) },
+      "A", "Spegni: ferma anche la macchina virtuale e fa coppia con Accendi. In macOS Espelli vuol dire solo smontare, e chi lo usa si aspetta che il disco non torni; il nostro agente invece lo rimonterebbe.")}
+    ${decision(2, "Cache piena", "Tre progetti già sul Mac occupano 97,4 GB; si chiede Rendi disponibile su Showreel 2026, 11,4 GB.",
+      { t: "Blocca con Serve spazio", body: desk(panel({ state: "ok", projects: FULL, menu: "showreel", hideSpace: true, fullMode: "block" }), { align: "center" }) },
+      { t: "Libera i meno recenti", body: desk(panel({ state: "ok", projects: FULL, menu: "showreel", hideSpace: true, fullMode: "evict" }), { align: "center" }) },
+      "B", "Libera i meno recenti: JuiceFS lo fa già quando la cache arriva al limite, e i blocchi che escono sono per definizione quelli che nessuno sta usando. Bloccare chiede a chi monta di decidere cosa liberare, cosa che il sistema sa meglio.")}
+    ${decision(3, "Riconnessione", "Cosa vede chi ha perso la rete mentre lavora.",
+      { t: "Automatica ogni 30 secondi", body: desk(panel({ state: "off", reconnect: "auto" }), { align: "center", mb: "off" }) },
+      { t: "Solo il pulsante Riconnetti", body: desk(panel({ state: "off", reconnect: "manual" }), { align: "center", mb: "off" }) },
+      "A", "Automatica: chi monta non deve fare niente e il pulsante resta per riprovare subito. Mentre l'app è aperta riprova ogni 30 secondi; l'agente di sistema resta il paracadute ogni 2 minuti.")}
+    ${decision(4, "Dove stanno le impostazioni", "Si aprono di rado: account, spazio, avvio al login, diagnostica.",
+      { t: "Finestra separata", body: desk(`<div class="scaled" data-scale=".62" style="width:${Math.round(620 * 0.62)}px;flex-shrink:0"><div style="width:620px;transform:scale(.62);transform-origin:top left">${settingsWindow(false)}</div></div>`, { align: "center" }) },
+      { t: "Seconda pagina del pannello", body: desk(settingsPage(), { align: "center" }) },
+      "A", "Finestra separata: è la convenzione del Mac (Cmd+virgola), c'è spazio per spiegare spazio e diagnostica, e il pannello resta a una cosa sola. La pagina nel pannello costringe a frasi da una riga proprio dove servono spiegazioni.")}
+  `)
+].join("");
+document.getElementById("stage").innerHTML = html;
+
+// Scaled previews keep their real layout and take only the scaled height
+document.querySelectorAll("[data-scale]").forEach((o) => { o.style.height = Math.ceil(o.firstElementChild.offsetHeight * Number(o.dataset.scale)) + "px"; });
+
+// Interactions that the frames promise
+document.querySelectorAll("[data-toggle], .toggle").forEach((t) => t.addEventListener("click", () => t.setAttribute("aria-checked", String(t.getAttribute("aria-checked") !== "true"))));
+document.querySelectorAll("[data-cap-range]").forEach((r) => r.addEventListener("input", () => { r.closest(".well").querySelector("[data-cap]").textContent = r.value + " GB"; }));
+document.querySelectorAll("[data-send]").forEach((b) => b.addEventListener("click", () => { const w = b.closest(".win"); w.outerHTML = settingsWindow(true); }));
+let left = 24;
+setInterval(() => { left = left <= 1 ? 30 : left - 1; document.querySelectorAll("[data-countdown]").forEach((e) => (e.textContent = left + " s")); }, 1000);
+
+// Concept chrome, from the mockup template
+const KEY = `concept:${location.pathname}`;
+const root = document.documentElement, body = document.body;
+const load = () => { try { return JSON.parse(localStorage.getItem(KEY) || "{}"); } catch { return {}; } };
+const save = (s) => { try { localStorage.setItem(KEY, JSON.stringify(s)); } catch {} };
+const setTheme = (t) => { root.dataset.theme = t; save({ ...load(), theme: t }); };
+document.querySelector("[data-theme-toggle]").addEventListener("click", () => setTheme(root.dataset.theme === "dark" ? "light" : "dark"));
+document.querySelector("[data-chrome-toggle]").addEventListener("click", () => (body.dataset.chrome = "off"));
+addEventListener("keydown", (e) => {
+  if (e.metaKey || e.ctrlKey || e.altKey || e.target.closest("input, textarea, select, [contenteditable]")) return;
+  const k = e.key.toLowerCase();
+  if (k === "t") setTheme(root.dataset.theme === "dark" ? "light" : "dark");
+  else if (k === "p") body.dataset.chrome = body.dataset.chrome === "off" ? "on" : "off";
+});
+root.dataset.theme = load().theme || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+</script>
+</body>
+</html>

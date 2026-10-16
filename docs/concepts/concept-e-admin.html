@@ -1,0 +1,707 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Concept E - web del control plane</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<!--
+  Concept E: com'è fatto il sito del control plane, dove un admin gestisce persone, Mac, dischi e
+  la chiave dell'archivio. Storyboard di tutte le schermate, nello stile D Drive (concept-b-identity).
+  Tasti: t tema, p nasconde barra, indice e selettori di stato per guardare pulito.
+  Deviazione voluta dal template: non è un file a varianti su una decisione sola, è il giro completo
+  delle schermate; le decisioni aperte stanno in fondo come blocchi A/B con la raccomandazione.
+
+  Il problema: con PostgreSQL condiviso e il login, qualcuno deve invitare le persone, vedere quali Mac
+  hanno accesso, revocarne uno e cambiare la chiave S3 dopo una revoca. Oggi non esiste niente: le
+  chiavi stanno in uno zip e "togliere l'accesso" vuol dire ruotare a mano su ogni Mac.
+
+  Schermate:
+  1  Accesso: email, link inviato, link scaduto.
+  2  Panoramica: i dischi, i Mac collegati adesso, lo stato dei servizi visto dal control plane,
+     l'attività recente, il promemoria della chiave da cambiare.
+  3  Persone: tabella, invito, cambio di ruolo, rimozione con conferma, stato dopo la rimozione.
+  4  Mac: tabella, revoca di un Mac, riga revocata, stato vuoto.
+  5  Cambio della chiave S3: quattro passi guidati, la finestra di rischio con il tempo che scorre,
+     errore della scrittura di prova.
+  6  Dischi: elenco, dettaglio, nuovo disco.
+  7  Registro: filtri, caricamento.
+  8  Impostazioni dell'organizzazione: nome, SMTP per i link, archivio S3 con prova fallita, chi invita.
+
+  Mappatura sul codice (fattibilità, non piano): FastAPI + React + PostgreSQL, il modello dati di
+  docs/architecture.html. Persone = users + memberships (admin | member, invited | active | revoked);
+  Mac = devices, un ruolo PostgreSQL fluix_d_<id> per Mac; Dischi = volumes, uno per database dei
+  metadata; Registro = audit_events; Accesso = sign_in_requests con magic link. Revocare un Mac è
+  REVOKE + pg_terminate_backend + DROP ROLE; rimuovere una persona lo fa per tutti i suoi Mac.
+  Il cambio della chiave: il control plane prova una scrittura con la chiave nuova, poi esegue
+  juicefs config su ogni volume; i Mac montati la leggono dai metadata entro un minuto (da verificare
+  nello spike). Creare e cancellare la chiave dal provider resta un passo manuale: niente API del
+  provider nel core.
+  Cosa il control plane non fa: non legge né scrive i file, non sta sul percorso dei dati. Se il sito
+  si ferma, i dischi montati continuano a funzionare; si fermano accessi nuovi, inviti, revoche.
+  "Mac collegati adesso" e "ultimo contatto" vengono dall'heartbeat dell'app; lo stato di PostgreSQL
+  e S3 è quello che vede il control plane, non quello che vede ogni Mac.
+
+  Dati: organizzazione "Studio Esempio", persone, Mac, date e misure inventati e plausibili; dominio
+  studio.example. Le dimensioni dei dischi sono di fantasia, i 4 MB di blocco e i 7 giorni di cestino
+  sono la configurazione vera (docs/ARCHITECTURE.md).
+
+  Decisioni aperte, con raccomandazione:
+  D1 navigazione: barra laterale (consigliata) o schede in alto.
+  D2 dopo la rimozione di una persona: rotazione che parte da sola, o promemoria fisso con il bottone
+     "Cambia chiave adesso" nella conferma (consigliato).
+  D3 cosa vede un membro: Persone e Mac in sola lettura, o solo "I miei Mac" con la revoca del proprio
+     Mac perso (consigliato).
+-->
+<style>
+@font-face { font-family: "Departure Mono"; src: url("https://cdn.jsdelivr.net/gh/rektdeckard/departure-mono@v1.500/public/assets/DepartureMono-Regular.woff2") format("woff2"); font-display: swap; }
+:root {
+  color-scheme: light;
+  --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, monospace;
+  --f-ui: "Schibsted Grotesk", var(--sans); --f-head: "Schibsted Grotesk", var(--sans); --f-ro: "Departure Mono", var(--mono);
+  --page: #e6e3dc; --surface: #f4f2ed; --raised: #fbfaf7; --sunken: #ebe8e1; --line: #dcd8cf; --ink: #1d1c1a; --ink-2: #625f58; --ink-3: #706c64;
+  --brand: #ff5b1f; --on-brand: #1d1c1a; --good: #2b9d4b; --bad: #e0402a; --track: #e2ded6; --idle: #c9c5bb;
+  --face-hi: #fdfcfa; --face-lo: #e9e6df; --face-edge: #d3cfc5; --slot: #2a2927; --slot-fill: #8e897f;
+  --led-ok: #2fbf57; --led-dl: #ff5b1f; --led-err: #ff3b24; --led-idle: #cfcbc2;
+  /* Text on tinted pills: darker steps of the LED hues, AA on their tint */
+  --t-ok: #1c6e36; --t-act: #a8380b; --t-err: #ad2a17; --t-idle: #5a5750;
+  --danger: #b8301f; --on-danger: #ffffff;
+  --scrim: rgba(29, 28, 26, 0.36);
+  --pop: 0 0 0 0.5px rgba(40, 30, 20, 0.16), 0 30px 70px -26px rgba(50, 35, 20, 0.5);
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #121211; --surface: #1d1c1a; --raised: #262522; --sunken: #161514; --line: #2f2d29; --ink: #efece5; --ink-2: #a29e95; --ink-3: #8f8b83;
+  --brand: #ff6a2e; --good: #3cc864; --bad: #ff5a43; --track: #2a2926; --idle: #44423d;
+  --face-hi: #2c2b28; --face-lo: #201f1d; --face-edge: #393733; --slot: #0b0b0a; --slot-fill: #6f6b63;
+  --led-ok: #3fdc6c; --led-dl: #ff6a2e; --led-err: #ff4b33; --led-idle: #3a3834;
+  --t-ok: #5fe08a; --t-act: #ff9a70; --t-err: #ff8a78; --t-idle: #b5b1a8;
+  --danger: #ff5a43; --on-danger: #1d1c1a;
+  --scrim: rgba(0, 0, 0, 0.55);
+  --pop: 0 0 0 0.5px rgba(0, 0, 0, 0.8), 0 30px 70px -26px rgba(0, 0, 0, 0.85);
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 64px; }
+body { background: var(--page); color: var(--ink); font: 15px/1.5 var(--f-ui); -webkit-font-smoothing: antialiased; }
+[hidden] { display: none !important; }
+button, input, select { font: inherit; color: inherit; }
+.ro { font-family: var(--f-ro); font-variant-numeric: tabular-nums; letter-spacing: 0.01em; }
+
+/* Concept chrome, not part of the design */
+.switch { position: sticky; top: 0; z-index: 100; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 8px 12px; background: #111; color: #aaa; font: 12px/1.4 ui-monospace, Menlo, monospace; }
+.switch b { color: #eee; font-weight: 500; }
+.switch button { font: inherit; border: 0; padding: 5px 9px; border-radius: 6px; background: #262626; color: #eee; cursor: pointer; }
+.switch p { margin: 0 0 0 8px; flex: 1 1 240px; min-width: 0; }
+.seg { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 0 0 12px; font: 12px var(--mono); color: var(--ink-2); }
+.seg button { font: inherit; padding: 4px 10px; border-radius: 6px; border: 1px solid var(--line); background: var(--surface); color: var(--ink-2); cursor: pointer; }
+.seg button[aria-pressed="true"] { color: var(--ink); border-color: var(--ink-2); }
+body[data-chrome="off"] .switch, body[data-chrome="off"] .index, body[data-chrome="off"] .seg, body[data-chrome="off"] .scr-note { display: none; }
+
+/* Board */
+.board { max-width: 1440px; margin: 0 auto; padding: 28px 28px 80px; display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 32px; }
+body[data-chrome="off"] .board { grid-template-columns: minmax(0, 1fr); }
+.index { position: sticky; top: 60px; align-self: start; display: flex; flex-direction: column; gap: 2px; }
+.index .wm { margin: 0 0 18px 10px; }
+.index a { display: block; padding: 7px 10px; border-radius: 8px; color: var(--ink-2); text-decoration: none; font-size: 14px; }
+.index a:hover { background: var(--surface); color: var(--ink); }
+.index a.on { background: var(--surface); color: var(--ink); font-weight: 600; }
+.index small { margin: 14px 10px 4px; font-size: 11px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-3); }
+.scr { padding-bottom: 56px; }
+.scr > h2 { margin: 0 0 6px; font: 700 24px/1.2 var(--f-head); letter-spacing: -0.02em; }
+.scr-note { margin: 0 0 14px; max-width: 78ch; color: var(--ink-2); font-size: 14.5px; }
+
+/* Browser frame */
+.frame { border-radius: 14px; overflow: hidden; background: var(--surface); box-shadow: var(--pop); }
+.fbar { height: 40px; display: flex; align-items: center; gap: 14px; padding: 0 14px; background: var(--sunken); }
+.dots { display: flex; gap: 7px; } .dots i { width: 11px; height: 11px; border-radius: 50%; background: var(--line); }
+.url { flex: 1; max-width: 520px; margin: 0 auto; height: 26px; border-radius: 8px; background: var(--raised); color: var(--ink-2); font-size: 13px; display: flex; align-items: center; justify-content: center; gap: 6px; }
+.viewport { overflow-x: auto; }
+.canvas { min-width: 1080px; position: relative; }
+
+/* App shell */
+.app { display: grid; grid-template-columns: 232px minmax(0, 1fr); min-height: 640px; }
+.app.tabs { grid-template-columns: minmax(0, 1fr); }
+.side { background: var(--sunken); padding: 18px 12px; display: flex; flex-direction: column; gap: 2px; }
+.side .wm { margin: 2px 8px 18px; }
+.org { margin: 0 8px 14px; padding: 10px 12px; border-radius: 12px; background: var(--raised); display: flex; justify-content: space-between; align-items: center; font-size: 14px; font-weight: 600; }
+.org span { font-weight: 400; color: var(--ink-3); font-size: 12px; display: block; }
+.nav { display: flex; align-items: center; gap: 11px; padding: 0 10px; height: 38px; border-radius: 10px; color: var(--ink-2); font-size: 14px; border: 0; background: none; cursor: pointer; text-align: left; width: 100%; }
+.nav:hover { color: var(--ink); background: color-mix(in srgb, var(--raised) 60%, transparent); }
+.nav.on { background: var(--raised); color: var(--ink); font-weight: 600; }
+.nav .cnt { margin-left: auto; font: 12px var(--f-ro); color: var(--ink-3); }
+.nav .dotn { margin-left: auto; width: 8px; height: 8px; border-radius: 50%; background: var(--led-dl); }
+.me { margin-top: auto; padding: 12px 10px 0; display: flex; align-items: center; gap: 10px; font-size: 13px; }
+.me .av { width: 30px; height: 30px; background: var(--raised); color: var(--ink-2); }
+.me span { color: var(--ink-3); display: block; font-size: 12px; }
+.main { padding: 28px 34px 40px; min-width: 0; }
+.ph { display: flex; justify-content: space-between; align-items: flex-end; gap: 20px; margin-bottom: 22px; }
+.ph h1 { margin: 0; font: 700 28px/1.15 var(--f-head); letter-spacing: -0.025em; }
+.ph p { margin: 6px 0 0; color: var(--ink-2); font-size: 14px; }
+.ph .acts { display: flex; gap: 8px; }
+.topnav { display: flex; align-items: center; gap: 6px; padding: 12px 24px; background: var(--sunken); }
+.topnav .wm { margin-right: 18px; }
+.topnav .nav { width: auto; }
+
+/* Controls */
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 40px; padding: 0 16px; border-radius: 11px; border: 0; cursor: pointer; font: 600 14px var(--f-ui); white-space: nowrap; }
+.btn-ink { background: var(--ink); color: var(--surface); }
+.btn-soft { background: var(--sunken); color: var(--ink); }
+.btn-ghost { background: transparent; color: var(--ink-2); font-weight: 500; }
+.btn-danger { background: var(--danger); color: var(--on-danger); }
+.btn-sm { height: 34px; padding: 0 12px; font-size: 13px; border-radius: 9px; }
+.icon-btn { width: 34px; height: 34px; border-radius: 9px; display: grid; place-items: center; border: 0; background: transparent; color: var(--ink-2); cursor: pointer; }
+.icon-btn:hover { background: var(--sunken); color: var(--ink); }
+.field { display: grid; gap: 6px; }
+.field label { font-size: 13px; font-weight: 600; }
+.field .hint { font-size: 13px; color: var(--ink-2); }
+.input { height: 42px; border-radius: 11px; border: 0; background: var(--raised); box-shadow: inset 0 0 0 1px var(--line); padding: 0 14px; font-size: 14.5px; width: 100%; }
+.input:focus { outline: none; box-shadow: inset 0 0 0 2px var(--ink); }
+.input.ro { font-size: 13.5px; }
+.choice { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.opt { text-align: left; padding: 12px 14px; border-radius: 12px; border: 0; background: var(--raised); box-shadow: inset 0 0 0 1px var(--line); cursor: pointer; }
+.opt b { display: block; font-size: 14px; margin-bottom: 2px; }
+.opt span { font-size: 13px; color: var(--ink-2); }
+.opt[aria-pressed="true"] { box-shadow: inset 0 0 0 2px var(--ink); }
+
+/* Pills with a LED */
+.pill { display: inline-flex; align-items: center; gap: 7px; height: 26px; padding: 0 10px 0 8px; border-radius: 99px; font-size: 13px; font-weight: 600; white-space: nowrap; }
+.pill::before { content: ""; width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.pill.ok { background: color-mix(in srgb, var(--led-ok) 14%, transparent); color: var(--t-ok); } .pill.ok::before { background: var(--led-ok); box-shadow: 0 0 6px var(--led-ok); }
+.pill.act { background: color-mix(in srgb, var(--led-dl) 14%, transparent); color: var(--t-act); } .pill.act::before { background: var(--led-dl); box-shadow: 0 0 6px var(--led-dl); }
+.pill.err { background: color-mix(in srgb, var(--led-err) 13%, transparent); color: var(--t-err); } .pill.err::before { background: var(--led-err); box-shadow: 0 0 6px var(--led-err); }
+.pill.idle { background: var(--sunken); color: var(--t-idle); } .pill.idle::before { box-shadow: inset 0 0 0 1.5px var(--t-idle); }
+.led { display: inline-block; width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.led.ok { background: var(--led-ok); box-shadow: 0 0 6px var(--led-ok); } .led.idle { box-shadow: inset 0 0 0 1.5px var(--ink-3); } .led.act { background: var(--led-dl); box-shadow: 0 0 6px var(--led-dl); }
+.av { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; flex-shrink: 0; font-size: 13px; font-weight: 700; background: var(--sunken); color: var(--ink-2); }
+
+/* Tables */
+.tbl { width: 100%; border-collapse: collapse; font-size: 14px; }
+.tbl th { text-align: left; font-size: 12.5px; font-weight: 600; color: var(--ink-2); padding: 0 14px 10px; white-space: nowrap; }
+.tbl td { padding: 11px 14px; border-top: 1px solid var(--line); vertical-align: middle; white-space: nowrap; }
+.tbl tr.dim td { color: var(--ink-3); }
+.tbl tr:hover td { background: color-mix(in srgb, var(--sunken) 55%, transparent); }
+.who { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.who b { font-weight: 600; display: block; }
+.who span { color: var(--ink-3); font-size: 13px; }
+.who .av { color: var(--ink-2); font-size: 13px; }
+.role { display: inline-flex; align-items: center; gap: 4px; height: 30px; padding: 0 8px; border-radius: 8px; border: 0; background: transparent; cursor: pointer; font-size: 14px; }
+.role:hover { background: var(--sunken); }
+.r { text-align: right; }
+.well { background: var(--raised); border-radius: 16px; padding: 18px 20px; }
+.well h3 { margin: 0 0 12px; font-size: 12px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-3); }
+.grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.grid3 { display: grid; grid-template-columns: 1.3fr 1fr; gap: 14px; align-items: start; }
+.kv { display: grid; grid-template-columns: auto 1fr; gap: 6px 18px; font-size: 14px; }
+.kv dt { color: var(--ink-2); } .kv dd { margin: 0; }
+
+/* Overview */
+.disk { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 18px; align-items: center; }
+.disk h4 { margin: 0; font: 700 18px var(--f-head); letter-spacing: -0.015em; display: flex; align-items: center; gap: 10px; }
+.disk .nums { display: flex; gap: 22px; margin-top: 10px; }
+.disk .nums div { font-size: 12.5px; color: var(--ink-2); }
+.disk .nums b { display: block; font: 20px var(--f-ro); color: var(--ink); font-weight: 400; white-space: nowrap; }
+.disk .nums div { white-space: nowrap; }
+.svc { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; padding: 12px 0; border-top: 1px solid var(--line); font-size: 14px; }
+.svc:first-of-type { border-top: 0; padding-top: 0; }
+.svc > span:last-child { color: var(--ink-2); font-size: 13px; grid-column: 1 / -1; }
+.svc .pill { justify-self: end; }
+.macs { display: grid; gap: 9px; font-size: 14px; }
+.macs div { display: flex; align-items: center; gap: 10px; }
+.macs em { margin-left: auto; font-style: normal; font: 12px var(--f-ro); color: var(--ink-2); }
+.feed { display: grid; gap: 0; font-size: 14px; }
+.feed div { display: grid; grid-template-columns: 92px 1fr; gap: 12px; padding: 9px 0; border-top: 1px solid var(--line); }
+.feed div:first-child { border-top: 0; padding-top: 0; }
+.feed time { font: 12px var(--f-ro); color: var(--ink-2); padding-top: 2px; }
+.notice { display: flex; align-items: center; gap: 16px; padding: 14px 18px; border-radius: 14px; background: color-mix(in srgb, var(--led-dl) 10%, var(--raised)); margin-bottom: 18px; font-size: 14px; }
+.notice p { margin: 0; flex: 1; }
+.notice .timer { font: 13px var(--f-ro); color: var(--t-act); white-space: nowrap; }
+.offpath { font-size: 13.5px; color: var(--ink-2); margin: 14px 0 0; }
+
+/* Dialog inside a frame */
+.scrim { position: absolute; inset: 0; background: var(--scrim); display: grid; place-items: center; padding: 24px; }
+.dlg { width: 480px; background: var(--surface); border-radius: 20px; padding: 24px; box-shadow: var(--pop); display: grid; gap: 16px; }
+.dlg h3 { margin: 0; font: 700 21px/1.2 var(--f-head); letter-spacing: -0.02em; }
+.dlg p { margin: 0; color: var(--ink-2); font-size: 14.5px; }
+.dlg ul { margin: 0; padding-left: 18px; color: var(--ink-2); font-size: 14.5px; display: grid; gap: 6px; }
+.dlg .row { display: flex; gap: 8px; justify-content: flex-end; }
+
+/* Steps (key rotation) */
+.steps { display: grid; gap: 10px; max-width: 760px; }
+.step { display: grid; grid-template-columns: 34px 1fr; gap: 14px; padding: 16px 18px; border-radius: 16px; background: var(--raised); }
+.step.todo { background: transparent; box-shadow: inset 0 0 0 1px var(--line); }
+.step .n { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; font: 13px var(--f-ro); background: var(--sunken); color: var(--ink-2); }
+.step.done .n { background: color-mix(in srgb, var(--led-ok) 18%, transparent); color: var(--t-ok); }
+.step.cur .n { background: var(--ink); color: var(--surface); }
+.step h4 { margin: 4px 0 4px; font-size: 16px; }
+.step p { margin: 0; color: var(--ink-2); font-size: 14px; max-width: 64ch; }
+.step .body { display: grid; gap: 14px; margin-top: 10px; }
+.progress { display: grid; gap: 8px; font-size: 14px; }
+.progress div { display: flex; align-items: center; gap: 10px; }
+.progress .ro { margin-left: auto; font-size: 12.5px; color: var(--ink-2); }
+.risk { display: flex; gap: 18px; align-items: center; padding: 16px 18px; border-radius: 16px; background: var(--sunken); margin-bottom: 16px; max-width: 760px; }
+.risk p { margin: 0; font-size: 14px; color: var(--ink-2); flex: 1; }
+.risk p b { color: var(--ink); }
+.risk .clock { text-align: right; }
+.risk .clock b { display: block; font: 22px var(--f-ro); color: var(--t-act); font-weight: 400; }
+.risk .clock span { font-size: 12.5px; color: var(--ink-2); }
+.check { display: flex; align-items: center; gap: 10px; font-size: 14px; cursor: pointer; }
+.check input { width: 18px; height: 18px; accent-color: var(--ink); }
+.errbox { padding: 12px 14px; border-radius: 12px; background: color-mix(in srgb, var(--led-err) 10%, var(--raised)); font-size: 14px; display: grid; gap: 6px; }
+.errbox code { font: 12.5px var(--f-ro); color: var(--t-err); }
+
+/* Volumes */
+.split { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 18px; align-items: start; }
+.tbl tr.sel td { background: var(--raised); }
+
+/* Audit */
+.filters { display: flex; gap: 10px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
+.chips { display: flex; gap: 4px; padding: 4px; border-radius: 12px; background: var(--sunken); }
+.chips button { height: 32px; padding: 0 12px; border: 0; border-radius: 9px; background: transparent; color: var(--ink-2); cursor: pointer; font-size: 13px; }
+.chips button[aria-pressed="true"] { background: var(--raised); color: var(--ink); font-weight: 600; }
+.search { position: relative; } .search svg { position: absolute; left: 12px; top: 13px; color: var(--ink-3); }
+.search .input { padding-left: 36px; width: 240px; height: 42px; }
+.sk { display: block; height: 12px; border-radius: 6px; background: var(--sunken); animation: sk 1.4s ease-in-out infinite; }
+@keyframes sk { 50% { opacity: 0.5; } }
+@media (prefers-reduced-motion: reduce) { .sk { animation: none; } }
+
+/* Settings */
+.form { display: grid; gap: 30px; max-width: 720px; }
+.form section { display: grid; gap: 14px; padding-top: 22px; border-top: 1px solid var(--line); }
+.form section:first-child { border-top: 0; padding-top: 0; }
+.form h3 { margin: 0; font-size: 16px; }
+.form .sub { margin: -8px 0 0; color: var(--ink-2); font-size: 14px; }
+.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+
+/* Empty state */
+.empty { display: grid; justify-items: center; text-align: center; gap: 12px; padding: 70px 20px; }
+.empty h3 { margin: 0; font: 700 20px var(--f-head); }
+.empty p { margin: 0; color: var(--ink-2); max-width: 44ch; font-size: 14.5px; }
+
+/* Sign-in */
+.signin { min-height: 640px; display: grid; place-items: center; background: var(--page); padding: 40px; }
+.signin .card { width: 420px; background: var(--surface); border-radius: 22px; padding: 32px; box-shadow: var(--pop); display: grid; gap: 20px; }
+.signin h1 { margin: 0; font: 700 26px/1.15 var(--f-head); letter-spacing: -0.025em; }
+.signin p { margin: 0; color: var(--ink-2); font-size: 14.5px; }
+.signin .foot { font-size: 13px; color: var(--ink-2); }
+
+/* Wordmark */
+.wm { display: inline-flex; align-items: center; gap: 9px; font: 800 21px/1 var(--f-head); letter-spacing: -0.035em; color: var(--ink); }
+.wm .i { position: relative; }
+.wm .i i { position: absolute; left: 50%; top: .26em; width: .16em; height: .16em; border-radius: 50%; transform: translateX(-50%); background: var(--brand); box-shadow: 0 0 8px var(--brand); }
+
+/* Decisions */
+.dec { display: grid; gap: 22px; }
+.dec article { display: grid; gap: 12px; }
+.dec h3 { margin: 0; font: 700 19px var(--f-head); letter-spacing: -0.015em; }
+.ab { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.ab > div { background: var(--surface); border-radius: 16px; padding: 18px; display: grid; gap: 10px; align-content: start; }
+.ab .tag { font: 12px var(--f-ro); color: var(--ink-2); }
+.ab b { font-size: 15px; }
+.ab p { margin: 0; font-size: 14px; color: var(--ink-2); }
+.ab .rec { font-size: 13px; font-weight: 600; color: var(--t-ok); display: inline-flex; align-items: center; gap: 7px; }
+.mini { border-radius: 10px; background: var(--page); padding: 8px; height: 120px; display: grid; gap: 6px; }
+.mini .s { display: grid; grid-template-columns: 54px 1fr; gap: 6px; height: 100%; }
+.mini i { display: block; border-radius: 4px; background: var(--sunken); }
+.mini i.on { background: var(--raised); }
+.mini .t { display: grid; grid-template-rows: 18px 1fr; gap: 6px; height: 100%; }
+.mini .tabsrow { display: flex; gap: 4px; } .mini .tabsrow i { flex: 1; }
+
+@media (max-width: 900px) {
+  .board { grid-template-columns: minmax(0, 1fr); padding: 18px 16px 60px; gap: 18px; }
+  .index { position: static; flex-direction: row; overflow-x: auto; gap: 4px; padding-bottom: 4px; }
+  .index .wm, .index small { display: none; }
+  .index a { white-space: nowrap; }
+  .ab { grid-template-columns: minmax(0, 1fr); }
+}
+</style>
+</head>
+<body>
+<div class="switch">
+  <b>Concept E</b><span>web del control plane, stile D Drive</span>
+  <p>storyboard di tutte le schermate · decisioni aperte in fondo</p>
+  <button data-theme-toggle>t tema</button>
+</div>
+
+<div class="board">
+  <nav class="index" aria-label="Schermate">
+    <span class="wm" id="idxMark"></span>
+    <a href="#s-accesso">Accesso</a>
+    <a href="#s-panoramica">Panoramica</a>
+    <a href="#s-persone">Persone</a>
+    <a href="#s-mac">Mac</a>
+    <a href="#s-chiave">Cambio della chiave</a>
+    <a href="#s-dischi">Dischi</a>
+    <a href="#s-registro">Registro</a>
+    <a href="#s-impostazioni">Impostazioni</a>
+    <small>Da decidere</small>
+    <a href="#s-decisioni">Decisioni aperte</a>
+  </nav>
+  <main id="screens"></main>
+</div>
+
+<script>
+"use strict";
+const ICON = {
+  home: '<rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/>',
+  users: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
+  laptop: '<path d="M20 16V7a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v9m16 0H4m16 0 1.28 2.55a1 1 0 0 1-.9 1.45H3.62a1 1 0 0 1-.9-1.45L4 16"/>',
+  key: '<path d="m15.5 7.5 2.3 2.3a1 1 0 0 0 1.4 0l2.1-2.1a1 1 0 0 0 0-1.4L19 4"/><path d="m21 2-9.6 9.6"/><circle cx="7.5" cy="15.5" r="5.5"/>',
+  drive: '<path d="M22 12H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/><path d="M6 16h.01"/><path d="M10 16h.01"/>',
+  list: '<path d="M8 6h13"/><path d="M8 12h13"/><path d="M8 18h13"/><path d="M3 6h.01"/><path d="M3 12h.01"/><path d="M3 18h.01"/>',
+  sliders: '<path d="M20 7h-9"/><path d="M14 17H5"/><circle cx="17" cy="17" r="3"/><circle cx="7" cy="7" r="3"/>',
+  plus: '<path d="M5 12h14"/><path d="M12 5v14"/>',
+  mail: '<rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/>',
+  more: '<circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/>',
+  check: '<path d="M20 6 9 17l-5-5"/>',
+  search: '<circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>',
+  down: '<path d="m6 9 6 6 6-6"/>',
+  ext: '<path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>',
+  lock: '<rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
+  out: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/>'
+};
+const ic = (n, s = 18) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON[n]}</svg>`;
+const driveMark = (h, led = "var(--led-dl)") => `<svg width="${h * 1.6}" height="${h}" viewBox="0 0 64 40" aria-hidden="true"><rect x="2" y="3" width="60" height="34" rx="9" fill="var(--ink)"/><rect x="10" y="13" width="34" height="6" rx="3" fill="var(--surface)"/><circle cx="51" cy="27" r="3.6" fill="${led}"/></svg>`;
+const wm = (size = 21) => `<span class="wm" style="font-size:${size}px">${driveMark(Math.round(size * 0.95))}<span>flu<span class="i">ı<i></i></span>x</span></span>`;
+// A small faceplate: the identity's drive, with its LED as the disk's state
+const face = (led) => `<svg width="96" height="58" viewBox="0 0 96 58" aria-hidden="true"><defs><linearGradient id="fg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--face-hi)"/><stop offset="1" stop-color="var(--face-lo)"/></linearGradient></defs><rect x=".5" y=".5" width="95" height="57" rx="10" fill="url(#fg)" stroke="var(--face-edge)"/><rect x="12" y="18" width="52" height="7" rx="3.5" fill="var(--slot)"/><circle cx="78" cy="21.5" r="4" fill="${led}" style="filter:drop-shadow(0 0 4px ${led})"/><path d="M12 42H84" stroke="var(--face-edge)"/></svg>`;
+
+const PEOPLE = [
+  { id: "giulia", n: "Giulia Ferri", e: "giulia@studio.example", role: "Admin", st: "ok", macs: 2, last: "adesso" },
+  { id: "anna", n: "Anna Villa", e: "anna@studio.example", role: "Admin", st: "ok", macs: 1, last: "2 giorni fa" },
+  { id: "marco", n: "Marco Bassi", e: "marco@studio.example", role: "Membro", st: "ok", macs: 1, last: "adesso" },
+  { id: "sara", n: "Sara Conti", e: "sara@studio.example", role: "Membro", st: "ok", macs: 2, last: "3 h fa" },
+  { id: "elena", n: "Elena Riva", e: "elena@studio.example", role: "Membro", st: "ok", macs: 1, last: "adesso" },
+  { id: "luca", n: "Luca Moretti", e: "luca@studio.example", role: "Membro", st: "inv", macs: 0, last: "invito del 15 ott" },
+  { id: "paolo", n: "Paolo Greco", e: "paolo@studio.example", role: "Membro", st: "rem", macs: 1, last: "rimosso il 14 ott" }
+];
+const MACS = [
+  { n: "MacBook Pro di Giulia", o: "Giulia Ferri", os: "27.0.1", app: "0.4.2", seen: "adesso", on: true },
+  { n: "Mac Studio di Giulia", o: "Giulia Ferri", os: "26.6", app: "0.4.2", seen: "12 min fa", on: false },
+  { n: "MacBook Air di Marco", o: "Marco Bassi", os: "27.0.1", app: "0.4.1", seen: "adesso", on: true },
+  { n: "MacBook Pro di Sara", o: "Sara Conti", os: "27.0", app: "0.4.2", seen: "3 h fa", on: false },
+  { n: "iMac di Sara", o: "Sara Conti", os: "26.6", app: "0.4.0", seen: "ieri, 18:40", on: false, old: true },
+  { n: "MacBook Pro di Elena", o: "Elena Riva", os: "27.0.1", app: "0.4.2", seen: "adesso", on: true },
+  { n: "MacBook Air di Anna", o: "Anna Villa", os: "27.0.1", app: "0.4.2", seen: "2 giorni fa", on: false },
+  { n: "MacBook Pro di Paolo", o: "Paolo Greco", os: "27.0", app: "0.4.1", seen: "revocato il 14 ott, 17:02", rev: true }
+];
+const initials = (n) => n.split(" ").map((w) => w[0]).join("");
+const T0 = Date.now() - (2 * 3600 + 14 * 60 + 5) * 1000; // window opened 2 h 14 min ago
+
+const S = { accesso: "form", panoramica: "promemoria", persone: "tabella", mac: "tabella", chiave: "incolla", dischi: "elenco", registro: "dati", impostazioni: "errore", nav: "side" };
+let run = 0; // progress index of the key rotation
+
+function frame(path, inner) {
+  return `<div class="frame"><div class="fbar"><span class="dots"><i></i><i></i><i></i></span><span class="url">${ic("lock", 13)}fluix.example.com${path}</span><span style="width:47px"></span></div><div class="viewport"><div class="canvas">${inner}</div></div></div>`;
+}
+const NAV = [["panoramica", "home", "Panoramica"], ["persone", "users", "Persone"], ["mac", "laptop", "Mac"], ["dischi", "drive", "Dischi"], ["chiave", "key", "Chiave dell'archivio"], ["registro", "list", "Registro"], ["impostazioni", "sliders", "Impostazioni"]];
+function shell(active, body, overlay = "", pending = true) {
+  const extra = (k) => k === "persone" ? `<span class="cnt">7</span>` : k === "mac" ? `<span class="cnt">7</span>` : k === "chiave" && pending ? `<span class="dotn" title="Da cambiare"></span>` : "";
+  const items = NAV.map(([k, i, t]) => `<button class="nav${k === active ? " on" : ""}" data-jump="${k}">${ic(i)}${t}${extra(k)}</button>`).join("");
+  return `<div class="app"><aside class="side">${wm()}<div class="org"><div>Studio Esempio<span>2 dischi · 7 persone</span></div>${ic("down", 16)}</div>${items}<div class="me"><span class="av">GF</span><div>Giulia Ferri<span>Admin</span></div></div></aside><div class="main">${body}</div></div>${overlay}`;
+}
+const ph = (h, p, acts = "") => `<div class="ph"><div><h1>${h}</h1>${p ? `<p>${p}</p>` : ""}</div>${acts ? `<div class="acts">${acts}</div>` : ""}</div>`;
+const timer = () => `<span data-timer>${fmt(Date.now() - T0)}</span>`;
+function fmt(ms) { const s = Math.floor(ms / 1000), h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), x = s % 60; return `${h} h ${String(m).padStart(2, "0")} min ${String(x).padStart(2, "0")} s`; }
+const dlg = (title, body, btns) => `<div class="scrim"><div class="dlg" role="dialog" aria-label="${title}"><h3>${title}</h3>${body}<div class="row">${btns}</div></div></div>`;
+
+/* 1. Accesso */
+function accesso() {
+  const s = S.accesso;
+  let card;
+  if (s === "form") card = `${wm(24)}<div><h1>Accedi a Fluix</h1><p style="margin-top:6px">Ti mandiamo un link via email: niente password da ricordare.</p></div>
+    <div class="field"><label for="em">Email</label><input id="em" class="input" value="giulia@studio.example"></div>
+    <button class="btn btn-ink" data-go="accesso:inviato">${ic("mail", 17)}Mandami il link</button>
+    <div class="foot">Per entrare serve un invito di un admin del tuo studio.</div>`;
+  else if (s === "inviato") card = `${wm(24)}<div><h1>Controlla la posta</h1><p style="margin-top:6px">Abbiamo mandato un link a <b style="color:var(--ink)">giulia@studio.example</b>. Vale 15 minuti e funziona una volta sola.</p></div>
+    <div class="well" style="background:var(--sunken);display:flex;gap:12px;align-items:center"><span class="pill act">In attesa</span><span style="font-size:14px;color:var(--ink-2)">Questa pagina si aggiorna da sola quando apri il link.</span></div>
+    <div style="display:flex;gap:8px"><button class="btn btn-soft" data-go="accesso:form">Usa un'altra email</button><button class="btn btn-ghost">Rimanda il link</button></div>`;
+  else card = `${wm(24)}<div><h1>Questo link è scaduto</h1><p style="margin-top:6px">I link valgono 15 minuti e una volta sola. Chiedine uno nuovo: arriva in pochi secondi.</p></div>
+    <span class="pill err" style="justify-self:start">Link scaduto alle 10:27</span>
+    <button class="btn btn-ink" data-go="accesso:inviato">${ic("mail", 17)}Mandami un link nuovo</button>`;
+  return frame("/accedi", `<div class="signin"><div class="card">${card}</div></div>`);
+}
+
+/* 2. Panoramica */
+function panoramica() {
+  const rem = S.panoramica === "promemoria";
+  const notice = rem ? `<div class="notice"><span class="pill act">Chiave da cambiare</span><p>Paolo Greco è stato rimosso il 14 ottobre. La chiave dell'archivio è ancora quella di prima.</p><span class="timer">aperta da ${timer()}</span><button class="btn btn-ink btn-sm" data-jump="chiave">Cambia chiave</button></div>` : "";
+  const disk = (n, tb, files, last, macs) => `<div class="well disk">${face("var(--led-ok)")}<div><h4>${n}<span class="pill ok">In linea</span></h4><div class="nums"><div><b>${tb}</b>usati</div><div><b>${files}</b>file</div><div><b>${macs}</b>Mac</div></div><div style="font-size:13px;color:var(--ink-2);margin-top:8px">Ultima scrittura ${last}</div></div></div>`;
+  const online = MACS.filter((m) => !m.rev).map((m) => `<div><span class="led ${m.on ? "ok" : "idle"}"></span>${m.n}<em>${m.seen}</em></div>`).join("");
+  const body = `${ph("Panoramica", "Studio Esempio")}${notice}
+    <div class="grid2" style="margin-bottom:14px">${disk("Progetti", "4,82 TB", "38.214", "3 min fa", 5)}${disk("Archivio 2025", "2,10 TB", "9.877", "6 giorni fa", 2)}</div>
+    <div class="grid3">
+      <div class="well"><h3>Mac collegati adesso · 3 di 7</h3><div class="macs">${online}</div></div>
+      <div class="well"><h3>Servizi, visti da qui</h3>
+        <div class="svc"><b>Database dei metadata</b><span class="pill ok">Risponde</span><span>4 ms · controllato 30 s fa</span></div>
+        <div class="svc"><b>Archivio S3</b><span class="pill ok">Scrive</span><span>Scrittura di prova riuscita 2 min fa</span></div>
+        <div class="svc"><b>Email per i link</b><span class="pill ok">Configurata</span><span>smtp.studio.example</span></div>
+        <p class="offpath">Fluix non passa di qui per leggere o scrivere i file. Se questo sito si ferma, i dischi già montati continuano a funzionare; si fermano accessi nuovi, inviti e revoche.</p>
+      </div>
+    </div>
+    <div class="well" style="margin-top:14px"><h3>Attività recente</h3><div class="feed">
+      <div><time>oggi 10:41</time><span>Giulia Ferri ha invitato <b>Luca Moretti</b></span></div>
+      <div><time>oggi 09:12</time><span>Nuovo Mac collegato: <b>MacBook Pro di Elena</b></span></div>
+      <div><time>ieri 18:40</time><span>Ultimo contatto di <b>iMac di Sara</b>, app 0.4.0</span></div>
+      <div><time>14 ott 17:02</time><span>Giulia Ferri ha rimosso <b>Paolo Greco</b> e revocato 1 Mac</span></div>
+    </div></div>`;
+  return frame("/", shell("panoramica", body, "", rem));
+}
+
+/* 3. Persone */
+function persone() {
+  const s = S.persone, after = s === "dopo";
+  const rows = PEOPLE.map((p) => {
+    const st = after && p.id === "marco" ? "rem" : p.st;
+    const pill = st === "ok" ? `<span class="pill ok">Attiva</span>` : st === "inv" ? `<span class="pill idle">Invito inviato</span>` : `<span class="pill err">Rimossa</span>`;
+    const last = after && p.id === "marco" ? "rimosso adesso" : p.last;
+    return `<tr class="${st === "rem" ? "dim" : ""}"><td><div class="who"><span class="av">${initials(p.n)}</span><div><b>${p.n}</b><span>${p.e}</span></div></div></td>
+      <td>${st === "rem" ? p.role : `<button class="role">${p.role}${ic("down", 15)}</button>`}</td><td>${pill}</td><td class="r ro">${st === "rem" ? 0 : p.macs}</td><td>${last}</td>
+      <td class="r">${st === "rem" ? "" : `<button class="icon-btn" aria-label="Azioni per ${p.n}" ${p.id === "marco" ? 'data-go="persone:rimuovi"' : ""}>${ic("more")}</button>`}</td></tr>`;
+  }).join("");
+  const notice = after ? `<div class="notice"><span class="pill act">Chiave da cambiare</span><p>Marco Bassi non ha più accesso al disco. Chi ha copiato la chiave dell'archivio può ancora usarla finché non la cambi.</p><button class="btn btn-ink btn-sm" data-jump="chiave">Cambia chiave adesso</button></div>` : "";
+  const table = `${ph("Persone", "Chi può usare i dischi di Studio Esempio", `<button class="btn btn-ink" data-go="persone:invita">${ic("plus", 17)}Invita persona</button>`)}${notice}
+    <table class="tbl"><thead><tr><th>Persona</th><th>Ruolo</th><th>Stato</th><th class="r">Mac</th><th>Ultimo accesso</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+  let overlay = "";
+  if (s === "invita") overlay = dlg("Invita una persona", `<div class="field"><label>Email</label><input class="input" value="chiara@studio.example"></div>
+    <div class="field"><label>Ruolo</label><div class="choice"><button class="opt" aria-pressed="true"><b>Membro</b><span>Usa il disco e gestisce i suoi Mac</span></button><button class="opt" aria-pressed="false"><b>Admin</b><span>Gestisce persone, Mac, dischi e chiave</span></button></div></div>
+    <p>Riceve un'email con un link per installare Fluix e accedere. L'invito vale 7 giorni.</p>`, `<button class="btn btn-ghost" data-go="persone:tabella">Annulla</button><button class="btn btn-ink" data-go="persone:tabella">Manda invito</button>`);
+  if (s === "rimuovi") overlay = dlg("Rimuovere Marco Bassi?", `<ul><li>Perde l'accesso subito: cancelliamo l'accesso al database del suo Mac, <b style="color:var(--ink)">MacBook Air di Marco</b>, e lì il disco smette di rispondere.</li>
+    <li>Al prossimo contatto l'app sul suo Mac si spegne e svuota la cache.</li>
+    <li>La chiave dell'archivio resta valida finché non la cambi. Chi l'avesse copiata potrebbe ancora scaricare o cancellare pezzi di file dal bucket.</li></ul>`,
+    `<button class="btn btn-ghost" data-go="persone:tabella">Annulla</button><button class="btn btn-danger" data-go="persone:dopo">Rimuovi Marco</button>`);
+  return frame("/persone", shell("persone", table, overlay));
+}
+
+/* 4. Mac */
+function mac() {
+  const s = S.mac;
+  if (s === "vuoto") {
+    const body = `${ph("Mac", "I Mac da cui si accede ai dischi")}<div class="empty">${face("var(--led-idle)")}<h3>Nessun Mac collegato</h3><p>Quando qualcuno accede dall'app Fluix sul suo Mac, il Mac compare qui con il suo ultimo contatto. Da qui lo puoi revocare.</p><button class="btn btn-ink" data-jump="persone">${ic("users", 17)}Invita persone</button></div>`;
+    return frame("/mac", shell("mac", body));
+  }
+  const rows = MACS.map((m) => {
+    if (m.rev) return `<tr class="dim"><td><b style="font-weight:600">${m.n}</b></td><td>${m.o}</td><td class="ro">${m.os}</td><td class="ro">${m.app}</td><td><span class="pill err">Revocato</span> <span style="font-size:13px;margin-left:6px">${m.seen.replace("revocato ", "")}</span></td><td></td></tr>`;
+    const app = m.old ? `<span class="ro">${m.app}</span> <span class="pill idle" style="margin-left:6px">da aggiornare</span>` : `<span class="ro">${m.app}</span>`;
+    return `<tr><td><div class="who"><span class="led ${m.on ? "ok" : "idle"}"></span><b>${m.n}</b></div></td><td>${m.o}</td><td class="ro">${m.os}</td><td>${app}</td><td>${m.seen}</td>
+      <td class="r"><button class="btn btn-soft btn-sm" ${m.n.includes("Pro di Sara") ? 'data-go="mac:revoca"' : ""}>Revoca</button></td></tr>`;
+  }).join("");
+  const body = `${ph("Mac", "Ogni Mac ha il suo accesso al database: revocarne uno non tocca gli altri")}
+    <table class="tbl"><thead><tr><th>Mac</th><th>Persona</th><th>macOS</th><th>App</th><th>Ultimo contatto</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+  const overlay = s === "revoca" ? dlg("Revocare MacBook Pro di Sara?", `<p>Il Mac perde l'accesso al disco entro pochi secondi. Al prossimo contatto Fluix si spegne su quel Mac e svuota la cache.</p><p>Sara continua a lavorare dal suo iMac. Se il Mac è stato perso o rubato, dopo la revoca conviene cambiare la chiave dell'archivio.</p>`,
+    `<button class="btn btn-ghost" data-go="mac:tabella">Annulla</button><button class="btn btn-danger" data-go="mac:tabella">Revoca il Mac</button>`) : "";
+  return frame("/mac", shell("mac", body, overlay));
+}
+
+/* 5. Chiave */
+function chiave() {
+  const s = S.chiave;
+  const closed = s === "chiusa";
+  const risk = closed
+    ? `<div class="risk"><span class="pill ok">Finestra chiusa</span><p>La chiave vecchia non esiste più. Ultimo cambio: <b>oggi alle 12:56</b>, dopo la rimozione di Paolo Greco.</p></div>`
+    : `<div class="risk"><span class="pill act">Finestra aperta</span><p><b>Paolo Greco non ha più accesso al disco</b>, ma la chiave dell'archivio è quella di prima. Chi l'avesse copiata può ancora scaricare o cancellare pezzi di file dal bucket, senza nomi né cartelle. Si chiude cambiando chiave.</p><div class="clock"><b>${timer()}</b><span>da quando è stato rimosso</span></div></div>`;
+  const st = (k) => {
+    const order = ["crea", "incolla", "applica", "cancella"];
+    const cur = closed ? 4 : s === "errore" ? 1 : s === "incolla" ? 1 : s === "applica" ? 2 : 3;
+    const i = order.indexOf(k);
+    return i < cur ? "done" : i === cur ? "cur" : "todo";
+  };
+  const n = (k, i) => `<span class="n">${st(k) === "done" ? ic("check", 15) : i}</span>`;
+  const paste = s === "incolla" || s === "errore"
+    ? `<div class="body"><div class="cols"><div class="field"><label>Access key</label><input class="input ro" value="EXAMPLE7Q2K9W3ZT0HVA"></div><div class="field"><label>Secret key</label><input class="input ro" type="password" value="xxxxxxxxxxxxxxxxxxxxxxxx"></div></div>
+      ${s === "errore" ? `<div class="errbox"><span class="pill err" style="justify-self:start">Scrittura di prova fallita</span><span>Il bucket ha rifiutato la chiave nuova. Controlla che abbia il permesso di scrivere su <b>studio-esempio-fluix</b>; nella console va assegnata al bucket, non solo creata.</span><code>AccessDenied · PUT /fluix-probe-7f3a</code></div>` : ""}
+      <div><button class="btn btn-ink" data-go="chiave:applica">Prova e applica</button></div></div>` : "";
+  const prog = s === "applica" ? `<div class="body progress">
+      <div><span class="led ${run > 0 ? "ok" : "act"}"></span>Scrittura di prova con la chiave nuova<span class="ro">${run > 0 ? "ok" : "..."}</span></div>
+      <div><span class="led ${run > 1 ? "ok" : run === 1 ? "act" : "idle"}"></span>Disco Progetti aggiornato<span class="ro">${run > 1 ? "ok" : ""}</span></div>
+      <div><span class="led ${run > 2 ? "ok" : run === 2 ? "act" : "idle"}"></span>Disco Archivio 2025 aggiornato<span class="ro">${run > 2 ? "ok" : ""}</span></div>
+      <div><span class="led ${run > 3 ? "ok" : run === 3 ? "act" : "idle"}"></span>Mac collegati con la chiave nuova<span class="ro">${run > 3 ? "3 di 3" : run === 3 ? "1 di 3" : ""}</span></div></div>` : "";
+  const del = s === "cancella" ? `<div class="body"><label class="check"><input type="checkbox" data-go="chiave:chiusa">Ho cancellato la chiave vecchia (finisce per <span class="ro">...ZT0QK</span>)</label></div>` : "";
+  const body = `${ph("Chiave dell'archivio", "Cambiala dopo ogni rimozione o revoca: è l'ultima cosa che un ex membro potrebbe avere")}${risk}
+    <div class="steps">
+      <div class="step ${st("crea")}">${n("crea", 1)}<div><h4>Crea una chiave nuova nel provider</h4><p>Nella console del tuo provider S3 crea una chiave con permesso di lettura e scrittura sul bucket <b>studio-esempio-fluix</b>. Fluix non lo fa da solo: non usa le API del provider.</p></div></div>
+      <div class="step ${st("incolla")}">${n("incolla", 2)}<div><h4>Incollala qui</h4><p>La proviamo con una scrittura nel bucket prima di usarla.</p>${paste}</div></div>
+      <div class="step ${st("applica")}">${n("applica", 3)}<div><h4>Fluix la passa ai dischi</h4><p>Aggiorniamo ogni disco; i Mac collegati la prendono da soli entro un minuto, senza fermarsi.</p>${prog}</div></div>
+      <div class="step ${st("cancella")}">${n("cancella", 4)}<div><h4>Cancella la chiave vecchia nel provider</h4><p>Finché esiste, la finestra resta aperta. È l'unico passo che chiude davvero.</p>${del}</div></div>
+    </div>`;
+  return frame("/chiave", shell("chiave", body, "", !closed));
+}
+
+/* 6. Dischi */
+function dischi() {
+  const s = S.dischi;
+  const body = `${ph("Dischi", "Ogni disco ha i suoi metadata; i file stanno tutti nello stesso bucket", `<button class="btn btn-ink" data-go="dischi:nuovo">${ic("plus", 17)}Nuovo disco</button>`)}
+    <div class="split"><table class="tbl"><thead><tr><th>Disco</th><th>Stato</th><th class="r">Usati</th><th class="r">File</th><th>Ultima scrittura</th></tr></thead><tbody>
+      <tr class="sel"><td><b style="font-weight:600">Progetti</b></td><td><span class="pill ok">In linea</span></td><td class="r ro">4,82 TB</td><td class="r ro">38.214</td><td>3 min fa</td></tr>
+      <tr><td><b style="font-weight:600">Archivio 2025</b></td><td><span class="pill ok">In linea</span></td><td class="r ro">2,10 TB</td><td class="r ro">9.877</td><td>6 giorni fa</td></tr>
+    </tbody></table>
+    <div class="well"><h3>Progetti</h3><dl class="kv">
+      <dt>Nel bucket</dt><dd class="ro">studio-esempio-fluix/progetti</dd>
+      <dt>Database</dt><dd class="ro">fluix_vol_progetti</dd>
+      <dt>Blocchi</dt><dd class="ro">4 MB</dd>
+      <dt>Cestino</dt><dd>7 giorni · <span class="ro">212 GB</span></dd>
+      <dt>Montato da</dt><dd>5 Mac</dd>
+      <dt>Creato</dt><dd>6 ott 2026, Giulia Ferri</dd></dl>
+      <p style="margin:16px 0 0;font-size:13px;color:var(--ink-2)">Il nome compare nel Finder dentro Fluix. Rinominare un disco rompe i percorsi dei progetti CapCut: per questo qui non si rinomina.</p></div></div>`;
+  const overlay = s === "nuovo" ? dlg("Nuovo disco", `<div class="field"><label>Nome</label><input class="input" value="Clienti 2026"><span class="hint">Compare nel Finder dentro Fluix. Non si potrà cambiare.</span></div>
+    <div class="field"><label>Posizione nel bucket</label><input class="input ro" value="studio-esempio-fluix/clienti-2026"></div>
+    <div class="field"><label>Dimensione dei blocchi</label><div class="choice"><button class="opt" aria-pressed="true"><b>4 MB</b><span>Consigliato per i video: misurato</span></button><button class="opt" aria-pressed="false"><b>1 MB</b><span>Salti più rapidi nei video mai aperti, più richieste</span></button></div></div>
+    <div class="field"><label>Giorni nel cestino</label><input class="input ro" value="7" style="width:110px"></div>`,
+    `<button class="btn btn-ghost" data-go="dischi:elenco">Annulla</button><button class="btn btn-ink" data-go="dischi:elenco">Crea disco</button>`) : "";
+  return frame("/dischi", shell("dischi", body, overlay));
+}
+
+/* 7. Registro */
+function registro() {
+  const s = S.registro;
+  const EV = [
+    ["oggi 10:41", "Giulia Ferri", "Invito", "Luca Moretti, membro"],
+    ["oggi 09:12", "Elena Riva", "Accesso", "MacBook Pro di Elena, primo accesso"],
+    ["oggi 08:55", "Marco Bassi", "Accesso", "MacBook Air di Marco"],
+    ["ieri 18:40", "Sara Conti", "Mac", "iMac di Sara, app 0.4.0"],
+    ["14 ott 17:02", "Giulia Ferri", "Mac revocato", "MacBook Pro di Paolo"],
+    ["14 ott 17:02", "Giulia Ferri", "Persona rimossa", "Paolo Greco"],
+    ["12 ott 11:20", "Anna Villa", "Disco creato", "Archivio 2025, blocchi 4 MB"],
+    ["9 ott 15:03", "Giulia Ferri", "Chiave cambiata", "2 dischi aggiornati"]
+  ];
+  const rows = s === "caricamento"
+    ? Array.from({ length: 6 }, () => `<tr><td><span class="sk" style="width:90px"></span></td><td><span class="sk" style="width:110px"></span></td><td><span class="sk" style="width:80px"></span></td><td><span class="sk" style="width:220px"></span></td></tr>`).join("")
+    : EV.map((e) => `<tr><td class="ro" style="font-size:13px;color:var(--ink-2);white-space:nowrap">${e[0]}</td><td>${e[1]}</td><td><b style="font-weight:600">${e[2]}</b></td><td>${e[3]}</td></tr>`).join("");
+  const body = `${ph("Registro", "Chi ha fatto cosa: accessi, persone, Mac, chiavi e dischi")}
+    <div class="filters"><div class="chips">${["Tutto", "Accessi", "Persone", "Mac", "Chiave", "Dischi"].map((c, i) => `<button aria-pressed="${i === 0}">${c}</button>`).join("")}</div>
+    <div class="search">${ic("search", 16)}<input class="input" placeholder="Cerca persona o Mac"></div><button class="btn btn-soft">Ultimi 30 giorni${ic("down", 15)}</button></div>
+    <table class="tbl"><thead><tr><th>Quando</th><th>Chi</th><th>Cosa</th><th>Dettaglio</th></tr></thead><tbody>${rows}</tbody></table>`;
+  return frame("/registro", shell("registro", body));
+}
+
+/* 8. Impostazioni */
+function impostazioni() {
+  const err = S.impostazioni === "errore";
+  const s3res = err
+    ? `<div class="errbox"><span class="pill err" style="justify-self:start">Prova fallita</span><span>Il bucket <b>studio-esempio-fluix-2</b> non esiste in questa regione, o la chiave non può vederlo. I dischi esistenti non sono toccati: questa è solo una prova.</span><code>NoSuchBucket · eu-south-mil</code></div>`
+    : `<div><span class="pill ok">Scrittura di prova riuscita</span></div>`;
+  const body = `${ph("Impostazioni", "Studio Esempio")}
+    <div class="form">
+      <section><h3>Organizzazione</h3><div class="field"><label>Nome</label><input class="input" value="Studio Esempio"></div></section>
+      <section><h3>Email per i link di accesso</h3><p class="sub">Da qui partono inviti e link di accesso. Qualsiasi server SMTP.</p>
+        <div class="cols"><div class="field"><label>Server</label><input class="input ro" value="smtp.studio.example"></div><div class="field"><label>Porta</label><input class="input ro" value="587"></div>
+        <div class="field"><label>Utente</label><input class="input ro" value="fluix@studio.example"></div><div class="field"><label>Mittente</label><input class="input" value="Fluix · Studio Esempio"></div></div>
+        <div><button class="btn btn-soft">${ic("mail", 17)}Mandami un'email di prova</button></div></section>
+      <section><h3>Archivio S3</h3><p class="sub">Dove stanno i file. Vale per i dischi nuovi; quelli esistenti restano dove sono.</p>
+        <div class="cols"><div class="field"><label>Endpoint</label><input class="input ro" value="s3.eu-south-mil.example.net"></div><div class="field"><label>Regione</label><input class="input ro" value="eu-south-mil"></div></div>
+        <div class="field"><label>Bucket</label><input class="input ro" value="${err ? "studio-esempio-fluix-2" : "studio-esempio-fluix"}"></div>
+        <div><button class="btn btn-soft" data-go="impostazioni:${err ? "ok" : "errore"}">Prova a scrivere</button></div>${s3res}</section>
+      <section><h3>Chi può invitare</h3><div class="choice"><button class="opt" aria-pressed="true"><b>Solo gli admin</b><span>Consigliato: ogni invito dà accesso a tutti i file</span></button><button class="opt" aria-pressed="false"><b>Tutti</b><span>I membri invitano, gli admin vedono il registro</span></button></div></section>
+      <div style="display:flex;gap:8px"><button class="btn btn-ink">Salva</button><button class="btn btn-ghost">Annulla</button></div>
+    </div>`;
+  return frame("/impostazioni", shell("impostazioni", body));
+}
+
+/* Decisions */
+function decisioni() {
+  const rec = `<span class="rec"><span class="led ok"></span>Consigliata</span>`;
+  const side = `<div class="mini"><div class="s"><i></i><i class="on"></i></div></div>`;
+  const tabs = `<div class="mini"><div class="t"><div class="tabsrow"><i></i><i class="on"></i><i></i><i></i></div><i class="on"></i></div></div>`;
+  return `<div class="dec">
+    <article><h3>D1 · Navigazione</h3><div class="ab">
+      <div><span class="tag">A</span>${side}<b>Barra laterale</b><p>Sette sezioni con contatori, il selettore dell'organizzazione in alto e chi sei in basso. Regge un'ottava sezione e, nel servizio ospitato, più organizzazioni.</p>${rec}</div>
+      <div><span class="tag">B</span>${tabs}<b>Schede in alto</b><p>Più spazio alle tabelle, ma sette schede affollano la riga e il selettore dell'organizzazione non ha un posto naturale.</p></div></div>
+      <div class="seg" style="margin:0"><span>prova:</span><button data-nav="side" aria-pressed="${S.nav === "side"}">A barra laterale</button><button data-nav="tabs" aria-pressed="${S.nav === "tabs"}">B schede</button></div>
+      <div id="navDemo"></div></article>
+    <article><h3>D2 · Dopo la rimozione di una persona</h3><div class="ab">
+      <div><span class="tag">A</span><b>La rotazione parte da sola</b><p>Chiusa la conferma, si apre il cambio della chiave. Nessuna finestra dimenticata, ma se rimuovi tre persone di fila la rifai tre volte, e non sempre hai la console del provider a portata.</p></div>
+      <div><span class="tag">B</span><b>Promemoria fisso, bottone nella conferma</b><p>Dopo la rimozione: "Cambia chiave adesso" in primo piano. Se rimandi, il promemoria resta in Panoramica e nella barra laterale con il tempo che scorre, finché la chiave vecchia non è cancellata.</p>${rec}</div></div></article>
+    <article><h3>D3 · Cosa vede un membro</h3><div class="ab">
+      <div><span class="tag">A</span><b>Persone e Mac in sola lettura</b><p>Trasparenza: tutti vedono chi ha accesso. Ma mostra email e Mac di tutti a chi non deve agire, e aggiunge sezioni che un membro non userà.</p></div>
+      <div><span class="tag">B</span><b>Solo "I miei Mac"</b><p>Il membro vede i suoi Mac e può revocarne uno perso o rubato da solo, subito, senza aspettare un admin. Persone, dischi, chiave e registro restano agli admin.</p>${rec}</div></div></article>
+  </div>`;
+}
+function navDemo() {
+  const el = document.getElementById("navDemo");
+  if (!el) return;
+  if (S.nav === "side") { el.innerHTML = ""; return; }
+  const items = NAV.map(([k, i, t]) => `<button class="nav${k === "persone" ? " on" : ""}">${ic(i, 16)}${t}</button>`).join("");
+  el.innerHTML = frame("/persone", `<div class="topnav">${wm()}${items}</div><div class="main" style="min-height:220px">${ph("Persone", "Chi può usare i dischi di Studio Esempio", `<button class="btn btn-ink">${ic("plus", 17)}Invita persona</button>`)}<p style="color:var(--ink-2);font-size:14px">La stessa pagina con le schede in alto: la tabella guadagna 232 px, la riga di navigazione si riempie.</p></div>`);
+}
+
+const SCREENS = [
+  ["accesso", "Accesso", "Email e link, senza password. Il link vale 15 minuti e una volta sola; la pagina aspetta e si aggiorna da sola.", [["form", "Modulo"], ["inviato", "Link inviato"], ["scaduto", "Link scaduto"]], accesso],
+  ["panoramica", "Panoramica", "Quello che un admin guarda aprendo il sito: i dischi, chi è collegato, se i servizi rispondono, cosa è successo. Lo stato dei servizi è quello visto dal control plane.", [["promemoria", "Con promemoria della chiave"], ["normale", "Normale"]], panoramica],
+  ["persone", "Persone", "Invito, ruolo, rimozione. La conferma dice in parole semplici cosa succede ai Mac di quella persona e cosa resta aperto.", [["tabella", "Tabella"], ["invita", "Invito"], ["rimuovi", "Rimozione"], ["dopo", "Dopo la rimozione"]], persone],
+  ["mac", "Mac", "Un accesso al database per Mac: un portatile perso si revoca da solo. Il LED è l'ultimo contatto dell'app; la riga revocata resta per memoria.", [["tabella", "Tabella"], ["revoca", "Revoca"], ["vuoto", "Vuoto"]], mac],
+  ["chiave", "Cambio della chiave", "La finestra di rischio dopo una rimozione, in quattro passi. Il passo 3 si anima: premi Prova e applica.", [["incolla", "Passo 2"], ["errore", "Prova fallita"], ["applica", "Applicazione"], ["cancella", "Passo 4"], ["chiusa", "Finestra chiusa"]], chiave],
+  ["dischi", "Dischi", "Un disco è un volume con il suo database dei metadata. Il nome non si cambia: CapCut ricorda i file per percorso.", [["elenco", "Elenco e dettaglio"], ["nuovo", "Nuovo disco"]], dischi],
+  ["registro", "Registro", "Gli eventi del registro di controllo, con filtri. Lo stato di caricamento usa righe segnaposto, non uno spinner.", [["dati", "Con dati"], ["caricamento", "Caricamento"]], registro],
+  ["impostazioni", "Impostazioni", "Nome, email per i link, archivio S3 con la prova di scrittura, chi può invitare.", [["errore", "Prova S3 fallita"], ["ok", "Prova riuscita"]], impostazioni]
+];
+
+function renderScreen(id) {
+  const sc = SCREENS.find((x) => x[0] === id);
+  const el = document.querySelector(`#s-${id} .stage`);
+  el.innerHTML = sc[4]();
+  document.querySelectorAll(`#s-${id} .seg button`).forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.state === S[id])));
+}
+function build() {
+  const main = document.getElementById("screens");
+  main.innerHTML = SCREENS.map(([id, t, note, states]) => `<section class="scr" id="s-${id}"><h2>${t}</h2><p class="scr-note">${note}</p>
+    <div class="seg"><span>stato:</span>${states.map(([k, l]) => `<button data-screen="${id}" data-state="${k}" aria-pressed="false">${l}</button>`).join("")}</div><div class="stage"></div></section>`).join("")
+    + `<section class="scr" id="s-decisioni"><h2>Decisioni aperte</h2><p class="scr-note">Tre scelte che cambiano il comportamento, con la mia raccomandazione.</p><div id="decBody"></div></section>`;
+  SCREENS.forEach(([id]) => renderScreen(id));
+  renderDecisions();
+  document.getElementById("idxMark").innerHTML = wm(19);
+}
+function renderDecisions() { document.getElementById("decBody").innerHTML = decisioni(); navDemo(); }
+
+function setState(id, st) {
+  S[id] = st;
+  if (id === "chiave" && st === "applica") { run = 0; step(); }
+  renderScreen(id);
+}
+let runTimer = null;
+function step() {
+  clearTimeout(runTimer);
+  runTimer = setTimeout(() => {
+    if (S.chiave !== "applica") return;
+    run += 1; renderScreen("chiave");
+    if (run < 4) step();
+    else runTimer = setTimeout(() => { if (S.chiave === "applica") setState("chiave", "cancella"); }, 1100);
+  }, 900);
+}
+
+document.addEventListener("click", (e) => {
+  const seg = e.target.closest("[data-screen]");
+  if (seg) return setState(seg.dataset.screen, seg.dataset.state);
+  const go = e.target.closest("[data-go]");
+  if (go) { const [id, st] = go.dataset.go.split(":"); return setState(id, st); }
+  const jump = e.target.closest("[data-jump]");
+  if (jump) { document.getElementById(`s-${jump.dataset.jump}`).scrollIntoView(); return; }
+  const nav = e.target.closest("[data-nav]");
+  if (nav) { S.nav = nav.dataset.nav; renderDecisions(); }
+});
+setInterval(() => document.querySelectorAll("[data-timer]").forEach((t) => (t.textContent = fmt(Date.now() - T0))), 1000);
+
+// Index highlight
+const obs = new IntersectionObserver((en) => en.forEach((x) => { if (x.isIntersecting) document.querySelectorAll(".index a").forEach((a) => a.classList.toggle("on", a.getAttribute("href") === "#" + x.target.id)); }), { rootMargin: "-30% 0px -60% 0px" });
+
+// Concept chrome
+const root = document.documentElement, body = document.body;
+const KEY = `concept:${location.pathname}`;
+const load = () => { try { return JSON.parse(localStorage.getItem(KEY) || "{}"); } catch { return {}; } };
+const save = (s) => { try { localStorage.setItem(KEY, JSON.stringify(s)); } catch {} };
+const setTheme = (t) => { root.dataset.theme = t; save({ ...load(), theme: t }); };
+document.querySelector("[data-theme-toggle]").addEventListener("click", () => setTheme(root.dataset.theme === "dark" ? "light" : "dark"));
+addEventListener("keydown", (e) => {
+  if (e.metaKey || e.ctrlKey || e.altKey || e.target.closest("input, textarea, select, [contenteditable]")) return;
+  const k = e.key.toLowerCase();
+  if (k === "t") setTheme(root.dataset.theme === "dark" ? "light" : "dark");
+  else if (k === "p") body.dataset.chrome = body.dataset.chrome === "off" ? "on" : "off";
+});
+root.dataset.theme = load().theme || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+build();
+document.querySelectorAll(".scr").forEach((s) => obs.observe(s));
+</script>
+</body>
+</html>

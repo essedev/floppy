@@ -1,0 +1,814 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Concept D - primo avvio</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<!--
+  Concept D: come una persona del team passa da "non ho Fluix" a "Fluix è nel Finder", e cosa
+  vede quando qualcosa va storto. Storyboard dell'intero flusso nello stile D Drive scelto in
+  concept-b-identity, non un file a varianti: le scelte aperte stanno nei blocchi Decisione.
+  Tasti: 1-9 e 0 saltano al passo, t tema, p nasconde barra e note.
+
+  Il problema: oggi il primo avvio è uno zip con le chiavi dentro e `bash install.sh` nel
+  Terminale. Con il control plane la persona riceve un invito, installa l'app, entra con la sua
+  email e l'app prepara tutto da sola. Chi la usa monta video con CapCut, non è tecnico.
+
+  Il flusso: 1 installazione con Homebrew, 2 benvenuto, 3 email nel browser, 4 "controlla la
+  posta", 5 la mail col link, 6 ritorno all'app, 7 preparazione del disco (e i due errori veri),
+  8 Fluix nel Finder, 9 il percorso dell'invito, 10 i casi limite.
+
+  Mappatura sul codice di oggi (fattibilità, non piano):
+  - App Tauri: finestra dedicata per il primo avvio, poi solo l'icona nella barra dei menu.
+  - Accesso: l'app apre il browser sul control plane con PKCE e un redirect di loopback su
+    127.0.0.1 (porta scelta dall'app). Il magic link è legato alla richiesta di accesso in
+    attesa, non a un cookie del browser: funziona anche se la mail si apre in un altro browser.
+    Il link vale 15 minuti e si usa una volta. Per non rivelare chi è iscritto, la pagina
+    risponde sempre "controlla la posta"; è la mail a dire se l'indirizzo non è in nessun team.
+  - Preparazione: è `fluix setup`. Crea la VM Lima da immagine inclusa nel pacchetto (misurato:
+    circa 90 s), monta il disco, scrive l'agente launchd. Rifiuta sotto i 5 GB liberi, come fa
+    già il comando. Nessun download durante l'installazione.
+  - Homebrew chiede i diritti di amministratore per installarsi: accettato per ora, è scritto
+    nella pagina dell'invito.
+  - Il comando del cask (`essedev/tap/fluix`) è plausibile, il tap non esiste ancora.
+
+  Dati: persona, team e indirizzi inventati (Giulia, Marco, Studio Esempio, dominio .example);
+  progetti da concept-a-panel; tempi dalle misure in docs/ARCHITECTURE.md.
+
+  Decisioni aperte, con raccomandazione:
+  1. Primo avvio in una finestra dedicata (consigliata: il browser ruba il fuoco e il pannello
+     della barra dei menu si chiuderebbe a metà) o dentro il pannello.
+  2. Accesso col link (consigliato) con un codice di 6 cifre nella stessa mail come riserva per
+     chi apre la posta sul telefono; il solo codice come alternativa.
+  3. Passi di preparazione in parole semplici (consigliati: se si blocca, la persona sa dire
+     dove) o una sola barra amichevole.
+
+  Giro 1: prima stesura.
+-->
+<style>
+@font-face { font-family: "Departure Mono"; src: url("https://cdn.jsdelivr.net/gh/rektdeckard/departure-mono@v1.500/public/assets/DepartureMono-Regular.woff2") format("woff2"); font-display: swap; }
+:root {
+  color-scheme: light;
+  --page: #e6e3dc; --surface: #f4f2ed; --raised: #fbfaf7; --sunken: #ebe8e1; --line: #dcd8cf;
+  --ink: #1d1c1a; --ink-2: #625f58; --ink-3: #706c64;
+  --brand: #ff5b1f; --brand-ink: #b93c0b; --good: #2b9d4b; --good-ink: #18672f; --bad: #e0402a; --bad-ink: #b3301d;
+  --track: #e2ded6; --idle: #c9c5bb;
+  --face-hi: #fdfcfa; --face-lo: #e9e6df; --face-edge: #d3cfc5; --slot: #2a2927; --slot-fill: #8e897f;
+  --led-ok: #2fbf57; --led-dl: #ff5b1f; --led-err: #ff3b24; --led-idle: #cfcbc2; --face-hl: rgba(255, 255, 255, 0.45);
+  --win-shadow: 0 0 0 0.5px rgba(40, 30, 20, 0.22), 0 22px 48px -20px rgba(50, 35, 20, 0.45);
+  --wall: radial-gradient(70% 60% at 15% 20%, #f2c9a8 0, transparent 60%), radial-gradient(60% 60% at 85% 80%, #c9cfc4 0, transparent 60%), linear-gradient(160deg, #ddd5c8, #c8c3b8);
+  --sys-bar: #ecebe8; --sys-side: #e4e2de; --sys-sel: #dcd9d3; --sys-text: #1d1d1f; --sys-text-2: #5d5d62;
+  --folder-a: #6cb6f6; --folder-b: #4e9ee8;
+  --f-ui: "Schibsted Grotesk", -apple-system, BlinkMacSystemFont, sans-serif;
+  --f-ro: "Departure Mono", ui-monospace, Menlo, monospace;
+  --f-sys: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+  --f-sys-mono: ui-monospace, "SF Mono", Menlo, monospace;
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #121211; --surface: #1d1c1a; --raised: #262522; --sunken: #161514; --line: #2f2d29;
+  --ink: #efece5; --ink-2: #a29e95; --ink-3: #8f8b83;
+  --brand: #ff6a2e; --brand-ink: #ff8a5c; --good: #3cc864; --good-ink: #4fd377; --bad: #ff5a43; --bad-ink: #ff7a66;
+  --track: #2a2926; --idle: #44423d;
+  --face-hi: #2c2b28; --face-lo: #201f1d; --face-edge: #393733; --slot: #0b0b0a; --slot-fill: #6f6b63;
+  --led-ok: #3fdc6c; --led-dl: #ff6a2e; --led-err: #ff4b33; --led-idle: #3a3834; --face-hl: rgba(255, 255, 255, 0.06);
+  --win-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.85), 0 22px 48px -20px rgba(0, 0, 0, 0.8);
+  --wall: radial-gradient(70% 60% at 15% 20%, #5a3320 0, transparent 60%), radial-gradient(60% 60% at 85% 80%, #24302c 0, transparent 60%), linear-gradient(160deg, #1c1a17, #0e0e0d);
+  --sys-bar: #2b2a28; --sys-side: #242321; --sys-sel: #3a3936; --sys-text: #f2f2f2; --sys-text-2: #ababb0;
+  --folder-a: #5aa9ef; --folder-b: #3f8ad8;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 56px; }
+body { background: var(--page); color: var(--ink); font: 15px/1.5 var(--f-ui); -webkit-font-smoothing: antialiased; }
+[hidden] { display: none !important; }
+.ro { font-family: var(--f-ro); font-variant-numeric: tabular-nums; }
+
+/* Concept chrome, not part of the design */
+.switch { position: sticky; top: 0; z-index: 100; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 8px 12px; background: #111; color: #aaa; font: 12px/1.4 ui-monospace, Menlo, monospace; }
+.switch button, .switch a { font: inherit; border: 0; padding: 5px 9px; border-radius: 6px; background: #262626; color: #eee; cursor: pointer; text-decoration: none; }
+.switch p { margin: 0 8px 0 0; }
+.switch .sp { flex: 1; }
+body[data-chrome="off"] .switch, body[data-chrome="off"] .meta .notes, body[data-chrome="off"] .why { display: none; }
+
+/* Page */
+.wrap { max-width: 1240px; margin: 0 auto; padding: 40px 28px 96px; }
+.intro { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 32px; align-items: end; margin-bottom: 48px; }
+.intro h1 { margin: 14px 0 10px; font: 800 44px/1.05 var(--f-ui); letter-spacing: -0.035em; }
+.intro p { margin: 0; max-width: 62ch; font-size: 17px; color: var(--ink-2); }
+.word { display: inline-flex; align-items: center; gap: 12px; font: 800 30px/1 var(--f-ui); letter-spacing: -0.035em; }
+.idot { position: relative; }
+.idot i { position: absolute; left: 50%; top: 0.26em; width: 0.16em; height: 0.16em; border-radius: 50%; transform: translateX(-50%); background: var(--brand); box-shadow: 0 0 10px var(--brand); }
+.legend { display: flex; gap: 18px; flex-wrap: wrap; font-size: 13px; color: var(--ink-2); }
+.legend span { display: inline-flex; align-items: center; gap: 8px; }
+.legend i { width: 9px; height: 9px; border-radius: 50%; }
+
+/* Steps */
+.steps { display: flex; flex-direction: column; gap: 56px; }
+.step { display: grid; grid-template-columns: 250px minmax(0, 1fr); gap: 32px; align-items: start; }
+.meta { position: sticky; top: 64px; }
+.num { font: 44px/1 var(--f-ro); color: var(--ink-3); }
+.meta h2 { margin: 12px 0 8px; font: 700 21px/1.2 var(--f-ui); letter-spacing: -0.02em; }
+.meta p { margin: 0 0 10px; font-size: 14px; color: var(--ink-2); }
+.notes { margin: 14px 0 0; padding: 0; list-style: none; display: grid; gap: 8px; font-size: 13px; color: var(--ink-2); }
+.notes li { padding-left: 16px; position: relative; }
+.notes li::before { content: ""; position: absolute; left: 0; top: 0.6em; width: 6px; height: 6px; border-radius: 50%; background: var(--idle); }
+.stage { min-width: 0; }
+.scroll { overflow-x: auto; padding: 4px 4px 12px; margin: -4px; }
+.desk { position: relative; border-radius: 18px; background: var(--wall); padding: 44px 36px 40px; min-width: 620px; }
+.desk.tight { padding: 28px; }
+.pair { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 20px; align-items: start; }
+.cap { margin: 10px 2px 0; font-size: 13px; color: var(--ink-2); }
+.flow-arrow { display: flex; align-items: center; gap: 10px; margin: 14px 0 0; font-size: 13px; color: var(--ink-3); }
+.flow-arrow svg { flex: none; }
+
+/* macOS window */
+.win { background: var(--surface); border-radius: 12px; box-shadow: var(--win-shadow); overflow: hidden; margin: 0 auto; }
+.tb { height: 38px; display: flex; align-items: center; gap: 8px; padding: 0 14px; position: relative; }
+.tb .t { position: absolute; left: 0; right: 0; text-align: center; font: 600 13px var(--f-sys); color: var(--sys-text-2); pointer-events: none; }
+.lights { display: flex; gap: 8px; position: relative; z-index: 1; }
+.lights i { width: 12px; height: 12px; border-radius: 50%; background: #ff5f57; box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.15); }
+.lights i:nth-child(2) { background: #febc2e; } .lights i:nth-child(3) { background: #28c840; }
+.win.inactive .lights i { background: var(--idle); }
+
+/* Fluix windows */
+.fx { width: 440px; }
+.fx .body { padding: 22px 28px 28px; display: flex; flex-direction: column; gap: 18px; }
+.fx h3 { margin: 0; font: 700 22px/1.2 var(--f-ui); letter-spacing: -0.02em; }
+.fx p { margin: 0; font-size: 14px; color: var(--ink-2); }
+.face { margin: 0 8px; }
+.face svg { display: block; width: 100%; height: auto; }
+.led-ok { fill: var(--led-ok); } .led-dl { fill: var(--led-dl); } .led-err { fill: var(--led-err); } .led-idle { fill: var(--led-idle); }
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 44px; padding: 0 18px; border: 0; border-radius: 12px; font: 600 14px var(--f-ui); cursor: pointer; white-space: nowrap; }
+.btn-primary { background: var(--ink); color: var(--surface); }
+.btn-ghost { background: transparent; color: var(--ink-2); font-weight: 500; }
+.btn-soft { background: var(--sunken); color: var(--ink); }
+.btn.wide { width: 100%; }
+.btns { display: flex; gap: 8px; }
+.btns .btn-primary { flex: 1; }
+.small { font-size: 13px; color: var(--ink-2); }
+.foot { display: flex; justify-content: space-between; align-items: center; font-size: 13px; color: var(--ink-3); padding-top: 4px; }
+.well { background: var(--sunken); border-radius: 14px; padding: 6px; }
+.prog-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.prog-steps li { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 10px; align-items: center; min-height: 44px; padding: 0 12px; border-radius: 9px; font-size: 14px; }
+.prog-steps li.now { background: var(--raised); }
+.prog-steps .st { width: 12px; height: 12px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px var(--ink-3); justify-self: center; }
+.prog-steps li.done .st { background: var(--led-ok); box-shadow: 0 0 6px var(--led-ok); }
+.prog-steps li.now .st { background: var(--led-dl); box-shadow: 0 0 6px var(--led-dl); animation: blink 1.1s steps(2, jump-none) infinite; }
+.prog-steps li.err .st { background: var(--led-err); box-shadow: 0 0 6px var(--led-err); }
+.prog-steps li.todo { color: var(--ink-2); }
+.prog-steps .tm { font: 12px var(--f-ro); color: var(--ink-2); }
+.bar { height: 6px; border-radius: 3px; background: var(--track); overflow: hidden; }
+.bar i { display: block; height: 100%; border-radius: inherit; background: var(--ink); transform-origin: left; }
+.rowline { display: flex; justify-content: space-between; gap: 12px; font: 12px var(--f-ro); color: var(--ink-2); }
+.tag { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 99px; font: 600 12px var(--f-ui); }
+.tag.err { background: color-mix(in srgb, var(--bad) 13%, transparent); color: var(--bad-ink); }
+.tag.ok { background: color-mix(in srgb, var(--good) 14%, transparent); color: var(--good-ink); }
+.code { display: flex; gap: 8px; justify-content: center; }
+.code span { width: 46px; height: 56px; border-radius: 10px; background: var(--raised); box-shadow: inset 0 0 0 1.5px var(--line); display: grid; place-items: center; font: 28px var(--f-ro); }
+.code span.cur { box-shadow: inset 0 0 0 2px var(--ink); }
+.code .gap { width: 10px; background: none; box-shadow: none; }
+@keyframes blink { 50% { opacity: 0.25; } }
+.blink { animation: blink 1.1s steps(2, jump-none) infinite; }
+@media (prefers-reduced-motion: reduce) { .blink, .prog-steps li.now .st { animation: none; } }
+
+/* Terminal */
+.term { width: 600px; background: #1c1c1b; color: #e8e6e1; }
+.term .tb { background: #2a2a29; }
+.term .tb .t { color: #9a9a96; }
+.term pre { margin: 0; padding: 16px 18px 20px; font: 13px/1.6 var(--f-sys-mono); white-space: pre-wrap; }
+.term .p { color: #8fd18a; } .term .d { color: #8a8a86; } .term .b { color: #8cb8ff; }
+
+/* Browser */
+.br { width: 640px; background: var(--page); }
+.br .tb { background: var(--sys-bar); height: 46px; }
+.url { flex: 1; max-width: 360px; margin: 0 auto; height: 28px; border-radius: 8px; background: var(--sys-side); display: flex; align-items: center; justify-content: center; gap: 6px; font: 13px var(--f-sys); color: var(--sys-text); position: relative; z-index: 1; }
+.url svg { color: var(--sys-text-2); }
+.web { padding: 36px 40px 40px; min-height: 340px; display: flex; flex-direction: column; align-items: center; }
+.webcard { width: 100%; max-width: 380px; background: var(--surface); border-radius: 18px; padding: 28px; display: flex; flex-direction: column; gap: 16px; box-shadow: 0 0 0 0.5px rgba(40, 30, 20, 0.14), 0 18px 40px -26px rgba(50, 35, 20, 0.45); }
+:root[data-theme="dark"] .webcard { box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.8), 0 18px 40px -26px rgba(0, 0, 0, 0.8); }
+.webcard h3 { margin: 0; font: 700 24px/1.15 var(--f-ui); letter-spacing: -0.02em; }
+.webcard p { margin: 0; font-size: 14px; color: var(--ink-2); }
+.field { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--ink-2); }
+.input { height: 44px; border-radius: 10px; background: var(--raised); box-shadow: inset 0 0 0 1.5px var(--line); display: flex; align-items: center; padding: 0 14px; font-size: 15px; color: var(--ink); }
+.input.focus { box-shadow: inset 0 0 0 2px var(--ink); }
+.device { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 10px; background: var(--sunken); font-size: 13px; color: var(--ink-2); }
+.device b { color: var(--ink); font-weight: 600; }
+.webfoot { margin-top: 20px; font-size: 13px; color: var(--ink-2); }
+.cmd { margin-top: 8px; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 12px; border-radius: 10px; background: var(--sunken); }
+.cmd .ro { font-size: 12.5px; color: var(--ink); }
+.webcard { overflow-wrap: anywhere; }
+.big-ro { font: 40px/1 var(--f-ro); letter-spacing: 0.04em; text-align: center; }
+
+/* Mail */
+.mail { width: 680px; background: var(--raised); }
+.mail .tb { background: var(--sys-bar); }
+.mail-grid { display: grid; grid-template-columns: 200px minmax(0, 1fr); min-height: 360px; }
+.mail-list { background: var(--sys-side); padding: 8px; font: 13px var(--f-sys); color: var(--sys-text); }
+.mail-item { padding: 10px; border-radius: 8px; display: grid; gap: 2px; }
+.mail-item.sel { background: var(--sys-sel); }
+.mail-item b { font-weight: 600; } .mail-item span { color: var(--sys-text-2); font-size: 12px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.mail-msg { padding: 18px 26px 26px; font-family: var(--f-sys); color: var(--sys-text); }
+.mail-head { display: grid; gap: 2px; padding-bottom: 14px; border-bottom: 1px solid var(--line); font-size: 13px; color: var(--sys-text-2); }
+.mail-head b { font-size: 15px; color: var(--sys-text); }
+.mail-body { padding-top: 20px; display: flex; flex-direction: column; gap: 16px; font-family: var(--f-ui); }
+.mail-body p { margin: 0; font-size: 14.5px; color: var(--ink); max-width: 52ch; }
+.mail-body .small { color: var(--ink-2); }
+.codebox { display: inline-flex; align-items: center; gap: 12px; padding: 10px 14px; border-radius: 10px; background: var(--sunken); font-size: 13px; color: var(--ink-2); }
+.codebox .ro { white-space: nowrap; font-size: 20px; color: var(--ink); letter-spacing: 0.08em; }
+
+/* Finder */
+.finder { width: 680px; }
+.finder .tb { background: var(--sys-bar); }
+.fgrid { display: grid; grid-template-columns: 180px minmax(0, 1fr); min-height: 300px; font: 13px var(--f-sys); color: var(--sys-text); }
+.fside { background: var(--sys-side); padding: 6px 10px 14px; }
+.fside h5 { margin: 12px 8px 4px; font: 600 11px var(--f-sys); color: var(--sys-text-2); }
+.fside div { display: flex; align-items: center; gap: 8px; padding: 4px 8px; border-radius: 6px; }
+.fside div.sel { background: var(--sys-sel); }
+.fside .ej { margin-left: auto; color: var(--sys-text-2); }
+.fmain { background: var(--raised); padding: 18px; display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 14px 6px; align-content: start; }
+.folder { display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center; font-size: 12px; line-height: 1.3; }
+.fpath { grid-column: 1 / -1; font-size: 12px; color: var(--sys-text-2); }
+
+/* Menu bar strip */
+.mbar { height: 28px; border-radius: 10px 10px 0 0; display: flex; align-items: center; justify-content: flex-end; gap: 14px; padding: 0 14px; font: 13px var(--f-sys); color: #1d1d1f; background: rgba(246, 246, 248, 0.6); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); }
+:root[data-theme="dark"] .mbar { color: #f1f1f1; background: rgba(24, 24, 28, 0.55); }
+.mbar .ic { height: 20px; padding: 0 6px; border-radius: 5px; display: grid; place-items: center; background: rgba(0, 0, 0, 0.1); }
+:root[data-theme="dark"] .mbar .ic { background: rgba(255, 255, 255, 0.18); }
+.tip { position: absolute; z-index: 2; right: 105px; top: 40px; width: 270px; background: var(--surface); border-radius: 14px; padding: 14px 16px; box-shadow: var(--win-shadow); font-size: 13.5px; color: var(--ink-2); }
+.tip b { display: block; color: var(--ink); font-size: 14px; margin-bottom: 2px; }
+.tip::before { content: ""; position: absolute; top: -6px; right: 30px; width: 12px; height: 12px; background: var(--surface); transform: rotate(45deg); border-radius: 2px; }
+
+/* Notification */
+.notif { position: absolute; right: 18px; top: 16px; width: 300px; display: grid; grid-template-columns: 36px minmax(0, 1fr); gap: 10px; padding: 12px 14px; border-radius: 16px; background: color-mix(in srgb, var(--raised) 88%, transparent); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); box-shadow: var(--win-shadow); font: 13px/1.35 var(--f-sys); color: var(--sys-text); }
+.notif b { display: block; font-weight: 600; }
+.notif span { color: var(--sys-text-2); }
+
+/* Decisions */
+.decision { margin-top: 8px; padding: 28px; border-radius: 22px; background: var(--surface); }
+.decision > header { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; flex-wrap: wrap; margin-bottom: 20px; }
+.decision h2 { margin: 0; font: 700 22px/1.2 var(--f-ui); letter-spacing: -0.02em; }
+.decision h2 .ro { font-size: 16px; color: var(--ink-2); margin-right: 10px; }
+.opts { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
+.opt { background: var(--sunken); border-radius: 16px; padding: 18px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.opt h3 { margin: 0; display: flex; align-items: center; gap: 10px; font: 700 16px var(--f-ui); }
+.opt h3 .ro { font-size: 15px; color: var(--ink-2); }
+.opt ul { margin: 0; padding-left: 18px; font-size: 13.5px; color: var(--ink-2); display: grid; gap: 4px; }
+.rec { margin-left: auto; padding: 3px 10px; border-radius: 99px; font: 600 12px var(--f-ui); background: color-mix(in srgb, var(--good) 14%, transparent); color: var(--good-ink); }
+.why { margin: 16px 0 0; font-size: 14px; color: var(--ink-2); max-width: 80ch; }
+.why b { color: var(--ink); }
+.mini { background: var(--wall); border-radius: 12px; padding: 18px; display: flex; justify-content: center; overflow: hidden; }
+.mini .win { width: 100%; max-width: 320px; }
+.mini .fx .body { padding: 16px 18px 18px; gap: 12px; }
+.mini .fx h3 { font-size: 17px; }
+.mini .fx p { font-size: 13px; }
+
+.edges { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.edge h4 { margin: 0 0 8px; font: 700 15px var(--f-ui); }
+.edge .web { padding: 22px 18px; min-height: 0; }
+.edge .webcard { padding: 20px; gap: 12px; }
+.edge .webcard h3 { font-size: 19px; }
+.edge .br { width: 100%; }
+.edge .url { max-width: 220px; }
+
+@media (max-width: 1000px) {
+  .step { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  .meta { position: static; }
+  .opts, .edges, .pair { grid-template-columns: minmax(0, 1fr); }
+  .intro { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 600px) {
+  .wrap { padding: 24px 16px 64px; }
+  .intro h1 { font-size: 32px; }
+  .decision { padding: 18px; }
+}
+</style>
+</head>
+<body>
+<div class="switch">
+  <p>Concept D · primo avvio e accesso</p>
+  <span data-jumps></span>
+  <span class="sp"></span>
+  <button data-theme-toggle>t tema</button>
+  <button data-chrome-toggle>p pulito</button>
+</div>
+
+<main class="wrap">
+  <header class="intro">
+    <div>
+      <span class="word" data-svg="word"></span>
+      <h1>Da "non ho Fluix" a Fluix nel Finder</h1>
+      <p>Giulia monta video per Studio Esempio. Marco, l'amministratore, l'ha invitata. Ecco cosa vede, passo per passo, e cosa succede quando qualcosa va storto. Circa tre minuti in tutto, uno e mezzo dei quali per preparare il disco.</p>
+    </div>
+    <div class="legend" aria-label="Significato del LED">
+      <span><i style="background:var(--led-idle)"></i>Spento</span>
+      <span><i style="background:var(--led-dl)"></i>Al lavoro</span>
+      <span><i style="background:var(--led-ok)"></i>Collegato</span>
+      <span><i style="background:var(--led-err)"></i>Errore</span>
+    </div>
+  </header>
+
+  <div class="steps">
+
+    <!-- 1 -->
+    <section class="step" id="s1">
+      <div class="meta">
+        <div class="num">01</div>
+        <h2>Installare</h2>
+        <p>Una riga nel Terminale, copiata dalla pagina dell'invito (passo 9). Poi Fluix si apre da Applicazioni.</p>
+        <ul class="notes">
+          <li>Il cask toglie la quarantena: nessun avviso di Gatekeeper al primo avvio.</li>
+          <li>Homebrew deve esserci già e chiede la password di amministratore per installarsi.</li>
+        </ul>
+      </div>
+      <div class="stage"><div class="scroll"><div class="desk">
+        <div class="win term">
+          <div class="tb"><span class="lights"><i></i><i></i><i></i></span><span class="t">giulia — zsh</span></div>
+<pre><span class="p">giulia@MacBook-Pro ~ %</span> brew install --cask essedev/tap/fluix
+<span class="b">==></span> Tapping essedev/tap
+<span class="b">==></span> Downloading https://github.com/essedev/fluix/releases/download/v0.1.0/Fluix_0.1.0_aarch64.dmg
+<span class="d">######################################################################## 100.0%</span>
+<span class="b">==></span> Installing Cask <b>fluix</b>
+<span class="b">==></span> Moving App 'Fluix.app' to '/Applications/Fluix.app'
+fluix was successfully installed!
+<span class="p">giulia@MacBook-Pro ~ %</span> open -a Fluix</pre>
+        </div>
+      </div></div>
+      <p class="cap">Il pacchetto include la macchina virtuale e i programmi che le servono: dopo questo download non si scarica più niente.</p></div>
+    </section>
+
+    <!-- 2 -->
+    <section class="step" id="s2">
+      <div class="meta">
+        <div class="num">02</div>
+        <h2>Benvenuto</h2>
+        <p>Una finestra, una frase, un pulsante. Il LED è spento: il disco non c'è ancora.</p>
+        <ul class="notes">
+          <li>"Accedi" apre il browser predefinito sulla pagina del team.</li>
+          <li>Nessun campo password nell'app, mai.</li>
+        </ul>
+      </div>
+      <div class="stage"><div class="scroll"><div class="desk">
+        <div class="win fx">
+          <div class="tb"><span class="lights"><i></i><i></i><i></i></span></div>
+          <div class="face" data-face='{"led":"idle","ro":"NUOVO","fill":0,"right":""}'></div>
+          <div class="body">
+            <div>
+              <h3>Il disco del team, nel Finder</h3>
+              <p style="margin-top:6px">Fluix mette sul tuo Mac i progetti di Studio Esempio. Stanno nel cloud: quelli che apri restano anche qui, e scorrono in timeline senza attese.</p>
+            </div>
+            <button class="btn btn-primary wide">Accedi</button>
+            <p class="small">Si apre il browser: entri con l'email di lavoro, senza password.</p>
+            <div class="foot"><span class="ro">Fluix 0.1.0</span><span>Serve un invito del tuo team</span></div>
+          </div>
+        </div>
+      </div></div></div>
+    </section>
+
+    <!-- Decision 1 -->
+    <section class="decision" id="d1">
+      <header><h2><span class="ro">Decisione 1</span>Dove avviene il primo avvio</h2></header>
+      <div class="opts">
+        <div class="opt">
+          <h3><span class="ro">A</span>Finestra dedicata<span class="rec">Consigliata</span></h3>
+          <div class="mini"><div class="win fx"><div class="tb"><span class="lights"><i></i><i></i><i></i></span></div><div class="face" data-face='{"led":"idle","ro":"NUOVO","fill":0,"right":""}'></div><div class="body"><h3>Il disco del team, nel Finder</h3><button class="btn btn-primary wide">Accedi</button></div></div></div>
+          <ul><li>Resta aperta mentre il browser ha il fuoco, e l'app la riporta davanti a login fatto.</li><li>Ha lo spazio per i passi di preparazione e per gli errori.</li><li>Dopo il primo avvio sparisce: resta solo l'icona nella barra dei menu.</li></ul>
+        </div>
+        <div class="opt">
+          <h3><span class="ro">B</span>Dentro il pannello della barra dei menu</h3>
+          <div class="mini" style="padding-top:0;display:block"><div class="mbar" style="border-radius:0"><span class="ic" data-svg="mb-idle"></span><span>10:42</span></div><div class="win fx" style="margin:8px 0 0 auto;max-width:280px"><div class="body" style="padding-top:18px"><h3>Accedi per iniziare</h3><button class="btn btn-primary wide">Accedi</button></div></div></div>
+          <ul><li>Una superficie in meno da disegnare e mantenere.</li><li>Il pannello si chiude appena il browser prende il fuoco: Giulia torna e non trova più dove era.</li><li>Al primo avvio nessuno sa ancora dov'è l'icona.</li></ul>
+        </div>
+      </div>
+      <p class="why"><b>Perché A.</b> Il primo avvio passa per il browser e dura un minuto e mezzo: deve vivere in una finestra che non si chiude da sola. Il pannello resta per l'uso di tutti i giorni.</p>
+    </section>
+
+    <!-- 3 -->
+    <section class="step" id="s3">
+      <div class="meta">
+        <div class="num">03</div>
+        <h2>L'email, nel browser</h2>
+        <p>La pagina del team, nello stesso stile dell'app. Dice da quale Mac sta arrivando la richiesta.</p>
+        <ul class="notes">
+          <li>La richiesta è legata a questo Mac con PKCE: il link della mail apre la sessione solo per lei.</li>
+          <li>La pagina risponde sempre "controlla la posta", anche per un indirizzo non invitato: non rivela chi è iscritto.</li>
+        </ul>
+      </div>
+      <div class="stage"><div class="scroll"><div class="desk">
+        <div class="win br">
+          <div class="tb"><span class="lights"><i></i><i></i><i></i></span><span class="url" data-svg="lock">fluix.example.com</span></div>
+          <div class="web">
+            <div class="webcard">
+              <span class="word" style="font-size:22px" data-svg="word-sm"></span>
+              <div><h3>Entra in Fluix</h3><p style="margin-top:6px">Ti mandiamo un link per entrare. Niente password da ricordare.</p></div>
+              <label class="field">Email di lavoro<span class="input focus">giulia@studio.example</span></label>
+              <button class="btn btn-primary wide">Mandami il link</button>
+              <div class="device"><span data-svg="mark-sm"></span><span>Accesso da <b>MacBook Pro di Giulia</b></span></div>
+            </div>
+            <p class="webfoot">Studio Esempio · Fluix</p>
+          </div>
+        </div>
+      </div></div></div>
+    </section>
+
+    <!-- 4 -->
+    <section class="step" id="s4">
+      <div class="meta">
+        <div class="num">04</div>
+        <h2>Controlla la posta</h2>
+        <p>La pagina aspetta. Il link vale 15 minuti; il pulsante per mandarne un altro si accende dopo un minuto.</p>
+        <ul class="notes">
+          <li>Se la posta è sul telefono, la mail ha anche un codice (Decisione 2).</li>
+        </ul>
+      </div>
+      <div class="stage"><div class="scroll"><div class="desk">
+        <div class="win br">
+          <div class="tb"><span class="lights"><i></i><i></i><i></i></span><span class="url" data-svg="lock">fluix.example.com</span></div>
+          <div class="web">
+            <div class="webcard" style="align-items:flex-start">
+              <span data-svg="envelope"></span>
+              <div><h3>Controlla la posta</h3><p style="margin-top:6px">Abbiamo mandato un link a <b style="color:var(--ink)">giulia@studio.example</b>. Aprilo da questo Mac entro 15 minuti.</p></div>
+              <div class="rowline" style="width:100%"><span>Nuovo link tra</span><span data-countdown>0:42</span></div>
+              <div class="btns" style="width:100%"><button class="btn btn-soft" style="flex:1" disabled>Mandane un altro</button><button class="btn btn-ghost">Cambia email</button></div>
+            </div>
+          </div>
+        </div>
+      </div></div></div>
+    </section>
+
+    <!-- 5 -->
+    <section class="step" id="s5">
+      <div class="meta">
+        <div class="num">05</div>
+        <h2>La mail</h2>
+        <p>Chi scrive, cosa fare, quanto dura il link. E cosa fare se non l'ha chiesta lei.</p>
+        <ul class="notes">
+          <li>Un solo uso: aprirlo una seconda volta porta alla pagina "link già usato".</li>
+          <li>Il codice serve solo per la richiesta aperta su questo Mac.</li>
+        </ul>
+      </div>
+      <div class="stage"><div class="scroll"><div class="desk">
+        <div class="win mail">
+          <div class="tb"><span class="lights"><i></i><i></i><i></i></span><span class="t">In arrivo — 1 messaggio</span></div>
+          <div class="mail-grid">
+            <div class="mail-list">
+              <div class="mail-item sel"><b>Fluix · Studio Esempio</b><span>Il tuo link per entrare in Fluix</span><span>10:43</span></div>
+              <div class="mail-item"><b>Marco</b><span>Ti ho invitata su Fluix</span><span>Ieri</span></div>
+            </div>
+            <div class="mail-msg">
+              <div class="mail-head"><b>Il tuo link per entrare in Fluix</b><span>Da: Fluix · Studio Esempio &lt;accesso@fluix.example.com&gt;</span><span>A: giulia@studio.example · oggi 10:43</span></div>
+              <div class="mail-body">
+                <span class="word" style="font-size:20px" data-svg="word-sm"></span>
+                <p>Ciao Giulia, premi il pulsante per entrare in Fluix su <b>MacBook Pro di Giulia</b>. Il link vale 15 minuti e si usa una volta sola.</p>
+                <div><button class="btn btn-primary">Entra in Fluix</button></div>
+                <div class="codebox">Posta aperta su un altro dispositivo? Scrivi in Fluix il codice <span class="ro">482 913</span></div>
+                <p class="small">Non hai chiesto tu di entrare? Ignora questa mail: senza il link o il codice nessuno entra.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div></div></div>
+    </section>
+
+    <!-- Decision 2 -->
+    <section class="decision" id="d2">
+      <header><h2><span class="ro">Decisione 2</span>Come si entra</h2></header>
+      <div class="opts">
+        <div class="opt">
+          <h3><span class="ro">A</span>Link, con il codice come riserva<span class="rec">Consigliata</span></h3>
+          <div class="mini" style="display:block"><div class="codebox" style="width:100%;justify-content:space-between;background:var(--surface)"><span>Entra in Fluix</span><span class="ro" style="font-size:15px">+ 482 913</span></div></div>
+          <ul><li>Un clic sul Mac, il caso normale.</li><li>Chi legge la posta sul telefono usa il codice nella stessa mail.</li><li>Due vie da tenere sicure: il codice scade col link e accetta 5 tentativi.</li></ul>
+        </div>
+        <div class="opt">
+          <h3><span class="ro">B</span>Solo codice di 6 cifre nell'app</h3>
+          <div class="mini"><div class="win fx"><div class="body" style="padding-top:18px"><h3>Scrivi il codice</h3><div class="code"><span>4</span><span>8</span><span class="cur">2</span><span></span><span class="gap"></span><span></span><span></span></div></div></div></div>
+          <ul><li>Funziona da qualunque dispositivo, senza tornare al browser.</li><li>Sei cifre da ricopiare ogni volta, anche quando la posta è sullo stesso Mac.</li><li>Niente redirect di loopback, ma il browser serve comunque per l'email.</li></ul>
+        </div>
+      </div>
+      <p class="why"><b>Perché A.</b> Il caso di tutti i giorni è la posta sullo stesso Mac, e lì un clic batte sei cifre. Il codice copre il telefono senza una seconda schermata di accesso.</p>
+    </section>
+
+    <!-- 6 -->
+    <section class="step" id="s6">
+      <div class="meta">
+        <div class="num">06</div>
+        <h2>Ritorno all'app</h2>
+        <p>Il link chiude il cerchio: il browser passa il codice a Fluix su 127.0.0.1, Fluix torna davanti e lo dice con una notifica.</p>
+        <ul class="notes">
+          <li>La pagina si può chiudere: il lavoro ora lo fa l'app.</li>
+        </ul>
+      </div>
+      <div class="stage"><div class="scroll"><div class="desk" style="padding-top:96px">
+        <div class="notif"><span data-svg="appicon-36"></span><div><b>Fluix</b>Accesso fatto: Giulia, Studio Esempio.<br><span>Preparo il disco su questo Mac.</span></div></div>
+        <div class="win br inactive">
+          <div class="tb"><span class="lights"><i></i><i></i><i></i></span><span class="url" data-svg="lock">fluix.example.com</span></div>
+          <div class="web">
+            <div class="webcard" style="align-items:center;text-align:center">
+              <span data-svg="check-big"></span>
+              <h3>Fatto. Torna a Fluix</h3>
+              <p>Sei dentro come giulia@studio.example. Puoi chiudere questa pagina.</p>
+              <button class="btn btn-soft">Apri Fluix</button>
+            </div>
+          </div>
+        </div>
+      </div></div></div>
+    </section>
+
+    <!-- 7 -->
+    <section class="step" id="s7">
+      <div class="meta">
+        <div class="num">07</div>
+        <h2>Preparare il disco</h2>
+        <p>Tre passi in parole semplici. Il LED lavora, la fessura si riempie. Nel mock il tempo è accelerato.</p>
+        <ul class="notes">
+          <li>È <span class="ro">fluix setup</span>: VM da immagine inclusa, mount, agente al login.</li>
+          <li>Sotto 5 GB liberi si ferma prima di cominciare.</li>
+          <li>"Invia diagnostica" manda log e stato all'amministratore, mai le chiavi.</li>
+        </ul>
+      </div>
+      <div class="stage"><div class="scroll"><div class="desk">
+        <div class="pair">
+          <div class="win fx" style="width:100%">
+            <div class="tb"><span class="lights"><i></i><i></i><i></i></span></div>
+            <div class="face" data-face-live></div>
+            <div class="body">
+              <div><h3>Preparo Fluix su questo Mac</h3><p style="margin-top:6px">Ci vuole circa un minuto e mezzo. Puoi lasciare la finestra aperta e fare altro.</p></div>
+              <div class="well"><ul class="prog-steps" data-prog>
+                <li><span class="st"></span><span>Preparo il disco virtuale</span><span class="tm"></span></li>
+                <li><span class="st"></span><span>Avvio</span><span class="tm"></span></li>
+                <li><span class="st"></span><span>Collego il disco</span><span class="tm"></span></li>
+              </ul></div>
+              <div class="rowline"><span data-elapsed>0:00</span><span data-remain>circa 1:30</span></div>
+            </div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:20px">
+            <div class="win fx" style="width:100%">
+              <div class="tb"><span class="lights"><i></i><i></i><i></i></span></div>
+              <div class="face" data-face='{"led":"err","ro":"ERRORE","fill":0,"right":"3,2 GB LIBERI"}'></div>
+              <div class="body">
+                <div><span class="tag err">Spazio insufficiente</span><h3 style="margin-top:10px">Serve più spazio su questo Mac</h3><p style="margin-top:6px">Fluix ha bisogno di almeno 5 GB liberi. Ora ne hai 3,2. Libera spazio, per esempio svuotando il Cestino, poi riprova.</p></div>
+                <div class="btns"><button class="btn btn-primary">Riprova</button><button class="btn btn-ghost">Invia diagnostica</button></div>
+              </div>
+            </div>
+            <div class="win fx" style="width:100%">
+              <div class="tb"><span class="lights"><i></i><i></i><i></i></span></div>
+              <div class="body" style="padding-top:12px">
+                <div><span class="tag err">Nessuna risposta</span><h3 style="margin-top:10px">Non raggiungo il disco del team</h3><p style="margin-top:6px">Il Mac è in rete, ma il disco di Studio Esempio non risponde. Riprova tra poco; se succede ancora, manda la diagnostica a Marco.</p></div>
+                <div class="btns"><button class="btn btn-primary">Riprova</button><button class="btn btn-ghost">Invia diagnostica</button></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div></div>
+      <p class="cap">A sinistra il caso normale, a destra i due errori che il comando sa già riconoscere: spazio e rete.</p></div>
+    </section>
+
+    <!-- Decision 3 -->
+    <section class="decision" id="d3">
+      <header><h2><span class="ro">Decisione 3</span>Quanto mostrare della preparazione</h2></header>
+      <div class="opts">
+        <div class="opt">
+          <h3><span class="ro">A</span>Tre passi in parole semplici<span class="rec">Consigliata</span></h3>
+          <div class="mini" style="display:block"><div class="well" style="background:var(--surface)"><ul class="prog-steps"><li class="done"><span class="st"></span><span>Preparo il disco virtuale</span><span class="tm">0:41</span></li><li class="now"><span class="st"></span><span>Avvio</span><span class="tm"></span></li><li class="todo"><span class="st"></span><span>Collego il disco</span><span class="tm"></span></li></ul></div></div>
+          <ul><li>Se si ferma, Giulia sa dire a Marco a quale passo.</li><li>I dettagli tecnici (log, comandi) stanno solo nella diagnostica.</li></ul>
+        </div>
+        <div class="opt">
+          <h3><span class="ro">B</span>Una sola barra</h3>
+          <div class="mini" style="display:block"><div class="well" style="background:var(--surface);padding:16px"><p style="margin:0 0 12px;font-size:14px">Un momento, sto preparando Fluix…</p><div class="bar"><i style="width:46%"></i></div></div></div>
+          <ul><li>Più calma, niente parole come "disco virtuale".</li><li>Un minuto e mezzo su una barra sola sembra fermo, e un errore non dice dove.</li></ul>
+        </div>
+      </div>
+      <p class="why"><b>Perché A.</b> Novanta secondi sono lunghi da guardare: tre tappe che si accendono una dopo l'altra fanno vedere che qualcosa si muove. I nomi restano da persona, non da terminale.</p>
+    </section>
+
+    <!-- 8 -->
+    <section class="step" id="s8">
+      <div class="meta">
+        <div class="num">08</div>
+        <h2>Fluix è nel Finder</h2>
+        <p>La finestra si chiude da sola e apre il Finder sul disco. Il LED è verde. Una nuvoletta, una volta sola, mostra dove vive Fluix d'ora in poi.</p>
+        <ul class="notes">
+          <li>Il disco è sempre <span class="ro">/Volumes/Fluix</span>: CapCut ritrova i file per percorso.</li>
+          <li>Avvio automatico al login già attivo, si spegne dalle impostazioni.</li>
+        </ul>
+      </div>
+      <div class="stage"><div class="scroll"><div class="desk" style="padding-top:0">
+        <div class="mbar" style="margin:0 -36px 0;border-radius:18px 18px 0 0"><b style="margin-right:auto">Finder</b><span class="ic" data-svg="mb-ok"></span><span>ven 16 ott 10:46</span></div>
+        <div class="tip"><b>Fluix sta qui</b>Clic per vedere lo stato e rendere disponibili i progetti prima di montare.</div>
+        <div class="win finder" style="margin-top:72px">
+          <div class="tb"><span class="lights"><i></i><i></i><i></i></span><span class="t">Fluix</span></div>
+          <div class="fgrid">
+            <div class="fside">
+              <h5>Preferiti</h5>
+              <div><span data-svg="sys-clock"></span>Recenti</div>
+              <div><span data-svg="sys-app"></span>Applicazioni</div>
+              <div><span data-svg="sys-doc"></span>Documenti</div>
+              <div><span data-svg="sys-down"></span>Download</div>
+              <h5>Posizioni</h5>
+              <div class="sel"><span data-svg="drive-16"></span>Fluix<span class="ej" data-svg="eject"></span></div>
+            </div>
+            <div class="fmain" data-folders></div>
+          </div>
+        </div>
+      </div></div></div>
+    </section>
+
+    <!-- 9 -->
+    <section class="step" id="s9">
+      <div class="meta">
+        <div class="num">09</div>
+        <h2>Prima di tutto: l'invito</h2>
+        <p>Il percorso comincia qui. Marco invita Giulia dal web del team; lei riceve la mail con le istruzioni e la riga da copiare.</p>
+        <ul class="notes">
+          <li>Senza invito l'accesso non va avanti: la mail del passo 5 dice "chiedi all'amministratore".</li>
+          <li>L'invito vale 7 giorni; Marco può rimandarlo.</li>
+          <li>Il web dell'amministratore è in concept-e-admin.</li>
+        </ul>
+      </div>
+      <div class="stage"><div class="scroll"><div class="desk">
+        <div class="pair">
+          <div class="win mail" style="width:100%">
+            <div class="tb"><span class="lights"><i></i><i></i><i></i></span><span class="t">In arrivo</span></div>
+            <div class="mail-msg">
+              <div class="mail-head"><b>Marco ti ha invitata su Fluix</b><span>Da: Fluix · Studio Esempio</span></div>
+              <div class="mail-body">
+                <p>Ciao Giulia, Marco ti ha aggiunta al disco di <b>Studio Esempio</b>: i progetti video del team, nel Finder del tuo Mac.</p>
+                <div><button class="btn btn-primary">Accetta l'invito</button></div>
+                <p class="small">L'invito vale 7 giorni.</p>
+              </div>
+            </div>
+          </div>
+          <div class="win br" style="width:100%">
+            <div class="tb"><span class="lights"><i></i><i></i><i></i></span><span class="url" data-svg="lock">fluix.example.com</span></div>
+            <div class="web" style="padding:24px 20px">
+              <div class="webcard" style="padding:22px;gap:14px">
+                <span class="tag ok">Invito accettato</span>
+                <h3 style="font-size:20px">Installa Fluix sul Mac</h3>
+                <ol style="margin:0;padding-left:18px;font-size:14px;color:var(--ink-2);display:grid;gap:8px">
+                  <li>Apri il Terminale e incolla questa riga:<div class="cmd"><span class="ro">brew install --cask essedev/tap/fluix</span><button class="btn btn-soft" style="height:36px;padding:0 14px;background:var(--surface)">Copia</button></div></li>
+                  <li>Apri Fluix e premi Accedi con <b style="color:var(--ink)">giulia@studio.example</b>.</li>
+                </ol>
+                <p class="small">Non hai Homebrew? Chiedi a Marco: si installa una volta, con la password del Mac.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div></div></div>
+    </section>
+
+    <!-- 10 -->
+    <section class="step" id="s10">
+      <div class="meta">
+        <div class="num">10</div>
+        <h2>Casi limite</h2>
+        <p>Tre situazioni che succederanno davvero, ognuna con una sola cosa da fare.</p>
+      </div>
+      <div class="stage">
+        <div class="edges">
+          <div class="edge">
+            <h4>Link scaduto o già usato</h4>
+            <div class="win br"><div class="tb"><span class="lights"><i></i><i></i><i></i></span><span class="url" data-svg="lock">fluix.example.com</span></div>
+              <div class="web"><div class="webcard"><span class="tag err">Link scaduto</span><h3>Questo link non vale più</h3><p>I link durano 15 minuti e si usano una volta. Torna su Fluix e chiedine uno nuovo.</p><button class="btn btn-primary wide">Torna a Fluix</button></div></div></div>
+          </div>
+          <div class="edge">
+            <h4>Link aperto sul telefono</h4>
+            <div class="win br"><div class="tb"><span class="lights"><i></i><i></i><i></i></span><span class="url" data-svg="lock">fluix.example.com</span></div>
+              <div class="web"><div class="webcard"><h3>Sei su un altro dispositivo</h3><p>L'accesso è per MacBook Pro di Giulia. Scrivi questo codice nella finestra di Fluix sul Mac:</p><div class="big-ro">482 913</div></div></div></div>
+          </div>
+          <div class="edge">
+            <h4>Già dentro su questo Mac</h4>
+            <div class="mini" style="padding:18px 12px"><div class="win fx" style="max-width:none"><div class="tb"><span class="lights"><i></i><i></i><i></i></span></div><div class="face" data-face='{"led":"ok","ro":"COLLEGATO","fill":0.48,"right":""}'></div><div class="body"><div><h3>Sei già dentro</h3><p style="margin-top:4px">giulia@studio.example · Studio Esempio</p></div><div class="btns"><button class="btn btn-primary">Apri nel Finder</button><button class="btn btn-ghost">Esci</button></div></div></div></div>
+          </div>
+        </div>
+        <p class="cap">"Esci" chiede conferma: toglie il disco da questo Mac e libera la cache; i file del team restano dove sono.</p>
+      </div>
+    </section>
+  </div>
+</main>
+
+<script>
+"use strict";
+let uid = 0;
+const id = (p) => `${p}${++uid}`;
+
+function markD(h, led = "led-dl", blink = false) {
+  return `<svg width="${h * 1.6}" height="${h}" viewBox="0 0 64 40" aria-hidden="true"><rect x="2" y="3" width="60" height="34" rx="9" fill="var(--ink)"/><rect x="10" y="13" width="34" height="6" rx="3" fill="var(--surface)"/><circle cx="51" cy="27" r="3.6" class="${led}${blink ? " blink" : ""}"/></svg>`;
+}
+const word = (h) => `${markD(h)}<span>flu<span class="idot">ı<i></i></span>x</span>`;
+
+function appIcon(size) {
+  const a = id("ai"), d = id("dr"), g = id("gl");
+  return `<svg width="${size}" height="${size}" viewBox="0 0 124 124" aria-hidden="true"><defs><linearGradient id="${a}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f7f5f0"/><stop offset="1" stop-color="#dcd7cc"/></linearGradient><linearGradient id="${d}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3a3835"/><stop offset="1" stop-color="#1c1b19"/></linearGradient><filter id="${g}" x="-1" y="-1" width="3" height="3"><feGaussianBlur stdDeviation="3"/></filter></defs><rect x="10" y="10" width="104" height="104" rx="24" fill="url(#${a})"/><rect x="22" y="40" width="80" height="46" rx="12" fill="url(#${d})"/><rect x="33" y="54" width="42" height="7" rx="3.5" fill="#0d0d0c"/><rect x="34" y="55" width="20" height="5" rx="2.5" fill="#8e897f"/><circle cx="88" cy="72" r="6" fill="#ff5b1f" filter="url(#${g})"/><circle cx="88" cy="72" r="4" fill="#ff7a45"/></svg>`;
+}
+
+function mb(s) {
+  const c = "currentColor";
+  const led = s === "off" ? `<circle cx="17.5" cy="11.5" r="1.9" fill="none" stroke="${c}" stroke-width="1.4"/>` : s === "idle" ? "" : `<circle cx="17.5" cy="11.5" r="2.1" fill="${c}"${s === "dl" ? ' class="blink"' : ""}/>`;
+  return `<svg width="24" height="16" viewBox="0 0 24 16"${s === "idle" ? ' opacity=".45"' : ""} aria-hidden="true"><rect x="1.5" y="1.5" width="21" height="13" rx="3.6" fill="none" stroke="${c}" stroke-width="1.5"/><rect x="5" y="5" width="11" height="2.4" rx="1.2" fill="${c}"/>${led}</svg>`;
+}
+
+// The faceplate from concept-b variant D: slot fill is the cache, LED is the state
+function face({ led = "idle", blink = false, ro = "", fill = 0, right = "" }) {
+  const g = id("fd"), w = Math.max(fill > 0 ? 6 : 0, fill * 206);
+  const glow = led === "idle" ? "" : `filter:drop-shadow(0 0 6px var(--led-${led === "err" ? "err" : led}))`;
+  return `<svg viewBox="0 0 336 112" aria-hidden="true">
+    <defs><linearGradient id="${g}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--face-hi)"/><stop offset="1" stop-color="var(--face-lo)"/></linearGradient></defs>
+    <rect x=".5" y=".5" width="335" height="111" rx="10" fill="url(#${g})" stroke="var(--face-edge)"/>
+    <rect x="1.5" y="1.5" width="333" height="109" rx="9" fill="none" stroke="var(--face-hl)"/>
+    <rect x="24" y="34" width="212" height="12" rx="6" fill="var(--slot)"/>
+    <rect x="27" y="37" width="${w}" height="6" rx="3" fill="${led === "dl" ? "var(--led-dl)" : "var(--slot-fill)"}" data-slot/>
+    <text x="24" y="76" font-family="Schibsted Grotesk" font-weight="800" font-size="15" letter-spacing="-.4" fill="var(--ink-3)">fluix</text>
+    <text x="236" y="76" text-anchor="end" font-family="Departure Mono" font-size="11" fill="var(--ink-2)" data-right>${right}</text>
+    <circle cx="290" cy="40" r="10" fill="var(--slot)" opacity=".9"/>
+    <circle cx="290" cy="40" r="5.5" class="led-${led}${blink ? " blink" : ""}" style="${glow}" data-led/>
+    <text x="290" y="76" text-anchor="middle" font-family="Departure Mono" font-size="10" letter-spacing=".5" fill="var(--ink-2)" data-ro>${ro}</text>
+    <path d="M24 94H312" stroke="var(--face-edge)"/><path d="M24 95H312" stroke="var(--face-hl)"/>
+  </svg>`;
+}
+
+const sys = (d, extra = "") => `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3d8fe0" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" ${extra}>${d}</svg>`;
+const SVG = {
+  word: () => word(30),
+  "word-sm": () => word(20),
+  "mark-sm": () => markD(16, "led-idle"),
+  "mb-idle": () => mb("idle"),
+  "mb-ok": () => mb("ok"),
+  "appicon-36": () => appIcon(36),
+  lock: () => `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>`,
+  envelope: () => `<svg width="44" height="44" viewBox="0 0 44 44" aria-hidden="true"><rect x="4" y="9" width="36" height="26" rx="6" fill="var(--sunken)"/><path d="M8 14l14 10 14-10" fill="none" stroke="var(--ink)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="36" cy="11" r="5" fill="var(--led-dl)" class="blink"/></svg>`,
+  "check-big": () => `<svg width="52" height="52" viewBox="0 0 52 52" aria-hidden="true"><circle cx="26" cy="26" r="24" fill="color-mix(in srgb, var(--good) 15%, transparent)"/><path d="M16 27l7 7 13-14" fill="none" stroke="var(--good-ink)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+  "drive-16": () => markD(10, "led-ok"),
+  eject: () => `<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 5 5 13h14z"/><rect x="5" y="16" width="14" height="3" rx="1"/></svg>`,
+  "sys-clock": () => sys('<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>'),
+  "sys-app": () => sys('<path d="M12 3 4 20M12 3l8 17M7 14h10"/>'),
+  "sys-doc": () => sys('<path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/>'),
+  "sys-down": () => sys('<circle cx="12" cy="12" r="9"/><path d="M12 7v9m-4-4 4 4 4-4"/>')
+};
+document.querySelectorAll("[data-svg]").forEach((el) => {
+  const html = SVG[el.dataset.svg]();
+  if (el.childNodes.length) el.insertAdjacentHTML("afterbegin", html); else el.innerHTML = html;
+});
+document.querySelectorAll("[data-face]").forEach((el) => (el.innerHTML = face(JSON.parse(el.dataset.face))));
+
+// Finder folders, names from concept-a-panel
+const folder = () => { const a = id("fa"); return `<svg width="64" height="52" viewBox="0 0 64 52" aria-hidden="true"><defs><linearGradient id="${a}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--folder-a)"/><stop offset="1" stop-color="var(--folder-b)"/></linearGradient></defs><path d="M4 8a4 4 0 0 1 4-4h14l5 5h29a4 4 0 0 1 4 4v3H4z" fill="var(--folder-b)"/><rect x="4" y="13" width="56" height="35" rx="4" fill="url(#${a})"/></svg>`; };
+document.querySelector("[data-folders]").innerHTML = ["Pastificio Moretti - Spot Natale", "Cantine Arnaldi - Vendemmia", "Showreel 2026", "Fondazione Lirica - Backstage", "Archivio 2025"]
+  .map((n) => `<div class="folder">${folder()}<span>${n}</span></div>`).join("") + `<div class="fpath">Fluix · 5 elementi</div>`;
+
+// Step 4: resend countdown
+const cd = document.querySelector("[data-countdown]");
+let left = 42;
+setInterval(() => { left = left <= 0 ? 60 : left - 1; cd.textContent = `0:${String(left).padStart(2, "0")}`; }, 1000);
+
+// Step 7: preparation, 90 s compressed into about 14 s
+const REDUCED = matchMedia("(prefers-reduced-motion: reduce)").matches;
+const liveFace = document.querySelector("[data-face-live]");
+const items = [...document.querySelectorAll("[data-prog] li")];
+const ENDS = [0.45, 0.8, 1];
+const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
+function paint(t) {
+  const done = t >= 1;
+  liveFace.innerHTML = face({ led: done ? "ok" : "dl", blink: !done, ro: done ? "COLLEGATO" : `${Math.floor(t * 100)}%`, fill: done ? 0.03 : t, right: done ? "PRONTO" : "PREPARO" });
+  items.forEach((li, i) => {
+    const start = i ? ENDS[i - 1] : 0;
+    li.className = t >= ENDS[i] ? "done" : t >= start ? "now" : "todo";
+    li.querySelector(".tm").textContent = t >= ENDS[i] ? fmt((ENDS[i] - start) * 90) : "";
+  });
+  document.querySelector("[data-elapsed]").textContent = fmt(t * 90);
+  document.querySelector("[data-remain]").textContent = done ? "fatto" : `circa ${fmt((1 - t) * 90)}`;
+}
+if (REDUCED) paint(0.6);
+else {
+  let t0 = performance.now();
+  const loop = (now) => {
+    const t = Math.min(1, (now - t0) / 14000);
+    paint(t);
+    if (t >= 1 && now - t0 > 17000) t0 = now;
+    requestAnimationFrame(loop);
+  };
+  requestAnimationFrame(loop);
+}
+
+// Concept chrome
+const KEY = `concept:${location.pathname}`;
+const root = document.documentElement;
+const load = () => { try { return JSON.parse(localStorage.getItem(KEY) || "{}"); } catch { return {}; } };
+const save = (s) => { try { localStorage.setItem(KEY, JSON.stringify(s)); } catch {} };
+const setTheme = (t) => { root.dataset.theme = t; save({ ...load(), theme: t }); };
+document.querySelector("[data-jumps]").innerHTML = Array.from({ length: 10 }, (_, i) => `<a href="#s${i + 1}">${i + 1}</a>`).join(" ");
+document.querySelector("[data-theme-toggle]").addEventListener("click", () => setTheme(root.dataset.theme === "dark" ? "light" : "dark"));
+document.querySelector("[data-chrome-toggle]").addEventListener("click", () => (document.body.dataset.chrome = document.body.dataset.chrome === "off" ? "on" : "off"));
+addEventListener("keydown", (e) => {
+  if (e.metaKey || e.ctrlKey || e.altKey || e.target.closest("input, textarea, select, [contenteditable]")) return;
+  const k = e.key.toLowerCase();
+  if (k === "t") setTheme(root.dataset.theme === "dark" ? "light" : "dark");
+  else if (k === "p") document.body.dataset.chrome = document.body.dataset.chrome === "off" ? "on" : "off";
+  else if (/^\d$/.test(k)) document.getElementById(`s${k === "0" ? 10 : k}`)?.scrollIntoView();
+});
+root.dataset.theme = load().theme || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+</script>
+</body>
+</html>
