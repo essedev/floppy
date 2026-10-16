@@ -1,4 +1,4 @@
-# The panel mockup shows the Italian UI: its copy is in the language it renders.
-mockups/panel.html
+# Concepts show the Italian UI: their copy is in the language it renders.
+docs/concepts/*.html
 # The prose check holds its own list of Italian words.
 scripts/check-prose.py

@@ -1,0 +1,1125 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fluix Architecture</title>
+<style>
+:root {
+  color-scheme: light;
+  --page: #f1f0ed;
+  --surface: #fcfcfb;
+  --surface-2: #f6f5f2;
+  --line: #e3e0db;
+  --line-strong: #cfcac2;
+  --text: #26231f;
+  --text-2: #6b665f;
+  --text-3: #9a958e;
+  --accent: #8a5c0d;
+  --accent-fill: #d4a044;
+  --accent-soft: #d4a04424;
+  --meta: #2a78d6;
+  --data: #eb6834;
+  --ctl: #1baf7a;
+  --ink: #8d877e;
+  --meta-soft: #2a78d61a;
+  --data-soft: #eb68341a;
+  --ctl-soft: #1baf7a1a;
+  --good: #0ca30c;
+  --warning: #fab219;
+  --serious: #ec835a;
+  --critical: #d03b3b;
+  --bar: #2a78d6;
+  --bar-ext: #86b6ef;
+  --ref: #26231f;
+  --shadow: 0 1px 2px rgba(30, 25, 20, 0.05), 0 8px 24px -12px rgba(30, 25, 20, 0.18);
+  --mono: ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --page: #121211;
+    --surface: #1a1a19;
+    --surface-2: #222220;
+    --line: #2e2d2a;
+    --line-strong: #44423e;
+    --text: #ece8e2;
+    --text-2: #aaa49b;
+    --text-3: #7a756d;
+    --accent: #e0b25c;
+    --accent-fill: #d4a044;
+    --accent-soft: #d4a0442b;
+    --meta: #3987e5;
+    --data: #d95926;
+    --ctl: #199e70;
+    --ink: #8b857c;
+    --meta-soft: #3987e522;
+    --data-soft: #d9592622;
+    --ctl-soft: #199e7022;
+    --bar: #3987e5;
+    --bar-ext: #1c5cab;
+    --ref: #ece8e2;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px -12px rgba(0, 0, 0, 0.6);
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #121211;
+  --surface: #1a1a19;
+  --surface-2: #222220;
+  --line: #2e2d2a;
+  --line-strong: #44423e;
+  --text: #ece8e2;
+  --text-2: #aaa49b;
+  --text-3: #7a756d;
+  --accent: #e0b25c;
+  --accent-fill: #d4a044;
+  --accent-soft: #d4a0442b;
+  --meta: #3987e5;
+  --data: #d95926;
+  --ctl: #199e70;
+  --ink: #8b857c;
+  --meta-soft: #3987e522;
+  --data-soft: #d9592622;
+  --ctl-soft: #199e7022;
+  --bar: #3987e5;
+  --bar-ext: #1c5cab;
+  --ref: #ece8e2;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px -12px rgba(0, 0, 0, 0.6);
+}
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; scroll-padding-top: 24px; }
+body {
+  margin: 0;
+  background: var(--page);
+  color: var(--text);
+  font: 15px/1.55 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+code, .mono { font-family: var(--mono); font-size: 0.88em; }
+code { background: var(--surface-2); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
+a { color: var(--accent); }
+
+/* Layout */
+.shell { display: grid; grid-template-columns: 260px minmax(0, 1fr); min-height: 100vh; }
+nav.side {
+  position: sticky; top: 0; height: 100vh; overflow-y: auto;
+  border-right: 1px solid var(--line); background: var(--surface);
+  padding: 22px 14px 18px; display: flex; flex-direction: column; gap: 18px;
+}
+.brand { display: flex; align-items: center; gap: 10px; padding: 0 8px; }
+.brand-mark {
+  width: 30px; height: 30px; border-radius: 8px; background: var(--accent-fill);
+  display: grid; place-items: center; color: #1f1a12; font-weight: 700;
+}
+.brand b { display: block; font-size: 15px; }
+.brand span { font-size: 12px; color: var(--text-2); }
+.toc { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.toc a {
+  display: flex; gap: 10px; align-items: baseline; padding: 6px 8px; border-radius: 6px;
+  color: var(--text-2); text-decoration: none; font-size: 13.5px;
+}
+.toc a .n { font-family: var(--mono); font-size: 11px; color: var(--text-3); width: 16px; }
+.toc a:hover { background: var(--surface-2); color: var(--text); }
+.toc a.on { background: var(--accent-soft); color: var(--text); font-weight: 600; }
+.toc a.on .n { color: var(--accent); }
+.side-foot { margin-top: auto; padding: 0 8px; display: flex; flex-direction: column; gap: 10px; font-size: 12px; color: var(--text-3); }
+.theme-btn {
+  align-self: flex-start; font: inherit; font-size: 12px; color: var(--text-2);
+  background: var(--surface-2); border: 1px solid var(--line); border-radius: 6px; padding: 4px 10px; cursor: pointer;
+}
+
+main { padding: 40px 48px 120px; max-width: 1100px; width: 100%; }
+section { padding: 8px 0 40px; border-bottom: 1px solid var(--line); margin-bottom: 40px; }
+section:last-child { border-bottom: 0; }
+.eyebrow { font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent); margin: 0 0 6px; }
+h1 { font-size: 34px; line-height: 1.15; margin: 0 0 12px; letter-spacing: -0.02em; }
+h2 { font-size: 24px; margin: 0 0 10px; letter-spacing: -0.01em; }
+h3 { font-size: 16px; margin: 26px 0 8px; }
+p { margin: 0 0 12px; max-width: 72ch; }
+.lead { font-size: 17px; color: var(--text-2); max-width: 68ch; }
+.muted { color: var(--text-2); }
+.small { font-size: 13px; }
+
+/* Cards and grids */
+.card {
+  background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
+  padding: 18px 20px; box-shadow: var(--shadow);
+}
+.grid { display: grid; gap: 14px; }
+.g2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.g3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.g4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.stat .v { font-size: 30px; font-weight: 650; letter-spacing: -0.02em; line-height: 1.1; }
+.stat .v small { font-size: 15px; font-weight: 500; color: var(--text-2); margin-left: 2px; }
+.stat .k { font-size: 13px; color: var(--text-2); margin-top: 6px; }
+.stat .src { font-size: 11.5px; color: var(--text-3); margin-top: 8px; }
+
+.principles { margin-top: 18px; }
+.principle { display: flex; gap: 12px; align-items: flex-start; }
+.principle .ic {
+  flex: none; width: 34px; height: 34px; border-radius: 9px; display: grid; place-items: center;
+  background: var(--accent-soft); color: var(--accent);
+}
+.principle b { display: block; font-size: 14px; margin-bottom: 2px; }
+.principle span { font-size: 13px; color: var(--text-2); }
+
+/* Tables */
+.table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: var(--shadow); }
+table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-size: 12px; font-weight: 600; color: var(--text-2); background: var(--surface-2); white-space: nowrap; }
+tr:last-child td { border-bottom: 0; }
+td.k { font-weight: 600; white-space: nowrap; }
+.then { color: var(--text-2); }
+
+/* Figures */
+figure { margin: 18px 0 0; }
+.fig {
+  background: var(--surface); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow);
+  padding: 16px; overflow-x: auto;
+}
+.fig svg { display: block; width: 100%; height: auto; }
+.fig.wide svg { min-width: 860px; }
+figcaption { font-size: 12.5px; color: var(--text-2); margin-top: 8px; max-width: 80ch; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 12.5px; color: var(--text-2); margin: 0 0 12px; }
+.legend i { display: inline-block; width: 22px; height: 0; border-top: 3px solid; vertical-align: middle; margin-right: 6px; border-radius: 2px; }
+.legend i.dash { border-top-style: dashed; }
+.legend i.sw { width: 12px; height: 12px; border: 0; border-radius: 3px; }
+
+/* SVG diagram classes */
+.zone { fill: var(--surface-2); stroke: var(--line-strong); stroke-width: 1; }
+.zone-vm { fill: var(--surface); stroke: var(--line-strong); stroke-dasharray: 4 4; }
+.zlabel { fill: var(--text-2); font: 600 12px -apple-system, sans-serif; letter-spacing: 0.05em; text-transform: uppercase; }
+.node { fill: var(--surface); stroke: var(--line-strong); stroke-width: 1; }
+.node.hl { stroke: var(--accent-fill); stroke-width: 1.5; }
+.nt { fill: var(--text); font: 600 14px -apple-system, sans-serif; }
+.ns { fill: var(--text-2); font: 12px -apple-system, sans-serif; }
+.e { fill: none; stroke-width: 2; }
+.e.meta { stroke: var(--meta); }
+.e.data { stroke: var(--data); stroke-width: 4; }
+.e.ctl { stroke: var(--ctl); stroke-dasharray: 6 5; }
+.e.ink { stroke: var(--ink); }
+.el { fill: var(--text-2); font: 12px -apple-system, sans-serif; paint-order: stroke; stroke: var(--surface); stroke-width: 5px; stroke-linejoin: round; }
+.zone ~ .el, .el.onzone { stroke: var(--surface-2); }
+.mk-meta { fill: var(--meta); } .mk-data { fill: var(--data); } .mk-ctl { fill: var(--ctl); } .mk-ink { fill: var(--ink); }
+.badge-bg { fill: var(--accent-soft); }
+.badge-t { fill: var(--accent); font: 600 11.5px -apple-system, sans-serif; }
+
+/* Sequence diagrams */
+.seq .life { stroke: var(--line-strong); stroke-dasharray: 3 4; }
+.seq .ph { fill: var(--surface-2); stroke: var(--line-strong); }
+.seq .pt { fill: var(--text); font: 600 13px -apple-system, sans-serif; }
+.seq .ps { fill: var(--text-3); font: 11px -apple-system, sans-serif; }
+.seq .ml { fill: var(--text); font: 12.5px -apple-system, sans-serif; }
+.seq .mn { fill: var(--text-3); font: 11px var(--mono); }
+.seq .note { fill: var(--accent-soft); stroke: none; }
+.seq .notet { fill: var(--text); font: 12px -apple-system, sans-serif; }
+.seq .grp { fill: none; stroke: var(--line-strong); stroke-dasharray: 2 3; }
+.seq .grpt { fill: var(--text-2); font: 600 11px -apple-system, sans-serif; letter-spacing: 0.04em; text-transform: uppercase; }
+
+/* Tabs */
+.tabs { display: flex; gap: 4px; flex-wrap: wrap; margin: 14px 0 0; }
+.tab {
+  font: inherit; font-size: 13px; padding: 6px 12px; border-radius: 7px; cursor: pointer;
+  background: transparent; border: 1px solid var(--line); color: var(--text-2);
+}
+.tab[aria-selected="true"] { background: var(--surface); color: var(--text); border-color: var(--line-strong); box-shadow: var(--shadow); font-weight: 600; }
+.panel[hidden] { display: none; }
+
+/* ER cards */
+.er { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-top: 16px; }
+.ent { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; box-shadow: var(--shadow); }
+.ent h4 { margin: 0; padding: 9px 12px; font: 600 13px var(--mono); background: var(--surface-2); border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; }
+.ent h4 span { font: 11px -apple-system, sans-serif; color: var(--text-3); }
+.ent ul { list-style: none; margin: 0; padding: 6px 0; }
+.ent li { display: flex; justify-content: space-between; gap: 8px; padding: 3px 12px; font: 12px var(--mono); color: var(--text); }
+.ent li em { font: 11px -apple-system, sans-serif; color: var(--text-3); font-style: normal; white-space: nowrap; }
+.ent li .pk { color: var(--accent); font-weight: 600; }
+.ent li .fk { color: var(--meta); }
+.ent.where-db h4 { box-shadow: inset 3px 0 0 var(--meta); }
+.ent.where-cp h4 { box-shadow: inset 3px 0 0 var(--ctl); }
+
+/* Status pills */
+.pill { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; padding: 2px 8px 2px 6px; border-radius: 999px; white-space: nowrap; }
+.pill::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+.pill.good { color: var(--good); background: color-mix(in srgb, var(--good) 12%, transparent); }
+.pill.warn { color: #9a6a00; background: color-mix(in srgb, var(--warning) 18%, transparent); }
+.pill.bad { color: var(--critical); background: color-mix(in srgb, var(--critical) 12%, transparent); }
+:root[data-theme="dark"] .pill.warn { color: var(--warning); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .pill.warn { color: var(--warning); } }
+
+/* Callouts */
+.callout { border-radius: 10px; padding: 12px 16px; font-size: 13.5px; margin-top: 16px; border: 1px solid; }
+.callout b { display: block; margin-bottom: 2px; }
+.callout.risk { background: color-mix(in srgb, var(--serious) 10%, transparent); border-color: color-mix(in srgb, var(--serious) 40%, transparent); }
+.callout.info { background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent-fill) 40%, transparent); }
+
+/* Charts */
+.chart .grid-l { stroke: var(--line); }
+.chart .axis-t { fill: var(--text-3); font: 11px -apple-system, sans-serif; }
+.chart .row-t { fill: var(--text); font: 12.5px -apple-system, sans-serif; }
+.chart .val-t { fill: var(--text-2); font: 600 12px -apple-system, sans-serif; }
+.chart .refl { stroke: var(--ref); stroke-width: 1.5; stroke-dasharray: 4 3; }
+.chart .ref-t { fill: var(--text); font: 600 11.5px -apple-system, sans-serif; }
+.chart .hit { fill: transparent; cursor: default; }
+.chart .bar { fill: var(--bar); }
+.chart .bar-ext { fill: var(--bar-ext); }
+.chart .s1 { fill: var(--meta); } .chart .s2 { fill: var(--data); }
+details.data { margin-top: 8px; font-size: 12.5px; color: var(--text-2); }
+details.data summary { cursor: pointer; }
+details.data table { margin-top: 8px; font-size: 12.5px; }
+#tip {
+  position: fixed; z-index: 10; pointer-events: none; opacity: 0; transition: opacity 0.1s;
+  background: var(--text); color: var(--surface); font-size: 12px; line-height: 1.4;
+  padding: 6px 9px; border-radius: 6px; max-width: 260px; box-shadow: var(--shadow);
+}
+
+/* Decisions */
+.dec { counter-reset: d; display: grid; gap: 10px; margin-top: 14px; }
+.dec .card { padding: 14px 18px; display: grid; grid-template-columns: 30px 1fr; gap: 4px 12px; }
+.dec .card::before { counter-increment: d; content: counter(d); font: 600 12px var(--mono); color: var(--accent); background: var(--accent-soft); border-radius: 6px; height: 24px; display: grid; place-items: center; }
+.dec b { font-size: 14px; }
+.dec p { grid-column: 2; margin: 0; font-size: 13.5px; color: var(--text-2); }
+.dec .rec { grid-column: 2; font-size: 13px; }
+.dec .rec::before { content: "Proposal: "; font-weight: 600; color: var(--accent); }
+
+.lic { display: inline-block; font: 600 10.5px var(--mono); padding: 1px 6px; border-radius: 4px; border: 1px solid var(--line-strong); color: var(--text-2); margin-left: 6px; vertical-align: 2px; }
+.comp h3 { margin: 0 0 4px; display: flex; align-items: center; gap: 6px; font-size: 15px; }
+.comp .where { font-size: 12px; color: var(--text-3); margin-bottom: 8px; }
+.comp ul { margin: 0; padding-left: 18px; font-size: 13px; color: var(--text-2); }
+.comp ul li { margin: 2px 0; }
+
+@media (max-width: 960px) {
+  .g4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .g3, .er { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 860px) {
+  .shell { display: block; }
+  nav.side {
+    position: sticky; top: 0; z-index: 5; height: auto; flex-direction: row; align-items: center;
+    padding: 10px 16px; border-right: 0; border-bottom: 1px solid var(--line); overflow-x: auto; gap: 12px;
+  }
+  .brand span, .side-foot { display: none; }
+  .toc { flex-direction: row; }
+  .toc a { white-space: nowrap; }
+  .toc a .n { display: none; }
+  main { padding: 28px 16px 80px; }
+  h1 { font-size: 27px; }
+}
+@media (max-width: 560px) {
+  .g2, .g3, .g4, .er { grid-template-columns: minmax(0, 1fr); }
+}
+</style>
+</head>
+<body>
+<div id="tip" role="tooltip"></div>
+<div class="shell">
+<nav class="side" aria-label="Sections">
+  <div class="brand">
+    <div class="brand-mark">F</div>
+    <div><b>Fluix</b><span>Architecture proposal</span></div>
+  </div>
+  <ul class="toc">
+    <li><a href="#overview"><span class="n">01</span>Overview</a></li>
+    <li><a href="#architecture"><span class="n">02</span>Architecture</a></li>
+    <li><a href="#components"><span class="n">03</span>Components</a></li>
+    <li><a href="#flows"><span class="n">04</span>Flows</a></li>
+    <li><a href="#states"><span class="n">05</span>App states</a></li>
+    <li><a href="#security"><span class="n">06</span>Credentials</a></li>
+    <li><a href="#model"><span class="n">07</span>Data model</a></li>
+    <li><a href="#failures"><span class="n">08</span>Failure modes</a></li>
+    <li><a href="#deploy"><span class="n">09</span>Deployments</a></li>
+    <li><a href="#performance"><span class="n">10</span>Performance</a></li>
+    <li><a href="#costs"><span class="n">11</span>Costs</a></li>
+    <li><a href="#plan"><span class="n">12</span>Plan</a></li>
+    <li><a href="#decisions"><span class="n">13</span>Open decisions</a></li>
+  </ul>
+  <div class="side-foot">
+    <button class="theme-btn" id="themeBtn" type="button">Toggle theme</button>
+    <span>Draft for review. Measured numbers come from docs/ARCHITECTURE.md; estimates are marked.</span>
+  </div>
+</nav>
+
+<main>
+
+<section id="overview">
+  <p class="eyebrow">01 · Overview</p>
+  <h1>From one disk per Mac to one disk per team</h1>
+  <p class="lead">Today every Mac has its own disk, with the metadata in SQLite inside the VM and the S3 keys in a zip. The proposal: one shared disk per team with the metadata in PostgreSQL, personal access through a login, and a menu bar app that installs and drives everything.</p>
+
+  <div class="grid g4" style="margin-top:22px">
+    <div class="card stat"><div class="v">3<small>ms</small></div><div class="k">Seek in cache, like a local disk</div><div class="src">Measured on OVH Milan</div></div>
+    <div class="card stat"><div class="v">0.9<small>s</small></div><div class="k">Seek on a clip never opened (max 1.9 s)</div><div class="src">Measured, 4 MB blocks</div></div>
+    <div class="card stat"><div class="v">12.1<small>MB/s</small></div><div class="k">Cold playback, against 7.5 a 60 Mbps clip needs</div><div class="src">Measured, 170 Mbps home line</div></div>
+    <div class="card stat"><div class="v">1,035<small>MB</small></div><div class="k">VM RAM on the Mac, down from 2,060</div><div class="src">Measured, 1 GiB VM</div></div>
+  </div>
+
+  <h3>What changes</h3>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th></th><th>Today (test package)</th><th>Proposed</th></tr></thead>
+      <tbody>
+        <tr><td class="k">Disk</td><td class="then">One per Mac, nobody else sees it</td><td>One per team, the same files on every Mac</td></tr>
+        <tr><td class="k">Metadata</td><td class="then">SQLite inside the VM: lose the VM, lose the files</td><td>PostgreSQL with backups and point-in-time recovery</td></tr>
+        <tr><td class="k">Access</td><td class="then">S3 keys and SMB password inside the zip</td><td>Login in the browser, a personal database role per Mac</td></tr>
+        <tr><td class="k">Someone leaves</td><td class="then">Rotate the keys on every Mac by hand</td><td>One click drops their role, then one key rotation that reaches every Mac on its own</td></tr>
+        <tr><td class="k">Install</td><td class="then">Zip plus <code>bash install.sh</code> in the Terminal</td><td><code>brew install --cask fluix</code>, then the app does the rest</td></tr>
+        <tr><td class="k">Interface</td><td class="then">The <code>fluix</code> command</td><td>Menu bar panel (variant B, status first), driving the same command</td></tr>
+        <tr><td class="k">Without network</td><td class="then">Cached files probably readable (not tested)</td><td>Disk unusable: the file tree lives in PostgreSQL</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="grid g3 principles">
+    <div class="principle"><div class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 12h16M14 6l6 6-6 6"/></svg></div><div><b>Control plane off the data path</b><span>It hands out access and configuration. Files flow between the Mac, PostgreSQL and S3 only, so if it goes down mounted disks keep working.</span></div></div>
+    <div class="principle"><div class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v12c0 1.7 3.1 3 7 3s7-1.3 7-3V6"/></svg></div><div><b>Only standard S3 and PostgreSQL</b><span>No provider API in the core. Any S3 and any PostgreSQL work; a provider-specific feature can only be an optional extra.</span></div></div>
+    <div class="principle"><div class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg></div><div><b>One codebase, open source</b><span>Self-hosted by anyone or run as a hosted service: the same code. App and engine MIT, control plane AGPL-3.0.</span></div></div>
+  </div>
+</section>
+
+<section id="architecture">
+  <p class="eyebrow">02 · Architecture</p>
+  <h2>Three places, three kinds of traffic</h2>
+  <p>Each Mac runs the app, the <code>fluix</code> command and a small Linux VM with JuiceFS. The VM talks to PostgreSQL for the file tree and to S3 for the file contents. The control plane only talks to the app and, as administrator, to PostgreSQL.</p>
+  <figure>
+    <div class="fig wide">
+      <div class="legend">
+        <span><i style="border-color:var(--data);border-top-width:4px"></i>File data (4 MB blocks)</span>
+        <span><i style="border-color:var(--meta)"></i>Metadata (file tree)</span>
+        <span><i class="dash" style="border-color:var(--ctl)"></i>Control (HTTPS)</span>
+        <span><i style="border-color:var(--ink)"></i>Local, on the Mac</span>
+      </div>
+      <svg viewBox="0 0 1000 600" role="img" aria-label="Architecture diagram: Mac with app, command and VM; control plane; PostgreSQL and S3 storage">
+        <defs>
+          <marker id="a-meta" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="mk-meta"/></marker>
+          <marker id="a-data" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="4.5" markerHeight="4.5" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="mk-data"/></marker>
+          <marker id="a-ctl" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="mk-ctl"/></marker>
+          <marker id="a-ink" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="mk-ink"/></marker>
+        </defs>
+
+        <rect class="zone" x="20" y="20" width="440" height="560" rx="14"/>
+        <text class="zlabel" x="40" y="46">Each Mac</text>
+        <rect class="zone" x="560" y="20" width="420" height="210" rx="14"/>
+        <text class="zlabel" x="580" y="46">Control plane · self-hosted</text>
+        <rect class="zone" x="560" y="290" width="420" height="290" rx="14"/>
+        <text class="zlabel" x="580" y="316">Storage · same region</text>
+
+        <rect class="zone-vm" x="40" y="262" width="400" height="298" rx="12"/>
+        <text class="zlabel" x="160" y="288">Lima VM · Debian</text>
+
+        <!-- edges first, under the nodes -->
+        <path class="e ink" d="M135 118 V300" marker-start="url(#a-ink)" marker-end="url(#a-ink)"/>
+        <text class="el onzone" x="145" y="214">SMB on the private</text>
+        <text class="el onzone" x="145" y="230">Mac-VM link</text>
+        <path class="e ink" d="M345 118 V158" marker-end="url(#a-ink)"/>
+        <text class="el onzone" x="355" y="142">drives</text>
+        <path class="e ink" d="M345 216 V300" marker-end="url(#a-ink)"/>
+        <text class="el onzone" x="355" y="250">limactl</text>
+        <path class="e ink" d="M222 330 H252" marker-start="url(#a-ink)" marker-end="url(#a-ink)"/>
+        <path class="e ink" d="M335 360 V422" marker-start="url(#a-ink)" marker-end="url(#a-ink)"/>
+
+        <path class="e meta" d="M422 320 C500 320 520 385 590 385" marker-start="url(#a-meta)" marker-end="url(#a-meta)"/>
+        <text class="el" x="470" y="338">metadata</text>
+        <path class="e data" d="M422 345 C500 345 500 505 590 505" marker-start="url(#a-data)" marker-end="url(#a-data)"/>
+        <text class="el" x="478" y="470">data blocks</text>
+        <path class="e ctl" d="M432 88 H590" marker-start="url(#a-ctl)" marker-end="url(#a-ctl)"/>
+        <text class="el" x="452" y="78">login · config · heartbeat</text>
+        <path class="e ctl" d="M675 126 V350" marker-end="url(#a-ctl)"/>
+        <text class="el" x="685" y="260">roles · volumes · key rotation</text>
+        <path class="e ink" d="M760 98 H790" marker-start="url(#a-ink)" marker-end="url(#a-ink)"/>
+        <path class="e ink" d="M790 176 C770 176 760 150 742 128" marker-end="url(#a-ink)"/>
+
+        <!-- Mac nodes -->
+        <rect class="node" x="50" y="62" width="170" height="56" rx="9"/>
+        <text class="nt" x="64" y="86">Finder · CapCut</text>
+        <text class="ns" x="64" y="104">/Volumes/Fluix</text>
+        <rect class="node hl" x="260" y="62" width="172" height="56" rx="9"/>
+        <text class="nt" x="274" y="86">Fluix.app</text>
+        <text class="ns" x="274" y="104">menu bar panel · Tauri</text>
+        <rect class="node" x="260" y="160" width="172" height="56" rx="9"/>
+        <text class="nt" x="274" y="184">fluix command</text>
+        <text class="ns" x="274" y="202">+ launchd agent, every 2 min</text>
+
+        <rect class="node" x="60" y="302" width="162" height="58" rx="9"/>
+        <text class="nt" x="74" y="326">Samba</text>
+        <text class="ns" x="74" y="344">share on vzNAT only</text>
+        <rect class="node" x="252" y="302" width="170" height="58" rx="9"/>
+        <text class="nt" x="266" y="326">JuiceFS client</text>
+        <text class="ns" x="266" y="344">mount, prefetch</text>
+        <rect class="node" x="252" y="424" width="170" height="58" rx="9"/>
+        <text class="nt" x="266" y="448">Cache</text>
+        <text class="ns" x="266" y="466">4 MB blocks on the SSD</text>
+        <text class="ns" x="62" y="420">Ceiling computed on the</text>
+        <text class="ns" x="62" y="436">Mac side, not in the VM</text>
+        <text class="ns" x="62" y="520">No ports exposed, no</text>
+        <text class="ns" x="62" y="536">administrator rights</text>
+
+        <!-- Control plane nodes -->
+        <rect class="node hl" x="590" y="70" width="170" height="56" rx="9"/>
+        <text class="nt" x="604" y="94">API + web</text>
+        <text class="ns" x="604" y="112">FastAPI · React</text>
+        <rect class="node" x="790" y="70" width="166" height="56" rx="9"/>
+        <text class="nt" x="804" y="94">Control DB</text>
+        <text class="ns" x="804" y="112">orgs, people, devices</text>
+        <rect class="node" x="790" y="152" width="166" height="50" rx="9"/>
+        <text class="nt" x="804" y="174">Admin</text>
+        <text class="ns" x="804" y="191">in the browser</text>
+        <rect class="badge-bg" x="590" y="150" width="160" height="24" rx="12"/>
+        <text class="badge-t" x="604" y="166">Not on the data path</text>
+
+        <!-- Storage nodes -->
+        <rect class="node" x="590" y="350" width="366" height="72" rx="9"/>
+        <text class="nt" x="604" y="376">PostgreSQL</text>
+        <text class="ns" x="604" y="396">file tree: one database per volume,</text>
+        <text class="ns" x="604" y="412">one role per Mac</text>
+        <rect class="node" x="590" y="470" width="366" height="72" rx="9"/>
+        <text class="nt" x="604" y="496">S3 bucket</text>
+        <text class="ns" x="604" y="516">file contents as 4 MB blocks,</text>
+        <text class="ns" x="604" y="532">one bucket per organization</text>
+      </svg>
+    </div>
+    <figcaption>The S3 key never travels through the control plane to the Mac: JuiceFS keeps it inside each volume's metadata, so whoever can read the metadata can reach the bucket, and whoever loses the database role loses both.</figcaption>
+  </figure>
+</section>
+
+<section id="components">
+  <p class="eyebrow">03 · Components</p>
+  <h2>What gets built, and where it lives</h2>
+  <div class="grid g3" style="margin-top:16px">
+    <div class="card comp">
+      <h3>Fluix.app<span class="lic">MIT</span></h3>
+      <div class="where">app/ · Tauri, React · from the Portsage skeleton</div>
+      <ul>
+        <li>Menu bar panel, variant B</li>
+        <li>Login in the browser, token in the Keychain</li>
+        <li>First run: creates the VM with progress</li>
+        <li>Make available / Free up space per project</li>
+        <li>Heartbeat, Send diagnostics</li>
+      </ul>
+    </div>
+    <div class="card comp">
+      <h3>fluix command<span class="lic">MIT</span></h3>
+      <div class="where">macos/ · bash · bundled as externalBin</div>
+      <ul>
+        <li>Stays the engine: setup, start, stop, warmup, free</li>
+        <li>New: <code>status --json</code> for the panel</li>
+        <li>New: <code>META_URL</code> from the app, no keys in a file</li>
+        <li>SMB password in the Keychain</li>
+      </ul>
+    </div>
+    <div class="card comp">
+      <h3>VM<span class="lic">MIT</span></h3>
+      <div class="where">macos/vm/ · Lima, Debian 13</div>
+      <ul>
+        <li>JuiceFS client and cache</li>
+        <li>Samba on the private link</li>
+        <li>Image and packages shipped, no downloads</li>
+        <li>Unchanged except the metadata URL</li>
+      </ul>
+    </div>
+    <div class="card comp">
+      <h3>Control plane<span class="lic">AGPL-3.0</span></h3>
+      <div class="where">server/ · FastAPI, React, PostgreSQL · Docker Compose</div>
+      <ul>
+        <li>Accounts, magic link sign-in, invites</li>
+        <li>Organizations, volumes, devices</li>
+        <li>Creates and drops database roles</li>
+        <li>Creates volumes (<code>juicefs format</code>), rotates the S3 key</li>
+        <li>Audit log</li>
+      </ul>
+    </div>
+    <div class="card comp">
+      <h3>PostgreSQL<span class="lic">any</span></h3>
+      <div class="where">managed, same region as the bucket</div>
+      <ul>
+        <li>One database per volume (JuiceFS tables)</li>
+        <li>One role per Mac, with access only to its organization's databases</li>
+        <li>Point-in-time recovery plus a daily <code>juicefs dump</code></li>
+      </ul>
+    </div>
+    <div class="card comp">
+      <h3>Object storage<span class="lic">any S3</span></h3>
+      <div class="where">a bucket per organization</div>
+      <ul>
+        <li>Volumes are prefixes inside the bucket</li>
+        <li>One key per organization, stored in the metadata</li>
+        <li>Rotated by pasting a new key, no provider API</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section id="flows">
+  <p class="eyebrow">04 · Flows</p>
+  <h2>How it works, step by step</h2>
+  <div class="tabs" role="tablist">
+    <button class="tab" role="tab" aria-selected="true" data-panel="f-login">First install and login</button>
+    <button class="tab" role="tab" aria-selected="false" data-panel="f-read">Reading a clip</button>
+    <button class="tab" role="tab" aria-selected="false" data-panel="f-revoke">Revocation and key rotation</button>
+  </div>
+  <div class="panel" id="f-login">
+    <figure><div class="fig wide"><svg class="seq" id="seq-login"></svg></div>
+    <figcaption>The magic link is bound to the pending sign-in request, not to a browser cookie: it works even if the mail client opens a different browser. The app never shows a password field.</figcaption></figure>
+  </div>
+  <div class="panel" id="f-read" hidden>
+    <figure><div class="fig wide"><svg class="seq" id="seq-read"></svg></div>
+    <figcaption>Attribute lookups are cached by JuiceFS for about a second; with remote PostgreSQL every miss is a network round trip. That cost is what step 0 of the plan measures.</figcaption></figure>
+  </div>
+  <div class="panel" id="f-revoke" hidden>
+    <figure><div class="fig wide"><svg class="seq" id="seq-revoke"></svg></div>
+    <figcaption>Dropping the role cuts the file tree at once. The old S3 key stays valid until the admin deletes it at the provider: that window is the risk described under Credentials.</figcaption></figure>
+  </div>
+</section>
+
+<section id="states">
+  <p class="eyebrow">05 · App states</p>
+  <h2>What the panel can show</h2>
+  <p>The states of variant B, plus the first run and revocation, which the mockup does not cover yet. Every state has one primary action.</p>
+  <figure>
+    <div class="fig wide">
+      <svg viewBox="0 0 1060 290" role="img" aria-label="App state diagram">
+        <defs>
+          <marker id="s-ink" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="mk-ink"/></marker>
+        </defs>
+        <g id="stateEdges"></g>
+        <g id="stateNodes"></g>
+      </svg>
+    </div>
+    <figcaption>Dots carry status color and every state is labeled in text. Reconnection is automatic from Unreachable; Off is only entered by the user.</figcaption>
+  </figure>
+</section>
+
+<section id="security">
+  <p class="eyebrow">06 · Credentials</p>
+  <h2>Who holds what, and how it is taken back</h2>
+  <div class="table-wrap" style="margin-top:14px">
+    <table>
+      <thead><tr><th>Credential</th><th>Held by</th><th>Stored</th><th>Gives</th><th>Taken back by</th></tr></thead>
+      <tbody>
+        <tr><td class="k">Device token</td><td>Each Mac</td><td>Keychain</td><td>Control plane API as that Mac</td><td>Revoking the device <span class="pill good">immediate</span></td></tr>
+        <tr><td class="k">Database role</td><td>Each Mac</td><td>Keychain, passed to the VM</td><td>Read and write the file tree, and through it the S3 key</td><td>Drop role and end its sessions <span class="pill good">immediate</span></td></tr>
+        <tr><td class="k">S3 key</td><td>Every Mac with a role, implicitly</td><td>Volume metadata, obfuscated with the volume's UUID</td><td>Read, write, delete objects in the bucket</td><td>New key pasted, old one deleted at the provider <span class="pill warn">manual</span></td></tr>
+        <tr><td class="k">SMB password</td><td>Mac and its VM</td><td>Keychain (today in the mount URL)</td><td>The share, only on the private Mac-VM link</td><td>Reinstall</td></tr>
+        <tr><td class="k">Database admin</td><td>Control plane</td><td>Server environment</td><td>Create and drop roles and databases</td><td>The operator</td></tr>
+        <tr><td class="k">Magic link</td><td>The person's inbox</td><td>Hashed, single use, 15 minutes</td><td>One sign-in</td><td>Expiry</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="callout risk"><b>Residual risk: the window before rotation</b>A revoked person who copied the S3 key can still delete or download raw blocks until the admin deletes that key at the provider. Without metadata the blocks are 4 MB fragments with no names; deletion is the real risk. Mitigations: rotate right after revoking, and bucket versioning as a safety net (an open decision, it bills deleted blocks).</div>
+  <div class="callout info"><b>Permissions stay all or nothing</b>Everyone in an organization sees and can delete every file of its volumes. JuiceFS Community has no per-folder permissions; trash (7 days) and the replica cover mistakes.</div>
+</section>
+
+<section id="model">
+  <p class="eyebrow">07 · Data model</p>
+  <h2>The control plane's tables</h2>
+  <p>Soft delete everywhere (<code>deleted_at</code>). The file tree is not here: it lives in each volume's own database, written by JuiceFS.</p>
+  <div class="legend" style="margin-top:12px">
+    <span><i class="sw" style="background:var(--ctl)"></i>Control DB</span>
+    <span><i class="sw" style="background:var(--meta)"></i>Created on the metadata PostgreSQL</span>
+  </div>
+  <div class="er">
+    <div class="ent where-cp"><h4>organizations <span>tenant</span></h4><ul>
+      <li><span class="pk">id</span><em>uuid</em></li><li>name, slug<em>text</em></li>
+      <li>s3_endpoint, bucket<em>text</em></li><li>key_rotated_at<em>timestamp</em></li><li>deleted_at<em>timestamp</em></li></ul></div>
+    <div class="ent where-cp"><h4>users <span>a person</span></h4><ul>
+      <li><span class="pk">id</span><em>uuid</em></li><li>email<em>unique</em></li><li>name<em>text</em></li>
+      <li>last_login_at<em>timestamp</em></li><li>deleted_at<em>timestamp</em></li></ul></div>
+    <div class="ent where-cp"><h4>memberships <span>user in org</span></h4><ul>
+      <li><span class="fk">org_id, user_id</span><em>fk</em></li><li>role<em>admin | member</em></li>
+      <li>status<em>invited | active | revoked</em></li><li>invited_by<em>fk users</em></li><li>revoked_at<em>timestamp</em></li></ul></div>
+    <div class="ent where-cp"><h4>volumes <span>a disk</span></h4><ul>
+      <li><span class="pk">id</span><em>uuid</em></li><li><span class="fk">org_id</span><em>fk</em></li>
+      <li>name<em>VOLUME_NAME</em></li><li>meta_database<em>text</em></li><li>block_size_kb, trash_days<em>int</em></li><li>deleted_at<em>timestamp</em></li></ul></div>
+    <div class="ent where-cp"><h4>devices <span>a Mac</span></h4><ul>
+      <li><span class="pk">id</span><em>uuid</em></li><li><span class="fk">user_id, org_id</span><em>fk</em></li>
+      <li>name, macos_version, app_version<em>text</em></li><li>token_hash<em>text</em></li>
+      <li>last_seen_at<em>timestamp</em></li><li>revoked_at<em>timestamp</em></li></ul></div>
+    <div class="ent where-db"><h4>device role <span>on PostgreSQL</span></h4><ul>
+      <li><span class="pk">fluix_d_&lt;id&gt;</span><em>role</em></li><li>CONNECT<em>org's volume DBs</em></li>
+      <li>SELECT, INSERT, UPDATE, DELETE<em>JuiceFS tables</em></li><li>password<em>shown once</em></li></ul></div>
+    <div class="ent where-cp"><h4>sign_in_requests <span>PKCE</span></h4><ul>
+      <li><span class="pk">id</span><em>uuid</em></li><li>code_challenge, redirect_uri<em>text</em></li>
+      <li>magic_link_hash<em>text</em></li><li>expires_at, used_at<em>timestamp</em></li></ul></div>
+    <div class="ent where-cp"><h4>audit_events <span>append only</span></h4><ul>
+      <li><span class="pk">id</span><em>bigint</em></li><li><span class="fk">org_id, actor_id</span><em>fk</em></li>
+      <li>action<em>text</em></li><li>target<em>jsonb</em></li><li>created_at<em>timestamp</em></li></ul></div>
+    <div class="ent where-db"><h4>volume database <span>JuiceFS</span></h4><ul>
+      <li>jfs_node, jfs_edge, ...<em>file tree</em></li><li>jfs_setting<em>format + S3 key</em></li>
+      <li>owner<em>admin role</em></li></ul></div>
+  </div>
+  <p class="small muted" style="margin-top:14px">One role per Mac instead of per person: a lost or stolen laptop is revoked alone, and the person keeps working on the others.</p>
+</section>
+
+<section id="failures">
+  <p class="eyebrow">08 · Failure modes</p>
+  <h2>What breaks when a piece is missing</h2>
+  <div class="table-wrap" style="margin-top:14px">
+    <table>
+      <thead><tr><th>Down</th><th>Mounted disks</th><th>What waits</th><th>Mitigation</th></tr></thead>
+      <tbody>
+        <tr><td class="k">Control plane</td><td><span class="pill good">keep working</span></td><td>Sign-in, new Macs, revocation, rotation</td><td>It holds no file data; restart or redeploy</td></tr>
+        <tr><td class="k">PostgreSQL</td><td><span class="pill bad">stop</span></td><td>Everything, cached files included</td><td>Managed, point-in-time recovery, daily dump, alert</td></tr>
+        <tr><td class="k">S3</td><td><span class="pill warn">cache only</span></td><td>Uncached reads and every write</td><td>Writeback off: a saved file is on S3, never only on a Mac</td></tr>
+        <tr><td class="k">The Mac's network</td><td><span class="pill bad">stop</span></td><td>Everything</td><td>None: accepted, the file tree is remote</td></tr>
+        <tr><td class="k">The VM</td><td><span class="pill warn">brief stop</span></td><td>Until the agent restarts it</td><td>Agent every 2 minutes, health check from inside the VM</td></tr>
+        <tr><td class="k">The Mac's disk space</td><td><span class="pill warn">cache freed</span></td><td>Cached clips must download again</td><td>Ceiling and emergency eviction computed on the Mac side</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="deploy">
+  <p class="eyebrow">09 · Deployments</p>
+  <h2>One codebase, three ways to run it</h2>
+  <div class="grid g3" style="margin-top:16px">
+    <div class="card comp">
+      <h3>Self-hosted</h3>
+      <div class="where">anyone, from the public repo</div>
+      <ul>
+        <li><code>docker compose up</code> for the control plane</li>
+        <li>Any S3 and any PostgreSQL</li>
+        <li>One organization, created at first start</li>
+        <li>Mail through plain SMTP</li>
+      </ul>
+    </div>
+    <div class="card comp" style="border-color:var(--accent-fill)">
+      <h3>First instance</h3>
+      <div class="where">a self-hosted install, the first real one</div>
+      <ul>
+        <li>Control plane on a Dokploy server</li>
+        <li>Managed PostgreSQL and S3 in Milan</li>
+        <li>Replaces the tester's per-Mac disk</li>
+        <li>Volume created fresh: the test volume does not migrate</li>
+      </ul>
+    </div>
+    <div class="card comp">
+      <h3>Hosted service</h3>
+      <div class="where">later, same code</div>
+      <ul>
+        <li>Many organizations on one instance</li>
+        <li>Isolation by database grants and a bucket per organization, not by application filters</li>
+        <li>The key's scope to its bucket is set by the operator in the provider console</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section id="performance">
+  <p class="eyebrow">10 · Performance</p>
+  <h2>Measured today, and the unknown</h2>
+  <div class="grid g2" style="margin-top:16px">
+    <figure style="margin:0">
+      <div class="fig">
+        <svg class="chart" id="ch-thr" viewBox="0 0 480 220" role="img" aria-label="Throughput on OVH Milan"></svg>
+      </div>
+      <figcaption>Throughput on OVH Milan, 170 Mbps home line, MB/s. Every cold figure stays above what a 60 Mbps clip needs. Cached reads (about 540 MB/s) are off this scale.</figcaption>
+      <details class="data"><summary>Data</summary><table><tr><th>Operation</th><th>MB/s</th></tr><tr><td>Copy 2.7 GB to the disk</td><td>23.9</td></tr><tr><td>Warmup of a 434 MB clip</td><td>14.3</td></tr><tr><td>Cold read of a 434 MB clip</td><td>12.1</td></tr><tr><td>Needed by a 60 Mbps clip</td><td>7.5</td></tr></table></details>
+    </figure>
+    <figure style="margin:0">
+      <div class="fig">
+        <svg class="chart" id="ch-rtt" viewBox="0 0 480 220" role="img" aria-label="Time for 200 uncached metadata round trips"></svg>
+      </div>
+      <figcaption>Arithmetic, not a measurement: 200 metadata round trips with no cache at all, by distance to PostgreSQL. JuiceFS caches attributes, so real numbers are lower; step 0 measures them on Finder and CapCut.</figcaption>
+      <details class="data"><summary>Data</summary><table><tr><th>Metadata location</th><th>Round trip</th><th>200 trips</th></tr><tr><td>SQLite in the VM (today)</td><td>about 0</td><td>about 0 s</td></tr><tr><td>PostgreSQL, same datacenter</td><td>2 ms</td><td>0.4 s</td></tr><tr><td>PostgreSQL in Milan</td><td>15 ms</td><td>3 s</td></tr><tr><td>Far region</td><td>30 ms</td><td>6 s</td></tr></table></details>
+    </figure>
+  </div>
+  <div class="callout risk"><b>The unknown that can change the design</b>All measurements so far had the metadata next to JuiceFS. With PostgreSQL across the internet, browsing a folder of clips and opening a CapCut project pay a round trip per uncached lookup. If the number is bad, the options are longer metadata cache timeouts or moving PostgreSQL closer, and the plan waits for it.</div>
+</section>
+
+<section id="costs">
+  <p class="eyebrow">11 · Costs</p>
+  <h2>Monthly cost for a team of three</h2>
+  <figure>
+    <div class="fig">
+      <div class="legend">
+        <span><i class="sw" style="background:var(--meta)"></i>Fluix (OVH storage + database), EUR</span>
+        <span><i class="sw" style="background:var(--data)"></i>SpaceFS Teams, USD</span>
+      </div>
+      <svg class="chart" id="ch-cost" viewBox="0 0 760 250" role="img" aria-label="Monthly cost ranges by active terabytes"></svg>
+    </div>
+    <figcaption>Estimates from docs/ARCHITECTURE.md, prices checked on 06/10/2026; each bar is a low to high range. Currencies differ as in the sources. Not counted: the time to run Fluix, and the control plane server (an existing Dokploy server in the first instance).</figcaption>
+    <details class="data"><summary>Data</summary><table><tr><th>Active TB</th><th>Fluix, EUR/month</th><th>SpaceFS Teams, USD/month</th></tr><tr><td>3</td><td>40-55</td><td>90</td></tr><tr><td>5</td><td>55-70</td><td>114-138</td></tr><tr><td>10</td><td>95-110</td><td>174-258</td></tr></table></details>
+  </figure>
+</section>
+
+<section id="plan">
+  <p class="eyebrow">12 · Plan</p>
+  <h2>Order of work</h2>
+  <p>Engineer days with a coding agent, low and high. A guess, except where step 0 replaces it with a measure.</p>
+  <figure>
+    <div class="fig">
+      <div class="legend">
+        <span><i class="sw" style="background:var(--bar)"></i>Low estimate</span>
+        <span><i class="sw" style="background:var(--bar-ext)"></i>Up to the high estimate</span>
+      </div>
+      <svg class="chart" id="ch-plan" viewBox="0 0 760 300" role="img" aria-label="Plan as a timeline"></svg>
+    </div>
+    <details class="data"><summary>Data</summary><table id="plan-table"><tr><th>Step</th><th>Days</th><th>What</th></tr></table></details>
+  </figure>
+  <h3>Step 0, the spike</h3>
+  <div class="grid g2">
+    <div class="card small">Finder and CapCut on metadata in a remote PostgreSQL: a folder of clips, opening a project, scrubbing. Round trip to the managed database in Milan.</div>
+    <div class="card small"><code>juicefs config</code> with a new key: mounted clients pick it up within a minute, as the JuiceFS docs say.</div>
+    <div class="card small">A client mounts with a role limited to SELECT, INSERT, UPDATE, DELETE on tables it does not own.</div>
+    <div class="card small">Ending the sessions and dropping the role stops a mounted client cleanly, without corrupting the volume.</div>
+  </div>
+</section>
+
+<section id="decisions">
+  <p class="eyebrow">13 · Open decisions</p>
+  <h2>To close before or during the build</h2>
+  <div class="dec">
+    <div class="card"><b>Role per Mac or per person</b><p>Per Mac lets a stolen laptop be revoked alone; per person is fewer roles.</p><span class="rec">per Mac.</span></div>
+    <div class="card"><b>Cache on revocation</b><p>The cache holds the organization's footage on a Mac that is no longer allowed.</p><span class="rec">the app clears it at the first heartbeat that says revoked.</span></div>
+    <div class="card"><b>Metadata cache timeouts</b><p>Longer timeouts mean fewer round trips but slower visibility of other people's changes.</p><span class="rec">decided on step 0 numbers.</span></div>
+    <div class="card"><b>Bucket versioning</b><p>A safety net for the rotation window, but deleted and compacted blocks stay billed.</p><span class="rec">on, with a lifecycle rule that expires old versions after a few days.</span></div>
+    <div class="card"><b>Mockup questions</b><p>Text when unreachable, full cache behavior, reconnection interval, "Turn off" or "Eject".</p><span class="rec">with shared PostgreSQL "files will not open until the disk is back" becomes true; the rest at the panel build.</span></div>
+    <div class="card"><b>Homebrew needs administrator rights</b><p>Installing Homebrew uses sudo; the app itself does not. It bends a "never compromise" rule.</p><span class="rec">accepted for now; a DMG into ~/Applications later if a team has standard accounts.</span></div>
+  </div>
+</section>
+
+</main>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  var NS = "http://www.w3.org/2000/svg";
+  function el(tag, attrs, parent, text) {
+    var n = document.createElementNS(NS, tag);
+    for (var k in attrs) n.setAttribute(k, attrs[k]);
+    if (text != null) n.textContent = text;
+    if (parent) parent.appendChild(n);
+    return n;
+  }
+
+  // Theme toggle
+  var root = document.documentElement;
+  try { var saved = localStorage.getItem("fluix-arch-theme"); if (saved) root.setAttribute("data-theme", saved); } catch (e) { /* storage unavailable */ }
+  document.getElementById("themeBtn").addEventListener("click", function () {
+    var dark = root.getAttribute("data-theme") === "dark" ||
+      (!root.getAttribute("data-theme") && matchMedia("(prefers-color-scheme: dark)").matches);
+    var next = dark ? "light" : "dark";
+    root.setAttribute("data-theme", next);
+    try { localStorage.setItem("fluix-arch-theme", next); } catch (e) { /* storage unavailable */ }
+  });
+
+  // Tooltip
+  var tip = document.getElementById("tip");
+  document.addEventListener("pointermove", function (ev) {
+    var t = ev.target.closest && ev.target.closest("[data-tip]");
+    if (!t) { tip.style.opacity = 0; return; }
+    tip.innerHTML = t.getAttribute("data-tip");
+    tip.style.opacity = 1;
+    var x = ev.clientX + 14, y = ev.clientY + 14;
+    var r = tip.getBoundingClientRect();
+    if (x + r.width > innerWidth - 8) x = ev.clientX - r.width - 14;
+    if (y + r.height > innerHeight - 8) y = ev.clientY - r.height - 14;
+    tip.style.left = x + "px"; tip.style.top = y + "px";
+  });
+
+  // Tabs
+  var tabs = document.querySelectorAll(".tab");
+  tabs.forEach(function (t) {
+    t.addEventListener("click", function () {
+      tabs.forEach(function (o) {
+        o.setAttribute("aria-selected", o === t ? "true" : "false");
+        document.getElementById(o.dataset.panel).hidden = o !== t;
+      });
+    });
+  });
+
+  // Scrollspy
+  var links = document.querySelectorAll(".toc a");
+  var obs = new IntersectionObserver(function (entries) {
+    entries.forEach(function (en) {
+      if (!en.isIntersecting) return;
+      links.forEach(function (a) { a.classList.toggle("on", a.getAttribute("href") === "#" + en.target.id); });
+    });
+  }, { rootMargin: "-20% 0px -70% 0px" });
+  document.querySelectorAll("main section").forEach(function (s) { obs.observe(s); });
+
+  // Sequence diagrams
+  function seq(id, parts, steps) {
+    var svg = document.getElementById(id);
+    var colW = 150, x0 = 85, top = 18, headH = 46, rowH = 38;
+    var W = x0 * 2 + colW * (parts.length - 1);
+    var rows = steps.reduce(function (n, s) { return n + (s.k === "note" || s.k === "group" ? 1 : 1); }, 0);
+    var H = top + headH + 24 + rows * rowH + 20;
+    svg.setAttribute("viewBox", "0 0 " + W + " " + H);
+    svg.setAttribute("role", "img");
+    var defs = el("defs", {}, svg);
+    ["meta", "data", "ctl", "ink"].forEach(function (c) {
+      var sz = c === "data" ? 4 : 7;
+      var m = el("marker", { id: id + "-" + c, viewBox: "0 0 10 10", refX: 9, refY: 5, markerWidth: sz, markerHeight: sz, orient: "auto-start-reverse" }, defs);
+      el("path", { d: "M0 0L10 5L0 10z", "class": "mk-" + c }, m);
+    });
+    var X = {};
+    parts.forEach(function (p, i) { X[p.id] = x0 + i * colW; });
+    var bottom = H - 12;
+    var gLines = el("g", {}, svg), gBody = el("g", {}, svg), gHead = el("g", {}, svg);
+    parts.forEach(function (p) {
+      var x = X[p.id];
+      el("line", { x1: x, x2: x, y1: top + headH, y2: bottom, "class": "life" }, gLines);
+      el("rect", { x: x - 66, y: top, width: 132, height: headH, rx: 8, "class": "ph" }, gHead);
+      el("text", { x: x, y: top + 20, "text-anchor": "middle", "class": "pt" }, gHead, p.label);
+      el("text", { x: x, y: top + 36, "text-anchor": "middle", "class": "ps" }, gHead, p.sub || "");
+    });
+    var y = top + headH + 30, n = 0;
+    steps.forEach(function (s) {
+      if (s.k === "note") {
+        var xa = Math.min(X[s.f], X[s.t || s.f]) - 62, xb = Math.max(X[s.f], X[s.t || s.f]) + 62;
+        el("rect", { x: xa, y: y - 16, width: xb - xa, height: 26, rx: 6, "class": "note" }, gBody);
+        el("text", { x: (xa + xb) / 2, y: y + 1, "text-anchor": "middle", "class": "notet" }, gBody, s.l);
+      } else if (s.k === "group") {
+        el("text", { x: 10, y: y + 1, "class": "grpt" }, gBody, s.l);
+        el("line", { x1: 10, x2: W - 10, y1: y + 8, y2: y + 8, "class": "grp" }, gBody);
+      } else if (s.f === s.t) {
+        n++;
+        var xs = X[s.f];
+        el("path", { d: "M" + xs + " " + (y - 6) + " h34 v14 h-32", "class": "e " + s.c, "marker-end": "url(#" + id + "-" + s.c + ")" }, gBody);
+        el("text", { x: xs + 42, y: y + 4, "class": "ml" }, gBody, s.l);
+        el("text", { x: xs - 8, y: y + 4, "text-anchor": "end", "class": "mn" }, gBody, n);
+      } else {
+        n++;
+        var xf = X[s.f], xt = X[s.t], dir = xt > xf ? 1 : -1;
+        el("line", { x1: xf + dir * 4, x2: xt - dir * 4, y1: y + 6, y2: y + 6, "class": "e " + s.c, "marker-end": "url(#" + id + "-" + s.c + ")" }, gBody);
+        el("text", { x: (xf + xt) / 2, y: y, "text-anchor": "middle", "class": "ml" }, gBody, s.l);
+        el("text", { x: Math.min(xf, xt) - 8, y: y + 10, "text-anchor": "end", "class": "mn" }, gBody, n);
+      }
+      y += rowH;
+    });
+  }
+
+  seq("seq-login",
+    [{ id: "u", label: "Person", sub: "edits video" }, { id: "app", label: "Fluix.app", sub: "menu bar" },
+     { id: "br", label: "Browser", sub: "same Mac" }, { id: "cp", label: "Control plane", sub: "API + web" },
+     { id: "pg", label: "PostgreSQL", sub: "metadata" }, { id: "vm", label: "VM", sub: "JuiceFS + Samba" }],
+    [
+      { f: "u", t: "app", l: "brew install --cask fluix, opens the app", c: "ink" },
+      { f: "app", t: "br", l: "open sign-in page (PKCE, loopback port)", c: "ctl" },
+      { f: "br", t: "cp", l: "email address", c: "ctl" },
+      { f: "cp", t: "u", l: "magic link by email", c: "ctl" },
+      { f: "br", t: "cp", l: "open the link", c: "ctl" },
+      { f: "cp", t: "app", l: "redirect to 127.0.0.1 with a one-time code", c: "ctl" },
+      { f: "app", t: "cp", l: "code + verifier, gets device token", c: "ctl" },
+      { k: "note", f: "app", l: "token saved in the Keychain" },
+      { f: "app", t: "cp", l: "register this Mac", c: "ctl" },
+      { f: "cp", t: "pg", l: "CREATE ROLE, GRANT on the org's volumes", c: "meta" },
+      { f: "cp", t: "app", l: "META_URL per volume, shown once", c: "ctl" },
+      { f: "app", t: "vm", l: "fluix setup: create VM, mount", c: "ink" },
+      { f: "vm", t: "pg", l: "read the volume format, S3 key included", c: "meta" },
+      { k: "note", f: "u", t: "vm", l: "Fluix appears in the Finder at /Volumes/Fluix" }
+    ]);
+
+  seq("seq-read",
+    [{ id: "cc", label: "CapCut", sub: "timeline" }, { id: "smb", label: "macOS", sub: "SMB client" },
+     { id: "sb", label: "Samba", sub: "in the VM" }, { id: "jf", label: "JuiceFS", sub: "in the VM" },
+     { id: "ca", label: "Cache", sub: "VM disk" }, { id: "pg", label: "PostgreSQL", sub: "metadata" },
+     { id: "s3", label: "S3", sub: "blocks" }],
+    [
+      { f: "cc", t: "smb", l: "read 1 MB at 02:14", c: "ink" },
+      { f: "smb", t: "sb", l: "SMB read", c: "ink" },
+      { f: "sb", t: "jf", l: "FUSE read", c: "ink" },
+      { f: "jf", t: "pg", l: "which chunk, which block (cached about 1 s)", c: "meta" },
+      { k: "group", l: "Block already cached" },
+      { f: "jf", t: "ca", l: "read the 4 MB block", c: "ink" },
+      { k: "note", f: "cc", t: "jf", l: "0-3 ms, like a local disk" },
+      { k: "group", l: "Block not cached" },
+      { f: "jf", t: "s3", l: "GET the whole 4 MB block", c: "data" },
+      { f: "jf", t: "ca", l: "keep a copy", c: "ink" },
+      { f: "jf", t: "s3", l: "prefetch the next blocks", c: "data" },
+      { k: "note", f: "cc", t: "jf", l: "about 0.9 s per cold seek on OVH Milan" }
+    ]);
+
+  seq("seq-revoke",
+    [{ id: "ad", label: "Admin", sub: "in the browser" }, { id: "cp", label: "Control plane", sub: "API" },
+     { id: "pg", label: "PostgreSQL", sub: "metadata" }, { id: "rm", label: "Revoked Mac", sub: "" },
+     { id: "om", label: "Other Macs", sub: "" }, { id: "s3", label: "S3 provider", sub: "console" }],
+    [
+      { k: "group", l: "Revoke" },
+      { f: "ad", t: "cp", l: "revoke Mac or member", c: "ctl" },
+      { f: "cp", t: "pg", l: "end sessions, DROP ROLE", c: "meta" },
+      { k: "note", f: "pg", t: "rm", l: "file tree gone: the disk stops" },
+      { f: "rm", t: "cp", l: "next heartbeat: revoked", c: "ctl" },
+      { f: "rm", t: "rm", l: "stop disk, clear cache, delete token", c: "ink" },
+      { k: "group", l: "Rotate the S3 key" },
+      { f: "ad", t: "s3", l: "create a new key", c: "ink" },
+      { f: "ad", t: "cp", l: "paste the new key", c: "ctl" },
+      { f: "cp", t: "s3", l: "test write with the new key", c: "data" },
+      { f: "cp", t: "pg", l: "juicefs config, every volume", c: "meta" },
+      { f: "om", t: "pg", l: "pick up the new key within a minute", c: "meta" },
+      { f: "ad", t: "s3", l: "delete the old key: window closed", c: "ink" }
+    ]);
+
+  // State diagram
+  (function () {
+    var E = document.getElementById("stateEdges"), N = document.getElementById("stateNodes");
+    var w = 140, h = 50;
+    var S = {
+      ni: { x: 20, y: 40, l: "Not installed", a: "Sign in", st: "idle" },
+      si: { x: 190, y: 40, l: "Signing in", a: "Open browser", st: "idle" },
+      in: { x: 360, y: 40, l: "Installing", a: "Progress", st: "busy" },
+      st: { x: 530, y: 40, l: "Starting", a: "Wait", st: "busy" },
+      re: { x: 700, y: 40, l: "Ready", a: "Open in Finder", st: "good" },
+      dl: { x: 890, y: 40, l: "Downloading", a: "Pause", st: "busy" },
+      of: { x: 530, y: 200, l: "Off", a: "Turn on", st: "idle" },
+      un: { x: 700, y: 200, l: "Unreachable", a: "Reconnect", st: "serious" },
+      rv: { x: 890, y: 200, l: "Revoked", a: "Sign in again", st: "critical" }
+    };
+    var col = { idle: "var(--text-3)", busy: "var(--meta)", good: "var(--good)", serious: "var(--serious)", critical: "var(--critical)" };
+    function c(k) { var s = S[k]; return { x: s.x + w / 2, y: s.y + h / 2 }; }
+    function edge(a, b, label, opts) {
+      opts = opts || {};
+      var A = S[a], B = S[b], d;
+      if (opts.d) d = opts.d;
+      else if (A.y === B.y) d = "M" + (A.x + w) + " " + (A.y + h / 2 + (opts.dy || 0)) + " H" + (B.x) ;
+      else d = "M" + (c(a).x + (opts.dx || 0)) + " " + (A.y < B.y ? A.y + h : A.y) + " V" + (A.y < B.y ? B.y : B.y + h);
+      var p = el("path", { d: d, "class": "e ink", "marker-end": "url(#s-ink)" }, E);
+      if (opts.both) p.setAttribute("marker-start", "url(#s-ink)");
+      if (label) el("text", { x: opts.lx, y: opts.ly, "class": "el", "text-anchor": opts.anchor || "middle" }, E, label);
+    }
+    edge("ni", "si", "", {});
+    edge("si", "in", "", {});
+    edge("in", "st", "", {});
+    edge("st", "re", "", {});
+    edge("re", "dl", "", { both: true });
+    edge("re", "un", "", { both: true });
+    el("text", { x: 778, y: 135, "class": "el" }, E, "network");
+    el("text", { x: 778, y: 151, "class": "el" }, E, "lost or back");
+    edge("re", "of", "", { d: "M740 90 L640 200" });
+    el("text", { x: 668, y: 135, "class": "el", "text-anchor": "end" }, E, "Turn off");
+    edge("of", "st", "", { d: "M580 200 V90" });
+    el("text", { x: 570, y: 150, "class": "el", "text-anchor": "end" }, E, "Turn on");
+    edge("re", "rv", "", { d: "M830 90 L920 200" });
+    el("text", { x: 900, y: 128, "class": "el", "text-anchor": "start" }, E, "heartbeat");
+    el("text", { x: 20, y: 130, "class": "ns" }, E, "First run only");
+    el("line", { x1: 20, x2: 500, y1: 110, y2: 110, stroke: "var(--line-strong)", "stroke-dasharray": "3 4" }, E);
+    Object.keys(S).forEach(function (k) {
+      var s = S[k];
+      el("rect", { x: s.x, y: s.y, width: w, height: h, rx: 10, "class": "node" + (k === "re" ? " hl" : "") }, N);
+      el("circle", { cx: s.x + 16, cy: s.y + 18, r: 5, fill: col[s.st] }, N);
+      el("text", { x: s.x + 28, y: s.y + 22, "class": "nt" }, N, s.l);
+      el("text", { x: s.x + 28, y: s.y + 39, "class": "ns" }, N, s.a);
+    });
+  })();
+
+  // Horizontal bar chart with optional reference line
+  function hbar(id, rows, o) {
+    var svg = document.getElementById(id);
+    var W = 480, left = o.left || 150, right = 40, top = 14, rowH = 40, barH = 14;
+    var H = top + rows.length * rowH + 40;
+    svg.setAttribute("viewBox", "0 0 " + W + " " + H);
+    var sx = function (v) { return left + (v / o.max) * (W - left - right); };
+    o.ticks.forEach(function (t) {
+      el("line", { x1: sx(t), x2: sx(t), y1: top - 4, y2: top + rows.length * rowH, "class": "grid-l" }, svg);
+      el("text", { x: sx(t), y: top + rows.length * rowH + 16, "text-anchor": "middle", "class": "axis-t" }, svg, t + (o.unit || ""));
+    });
+    rows.forEach(function (r, i) {
+      var y = top + i * rowH + rowH / 2;
+      el("text", { x: left - 10, y: y + 4, "text-anchor": "end", "class": "row-t" }, svg, r.l);
+      var w = Math.max(sx(r.v) - left, 2);
+      if (w > 4) el("path", { d: "M" + left + " " + (y - barH / 2) + " h" + (w - 4) + " a4 4 0 0 1 4 4 v" + (barH - 8) + " a4 4 0 0 1 -4 4 h" + (-(w - 4)) + "z", "class": "bar" }, svg);
+      else el("rect", { x: left, y: y - barH / 2, width: 2, height: barH, "class": "bar" }, svg);
+      el("text", { x: left + w + 6, y: y + 4, "class": "val-t" }, svg, r.t);
+      el("rect", { x: 0, y: y - rowH / 2, width: W, height: rowH, "class": "hit", "data-tip": r.tip }, svg);
+    });
+    if (o.ref) {
+      var rx = sx(o.ref.v);
+      el("line", { x1: rx, x2: rx, y1: top - 6, y2: top + rows.length * rowH, "class": "refl" }, svg);
+      el("text", { x: rx + 4, y: top + rows.length * rowH + 32, "class": "ref-t" }, svg, o.ref.l);
+    }
+  }
+
+  hbar("ch-thr", [
+    { l: "Copy to the disk", v: 23.9, t: "23.9", tip: "<b>Copy 2.7 GB to the disk</b><br>113 s, 23.9 MB/s, the line's upload limit" },
+    { l: "Warmup of a clip", v: 14.3, t: "14.3", tip: "<b>Warmup of a 434 MB clip</b><br>30 s, 14.3 MB/s" },
+    { l: "Cold read (playback)", v: 12.1, t: "12.1", tip: "<b>Reading a 434 MB clip not in cache</b><br>38 s, 12.1 MB/s" }
+  ], { max: 30, ticks: [0, 10, 20, 30], ref: { v: 7.5, l: "7.5 needed by a 60 Mbps clip" } });
+
+  hbar("ch-rtt", [
+    { l: "SQLite in the VM", v: 0, t: "about 0 s", tip: "<b>Today</b><br>Local file, no network" },
+    { l: "Same datacenter, 2 ms", v: 0.4, t: "0.4 s", tip: "200 × 2 ms = 0.4 s" },
+    { l: "Milan, 15 ms", v: 3, t: "3 s", tip: "200 × 15 ms = 3 s<br>15 ms is the measured round trip to OVH S3 in Milan" },
+    { l: "Far region, 30 ms", v: 6, t: "6 s", tip: "200 × 30 ms = 6 s" }
+  ], { max: 7, ticks: [0, 2, 4, 6], unit: " s", left: 160 });
+
+  // Cost ranges
+  (function () {
+    var svg = document.getElementById("ch-cost");
+    var W = 760, left = 70, right = 70, top = 10, groupH = 66, barH = 14, max = 280;
+    var data = [
+      { tb: "3 TB", f: [40, 55], s: [90, 90] },
+      { tb: "5 TB", f: [55, 70], s: [114, 138] },
+      { tb: "10 TB", f: [95, 110], s: [174, 258] }
+    ];
+    var H = top + data.length * groupH + 30;
+    svg.setAttribute("viewBox", "0 0 " + W + " " + H);
+    var sx = function (v) { return left + (v / max) * (W - left - right); };
+    [0, 50, 100, 150, 200, 250].forEach(function (t) {
+      el("line", { x1: sx(t), x2: sx(t), y1: top, y2: top + data.length * groupH, "class": "grid-l" }, svg);
+      el("text", { x: sx(t), y: top + data.length * groupH + 18, "text-anchor": "middle", "class": "axis-t" }, svg, t);
+    });
+    data.forEach(function (d, i) {
+      var gy = top + i * groupH;
+      el("text", { x: left - 12, y: gy + groupH / 2 + 4, "text-anchor": "end", "class": "row-t" }, svg, d.tb);
+      [["f", "s1", "EUR", "Fluix"], ["s", "s2", "USD", "SpaceFS"]].forEach(function (k, j) {
+        var r = d[k[0]], y = gy + 14 + j * (barH + 8);
+        var x1 = sx(0), x2 = sx(r[1]), xlo = sx(r[0]);
+        el("rect", { x: x1, y: y, width: Math.max(xlo - x1, 1), height: barH, rx: 3, "class": k[1], opacity: 0.35 }, svg);
+        el("rect", { x: xlo - (r[0] === r[1] ? 3 : 0), y: y, width: Math.max(x2 - xlo, 3) + (r[0] === r[1] ? 3 : 0), height: barH, rx: 3, "class": k[1] }, svg);
+        var lab = (r[0] === r[1] ? r[0] : r[0] + "-" + r[1]) + " " + k[2];
+        el("text", { x: x2 + 6, y: y + 11, "class": "val-t" }, svg, lab);
+        el("rect", { x: 0, y: y - 4, width: W, height: barH + 8, "class": "hit", "data-tip": "<b>" + k[3] + ", " + d.tb + "</b><br>" + lab + " per month" }, svg);
+      });
+    });
+  })();
+
+  // Plan timeline
+  (function () {
+    var steps = [
+      { l: "0. Spike", lo: 0.5, hi: 1, after: [], what: "Remote metadata latency, key rotation, limited role, revocation" },
+      { l: "1. Design docs", lo: 0.5, hi: 1, after: [0], what: "ARCHITECTURE, DATABASE_SCHEMA, decisions" },
+      { l: "2. Control plane", lo: 4, hi: 6, after: [1], what: "Auth, orgs, devices, roles, volumes, rotation, admin web" },
+      { l: "3. Engine changes", lo: 1, hi: 2, after: [1], what: "status --json, META_URL from the app, Keychain, revocation" },
+      { l: "4. Mac app", lo: 6, hi: 7, after: [3], what: "Tauri from Portsage, login, first run, panel B, diagnostics" },
+      { l: "5. Distribution", lo: 1, hi: 1, after: [2, 4], what: "Cask in its own tap, release with VM assets" },
+      { l: "6. First instance", lo: 1, hi: 1, after: [5], what: "Deploy, create the organization, move the tester" }
+    ];
+    steps.forEach(function (s, i) {
+      s.slo = s.after.reduce(function (m, j) { return Math.max(m, steps[j].slo + steps[j].lo); }, 0);
+      s.shi = s.after.reduce(function (m, j) { return Math.max(m, steps[j].shi + steps[j].hi); }, 0);
+    });
+    var endLo = Math.max.apply(null, steps.map(function (s) { return s.slo + s.lo; }));
+    var endHi = Math.max.apply(null, steps.map(function (s) { return s.shi + s.hi; }));
+    var svg = document.getElementById("ch-plan");
+    var W = 760, left = 140, right = 30, top = 10, rowH = 34, barH = 14, max = Math.ceil(endHi / 2) * 2;
+    var H = top + steps.length * rowH + 44;
+    svg.setAttribute("viewBox", "0 0 " + W + " " + H);
+    var sx = function (v) { return left + (v / max) * (W - left - right); };
+    for (var t = 0; t <= max; t += 2) {
+      el("line", { x1: sx(t), x2: sx(t), y1: top, y2: top + steps.length * rowH, "class": "grid-l" }, svg);
+      el("text", { x: sx(t), y: top + steps.length * rowH + 16, "text-anchor": "middle", "class": "axis-t" }, svg, t + " d");
+    }
+    var table = document.getElementById("plan-table");
+    steps.forEach(function (s, i) {
+      var y = top + i * rowH + rowH / 2;
+      el("text", { x: left - 10, y: y + 4, "text-anchor": "end", "class": "row-t" }, svg, s.l);
+      var xa = sx(s.slo), xl = sx(s.slo + s.lo), xh = sx(s.shi + s.hi);
+      if (xh > xl) el("rect", { x: xl - 2, y: y - barH / 2, width: xh - xl + 2, height: barH, rx: 4, "class": "bar-ext" }, svg);
+      el("rect", { x: xa, y: y - barH / 2, width: Math.max(xl - xa - 2, 4), height: barH, rx: 4, "class": "bar" }, svg);
+      var days = s.lo === s.hi ? s.lo + "" : s.lo + "-" + s.hi;
+      el("rect", { x: 0, y: y - rowH / 2, width: W, height: rowH, "class": "hit", "data-tip": "<b>" + s.l + "</b>, " + days + " days<br>" + s.what }, svg);
+      var tr = document.createElement("tr");
+      tr.innerHTML = "<td>" + s.l + "</td><td>" + days + "</td><td>" + s.what + "</td>";
+      table.appendChild(tr);
+    });
+    el("text", { x: left, y: top + steps.length * rowH + 36, "class": "ref-t" }, svg,
+      "Total " + endLo + "-" + endHi + " days; control plane and engine run in parallel");
+  })();
+})();
+</script>
+</body>
+</html>

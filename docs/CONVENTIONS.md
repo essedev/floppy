@@ -12,7 +12,7 @@ Public repository: code, comments, docs and commits are in English.
 | `README.md` | English, canonical |
 | `README.it.md` | Italian, a translation of `README.md`, updated in the same commit |
 | `docs/*`, `CLAUDE.md` | English |
-| `mockups/panel.html` | Italian, the language of the UI it shows (declared in `.prose-allow`) |
+| `docs/concepts/*.html` | Italian, the language of the UI they show (declared in `.prose-allow`) |
 | Git history before the rename | stays as it is |
 
 `make lint` runs `scripts/check-prose.py`, which fails on Italian prose outside the allowed paths and on a README pair out of step.

@@ -140,7 +140,7 @@ Planned form: a **Tauri app** in the menu bar, built on the skeleton of [Portsag
 
 **Early first version, command only.** Work on the app starts before the pilot ends, but the first version does only what the `fluix` command already does (status, turn on and off, make available, free up space, space used on the Mac): that is the engine the app drives, so it is not wasted work. The features in the table above stay tied to what the pilot shows.
 
-**Panel mockup**: `mockups/panel.html`, three variants side by side with the Normal, Downloading, Unreachable, Starting and Off states, and buttons that simulate a download at the speed measured on OVH. Style and colors are Portsage's. The variant is still to be chosen:
+**Panel mockup**: `docs/concepts/concept-a-panel.html`, three variants side by side with the Normal, Downloading, Unreachable, Starting and Off states, and buttons that simulate a download at the speed measured on OVH. Style and colors are Portsage's. The variant is still to be chosen:
 
 - **A, Projects first**: the list of projects with how much is already on the Mac and the action to change it; the disk status is a label that expands only when something is wrong. Same skeleton as Portsage's panel.
 - **B, Status first**: one sentence and a large button that does the right thing in the current state (Open in Finder, Reconnect, Turn on); below, the Mac's space split by project, with the actions in each row's menu.

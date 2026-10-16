@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Fluix is a shared remote disk for video teams on macOS: it shows up in the Finder as **Fluix**, and the files live on S3 object storage (OVH) through JuiceFS. On macOS JuiceFS runs in a Lima VM (Debian) and reaches the Mac over SMB, because mounting it directly would need macFUSE's kernel extension. The engine is a bash command (`macos/bin/fluix`) shipped in a private zip; the menu bar app is designed in `mockups/panel.html`.
+Fluix is a shared remote disk for video teams on macOS: it shows up in the Finder as **Fluix**, and the files live on S3 object storage (OVH) through JuiceFS. On macOS JuiceFS runs in a Lima VM (Debian) and reaches the Mac over SMB, because mounting it directly would need macFUSE's kernel extension. The engine is a bash command (`macos/bin/fluix`) shipped in a private zip; the menu bar app is designed in `docs/concepts/concept-a-panel.html`.
 
 Public repository: code, comments, docs and commits in English; README.md is mirrored in README.it.md in the same commit.
 
@@ -105,3 +105,5 @@ These are default rules for this repo: the global instructions sit below, and wh
 - [docs/CONVENTIONS.md](docs/CONVENTIONS.md): language, glossary, code conventions.
 - [docs/ROADMAP.md](docs/ROADMAP.md): open questions and next steps.
 - [docs/CYCLES.md](docs/CYCLES.md): what was done and when.
+- [docs/architecture.html](docs/architecture.html): the proposed team architecture (control plane, shared PostgreSQL, login) as diagrams and flows; a proposal until it lands in ARCHITECTURE.md.
+- [docs/concepts/](docs/concepts/): HTML concepts with variants side by side, one file per design decision.

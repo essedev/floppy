@@ -35,7 +35,7 @@ Log of the work done, most recent first. Plans are in [ROADMAP.md](ROADMAP.md), 
 - **macOS package** (`macos/`, `scripts/package.sh`): a Lima VM with the `vz` backend, the `fluix` command, a zip with `install.sh`, no administrator rights. One volume per Mac generated at install time, so the same zip goes to several people.
 - **Test on OVH Milan**: a test bucket with a dedicated user. Uncached playback at 12 MB/s on a 170 Mbps home line, cold seeks around a second, cached like a local disk. Fixed along the way: the `Fluix-1` mount point and caching of uploaded files (`--cache-large-write`).
 - **VM RAM**: from 2,060 to 1,035 MB on the Mac, with `memory` at 1 GiB and `--buffer-size` at 256 MB, with the same performance.
-- **Panel mockup** for the menu bar (`mockups/panel.html`), three variants A, B and C.
+- **Panel mockup** for the menu bar (`docs/concepts/concept-a-panel.html`), three variants A, B and C.
 
 **Decisions**: a Linux machine with SMB instead of macFUSE; macOS only with the system layer isolated; a private zip instead of Homebrew for the test; a Tauri app from Portsage instead of Swift, with a first version limited to what the command does. Reasons in [ARCHITECTURE.md](ARCHITECTURE.md).
 

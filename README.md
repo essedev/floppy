@@ -47,7 +47,7 @@ A launchd agent checks every 2 minutes that the VM, JuiceFS and Samba are runnin
 
 ## Status
 
-Early: a test package for macOS, tried on OVH Object Storage in Milan, with the metadata in SQLite inside each VM, so every Mac has its own disk. Sharing one disk across Macs needs PostgreSQL in `META_URL` and is the next step. A menu bar app is designed (`mockups/panel.html`) but not built. Measurements, decisions and alternatives are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), plans in [docs/ROADMAP.md](docs/ROADMAP.md).
+Early: a test package for macOS, tried on OVH Object Storage in Milan, with the metadata in SQLite inside each VM, so every Mac has its own disk. Sharing one disk across Macs needs PostgreSQL in `META_URL` and is the next step. A menu bar app is designed (`docs/concepts/concept-a-panel.html`) but not built. Measurements, decisions and alternatives are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), plans in [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## License
 
