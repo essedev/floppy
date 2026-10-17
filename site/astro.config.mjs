@@ -33,10 +33,11 @@ export default defineConfig({
 				preload('/fonts/schibsted-grotesk/schibsted-grotesk-latin-wght-normal.woff2'),
 				preload('/fonts/departure-mono/DepartureMono-Regular.woff2'),
 			],
-			customCss: ['./src/styles/fonts.css', './src/styles/theme.css'],
+			customCss: ['./src/styles/fonts.css', './src/styles/tokens.css', './src/styles/theme.css'],
 			components: {
 				SiteTitle: './src/components/SiteTitle.astro',
 				Hero: './src/components/Hero.astro',
+				SocialIcons: './src/components/SocialIcons.astro',
 			},
 			sidebar: [
 				{

@@ -1,0 +1,24 @@
+---
+// Header override: a text link to the docs before Starlight's own social icons, so the
+// landing's header leads to the docs as well as the hero does.
+import Default from '@astrojs/starlight/components/SocialIcons.astro';
+import { landing } from '@/i18n/landing';
+import { langOf, localePath } from '@/lib/locale';
+
+const lang = langOf(Astro.locals.starlightRoute.lang);
+---
+
+<a class="fx-docs" href={localePath(lang, '/introduction/')}>{landing[lang].docsNav}</a>
+<Default />
+
+<style>
+  .fx-docs {
+    color: var(--sl-color-gray-2);
+    font-size: 0.9375rem;
+    font-weight: 600;
+    text-decoration: none;
+  }
+  .fx-docs:hover {
+    color: var(--sl-color-white);
+  }
+</style>

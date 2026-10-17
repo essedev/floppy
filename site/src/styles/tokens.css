@@ -1,0 +1,105 @@
+/* COPY of design/tokens.css, which is the source: change a value there, then copy the file
+   here again. The only difference is the Google Fonts @import, dropped because the site
+   serves Schibsted Grotesk and Departure Mono itself (fonts.css). Starlight always sets
+   data-theme on <html>, so the [data-theme] selectors below decide the theme on this site. */
+
+/* Floppy's design tokens and the details of its identity (DECISIONS #11, #12).
+   One source for the site, the admin web and the Mac app (DECISIONS #9): import or
+   copy this file, never redefine a value locally. Taken from the chosen variant of
+   docs/concepts/concept-c-app.html (Grafite faceplate, Essenziale icons, detail set A).
+   The marks (app icon, menu bar icons in each state, faceplate) are in design/mark/.
+
+   Theme: light by default, dark with prefers-color-scheme, or forced with
+   data-theme="light" / "dark" on <html>. The faceplate is dark in both themes. */
+
+/* Departure Mono (SIL OFL) is not on Google Fonts: ship the woff2 with each surface,
+   from https://departuremono.com, as @font-face { font-family: "Departure Mono"; } */
+
+:root {
+  color-scheme: light;
+  --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+  --f-ui: "Schibsted Grotesk", var(--sans);
+  --f-ro: "Departure Mono", ui-monospace, Menlo, monospace;
+
+  --page: #e6e3dc; --surface: #f4f2ed; --raised: #fbfaf7; --sunken: #ebe8e1; --line: #dcd8cf;
+  --ink: #1d1c1a; --ink-2: #625f58; --ink-3: #706c64;
+  --brand: #ff5b1f; --good: #2b9d4b; --bad: #e0402a; --track: #e2ded6; --idle: #c9c5bb;
+  --good-text: #1a6c31; --brand-text: #a3370a; --bad-text: #b3311e;
+
+  /* The faceplate and the slot */
+  --face-hi: #fdfcfa; --face-lo: #e9e6df; --face-edge: #d3cfc5; --slot: #2a2927; --slot-fill: #8e897f;
+  --plate-hi: #3a3835; --plate-lo: #1c1b19; --plate-edge: #0f0f0e; --plate-slot: #0b0b0a; --plate-fill: #d9d4c8;
+
+  /* LED colours: on the light UI, then the dark faceplate uses the --led-*-plate values */
+  --led-ok: #2fbf57; --led-dl: #ff5b1f; --led-err: #ff3b24; --led-idle: #cfcbc2;
+  --led-ok-plate: #3fdc6c; --led-dl-plate: #ff6a2e; --led-err-plate: #ff4b33; --led-off-plate: #3a3834;
+  --bezel: #dcd8ce; --bezel-lift: rgba(255, 255, 255, .55);
+
+  --pop-shadow: 0 0 0 0.5px rgba(40, 30, 20, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.7), 0 34px 70px -24px rgba(50, 35, 20, 0.5);
+  --win-shadow: 0 0 0 0.5px rgba(40, 30, 20, 0.22), 0 30px 70px -20px rgba(50, 35, 20, 0.45);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --page: #121211; --surface: #1d1c1a; --raised: #262522; --sunken: #161514; --line: #2f2d29;
+    --ink: #efece5; --ink-2: #a29e95; --ink-3: #8f8b83;
+    --brand: #ff6a2e; --good: #3cc864; --bad: #ff5a43; --track: #2a2926; --idle: #44423d;
+    --good-text: #4fd476; --brand-text: #ff7a42; --bad-text: #ff6e5a;
+    --face-hi: #2c2b28; --face-lo: #201f1d; --face-edge: #393733; --slot: #0b0b0a; --slot-fill: #6f6b63;
+    --led-ok: #3fdc6c; --led-dl: #ff6a2e; --led-err: #ff4b33; --led-idle: #3a3834;
+    --bezel: #0f0f0e; --bezel-lift: rgba(255, 255, 255, .06);
+    --pop-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.8), inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 34px 70px -24px rgba(0, 0, 0, 0.8);
+    --win-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.9), 0 30px 70px -20px rgba(0, 0, 0, 0.8);
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #121211; --surface: #1d1c1a; --raised: #262522; --sunken: #161514; --line: #2f2d29;
+  --ink: #efece5; --ink-2: #a29e95; --ink-3: #8f8b83;
+  --brand: #ff6a2e; --good: #3cc864; --bad: #ff5a43; --track: #2a2926; --idle: #44423d;
+  --good-text: #4fd476; --brand-text: #ff7a42; --bad-text: #ff6e5a;
+  --face-hi: #2c2b28; --face-lo: #201f1d; --face-edge: #393733; --slot: #0b0b0a; --slot-fill: #6f6b63;
+  --led-ok: #3fdc6c; --led-dl: #ff6a2e; --led-err: #ff4b33; --led-idle: #3a3834;
+  --bezel: #0f0f0e; --bezel-lift: rgba(255, 255, 255, .06);
+  --pop-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.8), inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 34px 70px -24px rgba(0, 0, 0, 0.8);
+  --win-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.9), 0 30px 70px -20px rgba(0, 0, 0, 0.8);
+}
+
+/* Detail set A. These replace generic UI-kit details: no pills or badges for state,
+   no glowing dots, no coloured side stripes, no coloured backgrounds on notices. */
+
+/* LED in its bezel: the state indicator. Colour lives only in the lens. */
+.led {
+  display: inline-grid; place-items: center; flex: none;
+  width: 14px; height: 14px; border-radius: 50%; background: var(--bezel);
+  box-shadow: inset 0 1px 1.5px rgba(0, 0, 0, .35), 0 1px 0 var(--bezel-lift);
+}
+.led::after {
+  content: ""; width: 7px; height: 7px; border-radius: 50%; background: rgba(138, 134, 125, .35);
+}
+.led[data-state="ok"]::after, .led[data-state="dl"]::after, .led[data-state="err"]::after {
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, .55), inset 0 -1px 1px rgba(0, 0, 0, .25);
+}
+.led[data-state="ok"]::after { background: var(--led-ok); }
+.led[data-state="dl"]::after { background: var(--led-dl); }
+.led[data-state="err"]::after { background: var(--led-err); }
+/* Blink only for real activity */
+.led[data-blink]::after { animation: led-blink 1.1s steps(2, jump-none) infinite; }
+@keyframes led-blink { 50% { opacity: .15; } }
+@media (prefers-reduced-motion: reduce) { .led[data-blink]::after { animation: none; } }
+
+/* Readout: state text. Never coloured: the LED carries the colour. */
+.readout {
+  font-family: var(--f-ro); font-size: 11.5px; text-transform: uppercase;
+  letter-spacing: .04em; color: var(--ink-2);
+}
+
+/* Slot: the mark before list items and notes, 10px from the text, centred on the first line. */
+.slot-mark {
+  display: inline-block; flex: none; width: 12px; height: 4px; border-radius: 2px;
+  background: var(--ink-3); box-shadow: inset 0 1px 1px rgba(0, 0, 0, .3); margin-right: 10px;
+}
+
+/* Notices: a sunken surface, never a coloured background; a state notice carries a LED. */
+.notice { background: var(--sunken); border-radius: 10px; }

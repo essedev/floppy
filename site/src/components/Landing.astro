@@ -1,8 +1,8 @@
 ---
 // The landing page in one language: a Starlight splash page whose hero is overridden
-// (components/Hero.astro), followed by the three properties, how it works, install and links.
+// (components/Hero.astro), then who it is for, how it works, the measured numbers, where the
+// project stands, costs, the category, licenses and hosting, install, and links on.
 import StarlightPage from '@astrojs/starlight/components/StarlightPage.astro';
-import { Code } from '@astrojs/starlight/components';
 import { brand, type Lang } from '@/brand';
 import { landing } from '@/i18n/landing';
 import { localePath } from '@/lib/locale';
@@ -15,31 +15,35 @@ interface Props {
 
 const { lang } = Astro.props;
 const t = landing[lang];
-const installLine = `brew install --cask ${brand.cask}`;
+const other: Lang = lang === 'en' ? 'it' : 'en';
+const docsFile = (file: string, anchor: string) => `${brand.repo}/blob/main/docs/${file}#${anchor}`;
 ---
 
 <StarlightPage
   frontmatter={{
     title: t.pageTitle,
-    description: brand.tagline[lang],
+    description: t.description,
     template: 'splash',
     hero: { title: brand.tagline[lang] },
     pagefind: false,
   }}
 >
   <div class="not-content fx-landing">
-    <section class="fx-section" aria-labelledby="fx-what">
-      <h2 id="fx-what">{t.propertiesTitle}</h2>
-      <ul class="fx-props">
+    <section class="fx-section" aria-labelledby="fx-who">
+      <div class="fx-intro">
+        <h2 id="fx-who">{t.whoTitle}</h2>
+        <p class="fx-section-lead">{t.whoLead}</p>
+      </div>
+      <ul class="fx-cols">
         {
           t.properties.map((p) => (
             <li>
               <h3>
-                <span class="fx-slot" aria-hidden="true" />
+                <span class="slot-mark" aria-hidden="true" />
                 {p.title}
               </h3>
               <p>{p.text}</p>
-              <p class="fx-readout">{p.readout}</p>
+              <p class="readout">{p.readout}</p>
             </li>
           ))
         }
@@ -65,20 +69,157 @@ const installLine = `brew install --cask ${brand.cask}`;
           ))
         }
       </ul>
+      <p class="notice fx-note">{t.howNote}</p>
+    </section>
+
+    <section class="fx-section" aria-labelledby="fx-measured">
+      <h2 id="fx-measured">{t.measuredTitle}</h2>
+      <p class="fx-section-lead">{t.measuredLead}</p>
+      <div class="fx-measures">
+        {
+          t.measures.map((g) => (
+            <section class="fx-measure">
+              <h3>{g.title}</h3>
+              <p class="readout">{g.source}</p>
+              <dl>
+                {g.rows.map((r) => (
+                  <div>
+                    <dt>
+                      {r.label}
+                      {r.note && <span class="fx-measure-note">{r.note}</span>}
+                    </dt>
+                    <dd>{r.value}</dd>
+                  </div>
+                ))}
+              </dl>
+            </section>
+          ))
+        }
+      </div>
+      <p class="fx-more-link">
+        <a href={docsFile('ARCHITECTURE.md', 'measured-performance')}>{t.measuredMore}</a>
+      </p>
+    </section>
+
+    <section class="fx-section fx-split" aria-labelledby="fx-status">
+      <h2 id="fx-status">{t.statusTitle}</h2>
+      <ol class="fx-status">
+        {
+          t.status.map((s) => (
+            <li>
+              <p class="fx-status-head">
+                <span class="led" data-state={s.led === 'off' ? undefined : s.led} aria-hidden="true" />
+                <span class="readout">{s.readout}</span>
+              </p>
+              <h3>{s.title}</h3>
+              <p>{s.text}</p>
+            </li>
+          ))
+        }
+      </ol>
+    </section>
+
+    <section class="fx-section" aria-labelledby="fx-cost">
+      <h2 id="fx-cost">{t.costTitle}</h2>
+      <p class="fx-section-lead">{t.costLead}</p>
+      <table class="fx-table">
+        <caption class="readout">{t.costCaption}</caption>
+        <thead>
+          <tr>{t.costHead.map((h) => <th scope="col">{h}</th>)}</tr>
+        </thead>
+        <tbody>
+          {
+            t.costRows.map((row) => (
+              <tr>
+                {row.map((cell, i) =>
+                  i === 0 ? (
+                    <th scope="row">{cell}</th>
+                  ) : (
+                    <td data-label={t.costHead[i]} class:list={{ 'is-ours': i === 3 }}>
+                      {cell}
+                    </td>
+                  ),
+                )}
+              </tr>
+            ))
+          }
+        </tbody>
+      </table>
+      <p class="fx-fine">{t.costNote}</p>
+      <div class="notice fx-note">
+        <h3>{t.costHiddenTitle}</h3>
+        <p>{t.costHidden}</p>
+      </div>
+    </section>
+
+    <section class="fx-section" aria-labelledby="fx-compare">
+      <h2 id="fx-compare">{t.compareTitle}</h2>
+      <p class="fx-section-lead">{t.compareLead}</p>
+      <div class="fx-cols fx-compare">
+        {
+          t.competitors.map((c) => (
+            <section>
+              <h3>{c.name}</h3>
+              <ul class="fx-slots">
+                {c.facts.map((f) => (
+                  <li>{f}</li>
+                ))}
+              </ul>
+            </section>
+          ))
+        }
+      </div>
+      <p class="fx-fine">
+        {t.compareNote}{' '}
+        <a href={docsFile('ARCHITECTURE.md', 'alternatives-considered')}>ARCHITECTURE.md</a>
+      </p>
+      <div class="fx-elsewhere">
+        <h3>{t.elsewhereTitle}</h3>
+        <ul class="fx-slots">
+          {t.elsewhere.map((e) => <li>{e}</li>)}
+        </ul>
+      </div>
+    </section>
+
+    <section class="fx-section" aria-labelledby="fx-open">
+      <h2 id="fx-open">{t.openTitle}</h2>
+      <div class="fx-pair">
+        {
+          [
+            { p: t.openSource, href: localePath(lang, '/licenses/') },
+            { p: t.hosting, href: localePath(lang, '/self-hosting/') },
+          ].map(({ p, href }) => (
+            <div>
+              <h3>{p.title}</h3>
+              <p>{p.text}</p>
+              <p class="readout">{p.readout}</p>
+              <a class="fx-inline" href={href}>
+                {p.more}
+              </a>
+            </div>
+          ))
+        }
+      </div>
     </section>
 
     <section class="fx-section fx-install" aria-labelledby="fx-install">
       <div>
         <h2 id="fx-install">{t.installTitle}</h2>
         <p>{t.installText}</p>
-        <p class="fx-status">
-          <span class="fx-led" aria-hidden="true" />
-          <span class="fx-readout">{t.installStatus}</span>
+        <p class="fx-status-head fx-install-status">
+          <span class="led" aria-hidden="true" />
+          <span class="readout">{t.installStatus}</span>
+        </p>
+        <p class="fx-testers">
+          {t.installTesters}{' '}
+          <a class="fx-inline" href={`${brand.repo}#install`}>{t.installTestersLink}</a>
         </p>
       </div>
-      <div class="fx-install-cmd">
-        <Code code={installLine} lang="sh" frame="none" />
-        <a href={localePath(lang, '/install/')}>{t.installMore}</a>
+      <div>
+        <ul class="fx-slots">
+          {t.installRequirements.map((r) => <li>{r}</li>)}
+        </ul>
+        <a class="fx-inline" href={localePath(lang, '/install/')}>{t.installMore}</a>
       </div>
     </section>
 
@@ -86,9 +227,11 @@ const installLine = `brew install --cask ${brand.cask}`;
       <h2 id="fx-more">{t.linksTitle}</h2>
       <ul>
         <li><a href={localePath(lang, '/introduction/')}>{t.links.docs}</a></li>
+        <li><a href={localePath(lang, '/how-it-works/')}>{t.links.how}</a></li>
         <li><a href={localePath(lang, '/self-hosting/')}>{t.links.selfHosting}</a></li>
         <li><a href={localePath(lang, '/licenses/')}>{t.links.licenses}</a></li>
         <li><a href={brand.repo}>{t.links.github}</a></li>
+        <li><a href={localePath(other, '/')} hreflang={other} lang={other}>{t.otherLanguage}</a></li>
       </ul>
     </nav>
   </div>
@@ -110,12 +253,13 @@ const installLine = `brew install --cask ${brand.cask}`;
     border-top: 1px solid var(--fx-line);
   }
   h2 {
-    margin: 0 0 1.75rem;
+    margin: 0 0 1.25rem;
     color: var(--sl-color-white);
     font-size: clamp(1.6rem, 1.3rem + 1.2vw, 2.1rem);
     font-weight: 700;
     line-height: 1.15;
     letter-spacing: -0.02em;
+    text-wrap: balance;
   }
   h3 {
     margin: 0;
@@ -131,11 +275,46 @@ const installLine = `brew install --cask ${brand.cask}`;
   }
   .fx-section-lead {
     max-width: 44rem;
-    margin-bottom: 2.25rem;
+    margin-bottom: 2.5rem;
     font-size: 1.0625rem;
   }
+  .fx-fine {
+    max-width: 44rem;
+    margin-top: 1.25rem;
+    color: var(--fx-ink-2);
+    font-size: 0.9375rem;
+  }
+  a:not(.fx-btn) {
+    color: var(--sl-color-white);
+    font-weight: 600;
+    text-decoration: underline;
+    text-decoration-color: var(--fx-ink-3);
+    text-underline-offset: 0.2em;
+  }
+  a:not(.fx-btn):hover {
+    text-decoration-color: currentColor;
+  }
+  .fx-inline {
+    display: inline-block;
+    margin-top: 1rem;
+  }
+  .fx-testers .fx-inline {
+    margin-top: 0;
+  }
 
-  .fx-props {
+  /* Notices: a sunken surface, no tint and no stripe (detail set A). */
+  .fx-note {
+    max-width: 44rem;
+    margin-top: 2.5rem;
+    padding: 1.1rem 1.25rem;
+  }
+  .fx-note h3 {
+    font-size: 1.0625rem;
+    margin-bottom: 0.4rem;
+  }
+
+  /* Three columns of titled text: properties, the category. */
+  .fx-cols {
     display: grid;
     gap: 2.25rem;
     margin: 0;
@@ -143,30 +322,49 @@ const installLine = `brew install --cask ${brand.cask}`;
     list-style: none;
   }
   @media (min-width: 50rem) {
-    .fx-props {
+    .fx-cols {
       grid-template-columns: repeat(3, minmax(0, 1fr));
       gap: 2.5rem;
     }
   }
-  .fx-props h3 {
+  .fx-cols > li > h3 {
     display: flex;
     align-items: baseline;
-    gap: 10px;
   }
-  .fx-props p {
+  .fx-cols > li > h3 .slot-mark {
+    transform: translateY(-0.2em);
+  }
+  .fx-cols > li > p {
     margin-top: 0.75rem;
   }
-  .fx-props .fx-readout {
+  .fx-cols > li > .readout {
     margin-top: 1rem;
   }
-  .fx-slot {
-    flex: none;
+
+  /* A list with the slot as marker, 10px from the text, centred on the first line. */
+  .fx-slots {
+    margin: 0.9rem 0 0;
+    padding: 0;
+    list-style: none;
+  }
+  .fx-slots li {
+    position: relative;
+    padding-inline-start: 22px;
+    line-height: 1.6;
+  }
+  .fx-slots li + li {
+    margin-top: 0.55rem;
+  }
+  .fx-slots li::before {
+    content: '';
+    position: absolute;
+    inset-inline-start: 0;
+    top: calc(0.8em - 2px);
     width: 12px;
     height: 4px;
     border-radius: 2px;
     background: var(--fx-ink-3);
     box-shadow: inset 0 1px 1px rgba(0, 0, 0, 0.3);
-    transform: translateY(-0.2em);
   }
 
   .fx-traffic {
@@ -216,15 +414,192 @@ const installLine = `brew install --cask ${brand.cask}`;
     stroke-dasharray: 2 5;
   }
 
+  /* Measures: readout panels, label on the left, the number in Departure Mono. */
+  .fx-measures {
+    display: grid;
+    gap: 1rem;
+  }
+  @media (min-width: 62rem) {
+    .fx-measures {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+  }
+  .fx-measure {
+    padding: 1.4rem 1.4rem 1.1rem;
+    border: 1px solid var(--fx-line);
+    border-radius: 12px;
+    background: var(--fx-surface);
+  }
+  .fx-measure h3 {
+    font-size: 1.0625rem;
+  }
+  .fx-measure .readout {
+    margin-top: 0.5rem;
+    line-height: 1.5;
+  }
+  .fx-measure dl {
+    margin: 1rem 0 0;
+  }
+  .fx-measure dl > div {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: baseline;
+    gap: 1rem;
+    padding-block: 0.6rem;
+    border-top: 1px solid var(--fx-line);
+  }
+  .fx-measure dt {
+    font-size: 0.9375rem;
+    line-height: 1.45;
+  }
+  .fx-measure-note {
+    display: block;
+    color: var(--fx-ink-2);
+    font-size: 0.875rem;
+  }
+  .fx-measure dd {
+    margin: 0;
+    color: var(--sl-color-white);
+    font-family: var(--f-ro);
+    font-size: 0.875rem;
+    line-height: 1.45;
+    white-space: nowrap;
+  }
+  .fx-more-link {
+    margin-top: 1.5rem;
+  }
+
+  /* Status: heading on the left, LED steps on the right. */
+  @media (min-width: 56rem) {
+    .fx-split {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+      gap: 4rem;
+    }
+  }
+  .fx-status {
+    display: grid;
+    gap: 2rem;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .fx-status-head {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    margin-bottom: 0.5rem;
+  }
+  .fx-status h3 + p {
+    margin-top: 0.4rem;
+    max-width: 40rem;
+  }
+
+  /* Costs: a real table on wide screens, one block per row on a phone. */
+  .fx-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9375rem;
+  }
+  .fx-table caption {
+    margin-bottom: 0.75rem;
+    text-align: start;
+  }
+  .fx-table th,
+  .fx-table td {
+    padding: 0.75rem 1rem 0.75rem 0;
+    border-top: 1px solid var(--fx-line);
+    text-align: start;
+    vertical-align: baseline;
+  }
+  .fx-table thead th {
+    color: var(--fx-ink-2);
+    font-weight: 600;
+    line-height: 1.35;
+  }
+  .fx-table tbody th {
+    color: var(--sl-color-white);
+    font-weight: 700;
+  }
+  .fx-table td {
+    font-family: var(--f-ro);
+    font-size: 0.875rem;
+  }
+  .fx-table td.is-ours {
+    color: var(--sl-color-white);
+  }
+  @media (max-width: 40rem) {
+    .fx-table thead {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip-path: inset(50%);
+    }
+    .fx-table,
+    .fx-table tbody,
+    .fx-table tr,
+    .fx-table th,
+    .fx-table td {
+      display: block;
+    }
+    .fx-table tr {
+      padding-block: 0.4rem 0.8rem;
+      border-top: 1px solid var(--fx-line);
+    }
+    .fx-table th,
+    .fx-table td {
+      border: 0;
+      padding: 0.3rem 0;
+    }
+    .fx-table td {
+      display: flex;
+      justify-content: space-between;
+      gap: 1rem;
+    }
+    .fx-table td::before {
+      content: attr(data-label);
+      color: var(--fx-ink-2);
+      font-family: var(--__sl-font);
+      font-size: 0.875rem;
+    }
+  }
+
+  .fx-compare h3 {
+    font-size: 1.125rem;
+  }
+  .fx-elsewhere {
+    max-width: 44rem;
+    margin-top: 2.75rem;
+  }
+
+  .fx-pair {
+    display: grid;
+    gap: 2.5rem;
+    margin-top: 2rem;
+  }
+  @media (min-width: 50rem) {
+    .fx-pair {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 4rem;
+    }
+  }
+  .fx-pair p {
+    margin-top: 0.75rem;
+  }
+  .fx-pair .readout {
+    margin-top: 1rem;
+  }
+
   .fx-install {
     display: grid;
-    gap: 1.75rem;
-    align-items: center;
+    gap: 2rem;
   }
   @media (min-width: 56rem) {
     .fx-install {
       grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
       gap: 4rem;
+      align-items: end;
     }
   }
   .fx-install h2 {
@@ -233,28 +608,13 @@ const installLine = `brew install --cask ${brand.cask}`;
   .fx-install p {
     max-width: 32rem;
   }
-  .fx-status {
-    display: flex;
-    align-items: center;
-    gap: 0.6rem;
+  .fx-install-status {
     margin-top: 1.25rem;
   }
-  .fx-install-cmd {
-    display: grid;
-    gap: 1rem;
-    min-width: 0;
-  }
-  .fx-install-cmd a,
-  .fx-more a {
-    color: var(--sl-color-white);
-    font-weight: 600;
-    text-decoration: underline;
-    text-decoration-color: var(--fx-ink-3);
-    text-underline-offset: 0.2em;
-  }
-  .fx-install-cmd a:hover,
-  .fx-more a:hover {
-    text-decoration-color: currentColor;
+  .fx-testers {
+    margin-top: 1rem;
+    color: var(--fx-ink-2);
+    font-size: 0.9375rem;
   }
 
   .fx-more ul {
