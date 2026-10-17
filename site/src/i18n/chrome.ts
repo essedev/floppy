@@ -5,12 +5,10 @@ import type { Lang } from '@/brand';
 
 /** Every string the header controls show, for one language. */
 export interface ChromeStrings {
-  /** Accessible name of the theme switch. */
+  /** Accessible name of the theme switch, which is on when the theme is dark. */
   themeLabel: string;
   /** Readouts under the theme switch, one per position. */
-  theme: { light: string; auto: string; dark: string };
-  /** Accessible names of the positions, spelled out. */
-  themeNames: { light: string; auto: string; dark: string };
+  theme: { light: string; dark: string };
   /** Accessible name of the language selector. */
   languageLabel: string;
   /** Name of the language, in that language, for screen readers. */
@@ -28,9 +26,8 @@ export interface ChromeStrings {
 /** Header strings by language. */
 export const chrome: Record<Lang, ChromeStrings> = {
   en: {
-    themeLabel: 'Theme',
-    theme: { light: 'Light', auto: 'Auto', dark: 'Dark' },
-    themeNames: { light: 'Light', auto: 'Same as the system', dark: 'Dark' },
+    themeLabel: 'Dark theme',
+    theme: { light: 'Light', dark: 'Dark' },
     languageLabel: 'Language',
     languageName: 'English',
     docs: 'Docs',
@@ -39,9 +36,8 @@ export const chrome: Record<Lang, ChromeStrings> = {
     skip: 'Skip to content',
   },
   it: {
-    themeLabel: 'Tema',
-    theme: { light: 'Chiaro', auto: 'Auto', dark: 'Scuro' },
-    themeNames: { light: 'Chiaro', auto: 'Come il sistema', dark: 'Scuro' },
+    themeLabel: 'Tema scuro',
+    theme: { light: 'Chiaro', dark: 'Scuro' },
     languageLabel: 'Lingua',
     languageName: 'Italiano',
     docs: 'Documentazione',
