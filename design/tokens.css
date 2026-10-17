@@ -63,7 +63,9 @@
 }
 
 /* Detail set A. These replace generic UI-kit details: no pills or badges for state,
-   no glowing dots, no coloured side stripes, no coloured backgrounds on notices. */
+   no glowing dots, no coloured side stripes, no coloured backgrounds on notices.
+   Colour lives only in the LED: text, the slot and its fill (activity included: the
+   fill's leading block blinks in its own colour) and surfaces stay neutral. */
 
 /* LED in its bezel: the state indicator. Colour lives only in the lens. */
 .led {
