@@ -126,10 +126,15 @@ class Settings(BaseSettings):
     juicefs_timeout_seconds: float = 120.0
     storage_timeout_seconds: float = 15.0
 
-    # The meta service that gives each disk its own Valkey instance (DECISIONS #25): `pool`
-    # hands out a fixed list of instances (`meta_pool`, comma-separated `url` or
+    # The meta service that gives each disk its own Valkey instance (DECISIONS #25):
+    # `service` is the meta service at `meta_url` with its bearer token (`meta_admin_host`
+    # when the control plane reaches the instances by another name than the API's host);
+    # `pool` hands out a fixed list of instances (`meta_pool`, comma-separated `url` or
     # `url|admin_url`), all with the admin credentials below; `fake` invents them.
-    meta_backend: Literal["pool", "fake"] = "pool"
+    meta_backend: Literal["service", "pool", "fake"] = "pool"
+    meta_url: str = ""
+    meta_token: SecretStr | None = None
+    meta_admin_host: str | None = None
     meta_pool: str = ""
     # The private CA the disks' metadata TLS is signed by, for devices to trust (a PEM, or a
     # path to one); unset when the certificate is public (Let's Encrypt). Not a secret.
@@ -194,6 +199,8 @@ class Settings(BaseSettings):
         if self.meta_ca_pem and self.meta_ca_file:
             raise ValueError("set FLOPPY_META_CA_PEM or FLOPPY_META_CA_FILE, not both")
         _ = self.meta_ca
+        if self.meta_backend == "service" and (not self.meta_url or self.meta_token is None):
+            raise ValueError("the meta service needs FLOPPY_META_URL and FLOPPY_META_TOKEN")
         if not self.public_url.startswith(("http://", "https://")):
             raise ValueError("FLOPPY_PUBLIC_URL must be an http(s) address")
         return self

@@ -1,16 +1,18 @@
-# The control plane for self-hosting and local development: PostgreSQL 18, a pool of Valkey
+# The control plane for local development and the tests (production: deploy/): PostgreSQL 18, a pool of Valkey
 # instances (one per disk, DECISIONS #23) and the server. Secrets come from server/.env
 # (outside git); see .env.example.
 #
 #   docker compose up -d --build                        # migrations and bootstrap, then serve
 #   docker compose up -d db meta-1 meta-2 meta-3        # only the stores, for `uv run`
-#   docker compose --profile test up -d db meta-test-1 meta-test-2 meta-test-3   # for the tests
+#   docker compose --profile test up -d --build db meta-test-1 meta-test-2 meta-test-3 meta-test   # for the tests
+#   docker compose --profile meta up -d --build meta    # the meta service, to try it
 #   docker compose --profile s3 up -d garage && docker/garage-setup.sh   # a local S3 for tests
 #
 # The image carries the patched JuiceFS built by spike/juicefs-replica/build.sh; JUICEFS_DIST
 # points at its output when it is not in the default place.
 #
-# Ports from the project's Portsage range (4500-4509), on localhost only.
+# Ports from the project's Portsage ranges (fluix 4500-4509, fluix-server 4540-4549,
+# fluix-meta 4560-4569), on localhost only.
 name: floppy-server
 
 services:
@@ -89,6 +91,43 @@ services:
     ports:
       - "127.0.0.1:4548:6379"
 
+  # The meta service itself (meta/, DECISIONS #25): one valkey-server per disk inside the
+  # container, created on the control plane's request. `meta` is for trying it in development
+  # (profile meta; the server above still uses the pool), `meta-test` for the tests, with a
+  # fixed token and no volume. Instance ports equal the host ports, so the control plane on
+  # the host reaches an instance at the port the service reports.
+  meta: &meta-service
+    build: ../meta
+    profiles: [meta]
+    init: true
+    stop_grace_period: 60s
+    environment:
+      FLOPPY_META_TOKEN: ${FLOPPY_META_TOKEN:-}
+      FLOPPY_META_ROUTES_TOKEN: ${FLOPPY_META_ROUTES_TOKEN:-}
+      FLOPPY_META_DOMAIN: meta.floppy.test
+      FLOPPY_META_PORT_MIN: "4561"
+      FLOPPY_META_PORT_MAX: "4564"
+    volumes:
+      - meta-data:/data
+    ports:
+      - "127.0.0.1:4560:8080"
+      - "127.0.0.1:4561-4564:4561-4564"
+
+  meta-test:
+    <<: *meta-service
+    profiles: [test]
+    environment:
+      FLOPPY_META_TOKEN: floppy-meta-test-token-not-a-secret-0001
+      FLOPPY_META_ROUTES_TOKEN: floppy-meta-test-routes-not-a-secret-01
+      FLOPPY_META_DOMAIN: meta.floppy.test
+      FLOPPY_META_PORT_MIN: "4566"
+      FLOPPY_META_PORT_MAX: "4569"
+      FLOPPY_META_ACL_SAVE_SECONDS: "1"
+    volumes: []
+    ports:
+      - "127.0.0.1:4565:8080"
+      - "127.0.0.1:4566-4569:4566-4569"
+
   server:
     build:
       context: .
@@ -137,6 +176,7 @@ volumes:
   meta-1-data:
   meta-2-data:
   meta-3-data:
+  meta-data:
   garage-meta:
   garage-data:
 

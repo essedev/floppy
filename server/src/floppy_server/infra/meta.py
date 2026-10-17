@@ -5,16 +5,20 @@ The control plane never starts containers; it asks a `MetaService` for an instan
 (the volume's id) and gets its address and admin credentials back. Creating is idempotent by
 name, so a job interrupted between the call and its commit finds the same instance again.
 
-`PoolMetaService` hands out instances from a fixed list, the Compose file's `meta-*` services
-in development and the tests: an instance is taken by writing the disk's name into a key of
-its database 0, and one that is taken or holds any data is never handed out. The real meta
-service of DECISIONS #25 (one Valkey per disk behind the TLS proxy) implements the same
-interface and is not built. `FakeMetaService` invents addresses for tests with a fake Valkey.
+`HttpMetaService` is the real one: the `meta` service of DECISIONS #25 (meta/), which runs
+one Valkey per disk in its container and answers on the private network with a bearer token.
+Devices reach an instance through Traefik by its opaque label, the control plane straight on
+the private network. `PoolMetaService` hands out instances from a fixed list, the Compose
+file's `meta-*` services in development and some tests: an instance is taken by writing the
+disk's name into a key of its database 0, and one that is taken or holds any data is never
+handed out. `FakeMetaService` invents addresses for tests with a fake Valkey.
 """
 
 from dataclasses import dataclass, field
-from typing import Protocol
+from typing import Any, Protocol
+from urllib.parse import urlsplit
 
+import httpx
 import redis.asyncio as aioredis
 from redis.exceptions import RedisError
 
@@ -54,6 +58,83 @@ class MetaService(Protocol):
         a creation that failed, whose format never reached a device).
         """
         ...
+
+
+class HttpMetaService:
+    """
+    `MetaService` over the meta service's API (meta/src/floppy_meta/api.py). The instance's
+    `url` is the devices' (`rediss://<label>.meta.<domain>:443`, through Traefik); its
+    `admin_url` is `redis://<admin_host>:<port>`, the same container on the private network,
+    where `admin_host` defaults to the API's own host name.
+    """
+
+    def __init__(
+        self,
+        base_url: str,
+        token: str,
+        admin_host: str | None = None,
+        timeout_seconds: float = 60.0,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ) -> None:
+        parts = urlsplit(base_url)
+        if parts.scheme not in ("http", "https") or not parts.hostname:
+            raise ValueError("FLOPPY_META_URL must be an http(s) address")
+        if parts.username or parts.password:
+            raise ValueError("FLOPPY_META_URL carries no credentials")
+        self._base = base_url.rstrip("/")
+        self._token = token
+        self._admin_host = admin_host or parts.hostname
+        # Creating waits for the new valkey-server to answer, a few seconds at most.
+        self._timeout = timeout_seconds
+        self._transport = transport
+
+    def __repr__(self) -> str:
+        return f"HttpMetaService(base_url={self._base!r})"
+
+    async def _call(self, method: str, path: str, body: dict[str, Any] | None = None) -> Any:
+        async with httpx.AsyncClient(
+            base_url=self._base,
+            headers={"authorization": f"Bearer {self._token}"},
+            timeout=self._timeout,
+            transport=self._transport,
+        ) as client:
+            try:
+                response = await client.request(method, path, json=body)
+            except httpx.HTTPError as error:
+                raise MetaServiceError(
+                    f"meta service unreachable: {type(error).__name__}"
+                ) from error
+        if response.status_code >= 400:
+            raise MetaServiceError(
+                f"meta service answered {response.status_code}: {_detail(response)}"
+            )
+        return response.json()
+
+    async def create_instance(self, name: str) -> InstanceSpec:
+        data = await self._call("PUT", f"/v1/instances/{name}", {})
+        try:
+            return InstanceSpec(
+                service_ref=str(data["name"]),
+                url=str(data["url"]),
+                admin_url=f"redis://{self._admin_host}:{int(data['port'])}",
+                admin_username=data.get("admin_username"),
+                admin_password=str(data["admin_password"]),
+            )
+        except (KeyError, TypeError, ValueError) as error:
+            raise MetaServiceError("meta service answered without an instance") from error
+
+    async def release_instance(self, service_ref: str, *, discard: bool) -> None:
+        await self._call("POST", f"/v1/instances/{service_ref}/stop", {"discard": discard})
+
+
+def _detail(response: httpx.Response) -> str:
+    """The meta service's error message, which never holds a secret, cut short."""
+    try:
+        body = response.json()
+    except ValueError:
+        body = None
+    detail = body.get("detail", "") if isinstance(body, dict) else ""
+    return str(detail)[:200] or response.reason_phrase
 
 
 @dataclass(frozen=True)

@@ -32,7 +32,13 @@ from floppy_server.errors import install_error_handlers
 from floppy_server.health.router import router as health_router
 from floppy_server.infra.juicefs import FakeVolumeFormatter, JuiceFSFormatter
 from floppy_server.infra.mail import ConsoleMailer, SmtpMailer
-from floppy_server.infra.meta import FakeMetaService, MetaService, PoolMetaService, parse_pool
+from floppy_server.infra.meta import (
+    FakeMetaService,
+    HttpMetaService,
+    MetaService,
+    PoolMetaService,
+    parse_pool,
+)
 from floppy_server.infra.metadata import FakeMetadataAdmin, ValkeyMetadataAdmin
 from floppy_server.infra.storage import FakeStorageProber, S3StorageProber
 from floppy_server.keys.router import router as keys_router
@@ -46,9 +52,13 @@ UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 
 
 def build_meta(settings: Settings) -> MetaService:
-    """The meta service the settings name: the pool of `FLOPPY_META_POOL`, or the fake."""
+    """The meta service the settings name: the service, the pool of `FLOPPY_META_POOL`, or the fake."""
     if settings.meta_backend == "fake":
         return FakeMetaService()
+    if settings.meta_backend == "service" and settings.meta_token is not None:
+        return HttpMetaService(
+            settings.meta_url, settings.meta_token.get_secret_value(), settings.meta_admin_host
+        )
     password = settings.valkey_admin_password
     return PoolMetaService(
         parse_pool(settings.meta_pool),
