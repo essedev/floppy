@@ -2,10 +2,9 @@
 
 The principle is the one in [ARCHITECTURE.md](ARCHITECTURE.md#guiding-principle): build only what the previous step proved necessary. Work already done is in [CYCLES.md](CYCLES.md), the decisions in [DECISIONS.md](DECISIONS.md).
 
-## 1. Close the spikes (in progress)
+## 1. Data-path spike (next)
 
-- **Metadata** (DECISIONS #5, #6): a slow but alive master must never turn the disk read-only; only unambiguous unreachability, or several failed checks in a row, means offline. Then the acceptance suite (`spike/acceptance.py`) all green.
-- **Data path**: over SMB the Mac reads a never-opened clip at about half the line (5.7 MB/s on a simulated 100 Mbps), and one read took 15 s. To try, one at a time, against targets set before measuring (cold read at least 80% of the line, cold seek under 0.4 s at 100 Mbps, no single read over 3 s): SMB multichannel (Samba advertising the VM's interface as RSS-capable so the Mac opens several connections), 1 MB blocks, more JuiceFS readahead. The I/O error seen in some cold reads (`t03`) belongs here.
+The metadata spike is closed (16 of 17 checks, CYCLES 6). What is left is the data path: over SMB the Mac reads a never-opened clip at about half the line (5.7 MB/s on a simulated 100 Mbps), and one read took 15 s. To try, one at a time, against targets set before measuring (cold read at least 80% of the line, cold seek under 0.4 s at 100 Mbps, no single read over 3 s): SMB multichannel (Samba advertising the VM's interface as RSS-capable so the Mac opens several connections), 1 MB blocks, more JuiceFS readahead. The I/O error seen in some cold reads (`t03`) belongs here.
 
 ## 2. Name
 
