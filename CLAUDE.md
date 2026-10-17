@@ -78,6 +78,8 @@ cd site && pnpm dev            # pnpm build, pnpm check
 
 **Measure reads from the Mac through its cache too.** With `F_NOCACHE` the macOS SMB client sends one read at a time; through its cache it sends 128 KB pieces out of order, up to 40 MB ahead, and a test that stops reading halfway counts those as waste. Compare whole-file reads, and count GETs in Garage's log, not only JuiceFS's metrics: cancelled downloads are missing there.
 
+**The site describes the finished product.** It goes online when the product is complete: no "early", "being built" or "not published yet" on its pages, no dates on measures (they will be tied to a release). The current state lives in README and ROADMAP. Competitors: facts that can be linked, no judgements.
+
 **Docker ran out of default subnets** on the development Mac (many compose projects): the spike pins an explicit subnet in `spike/docker-compose.yml`. Never `docker network prune`, the networks belong to other projects.
 
 **A UI is verified in a real browser.** The mockup passed checks in node and in the browser drew one variant out of three because of a JavaScript error. Load it in headless Chrome (Playwright with Chrome's `executablePath`) and look at the screenshot.
