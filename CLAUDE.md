@@ -135,6 +135,7 @@ These are default rules for this repo: the global instructions sit below, and wh
 - [README.md](README.md): what it is, how to build and hand out the zip.
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): why JuiceFS, VM and SMB, configuration, measured performance, alternatives, costs.
 - [docs/CONVENTIONS.md](docs/CONVENTIONS.md): language, glossary, code conventions.
+- [docs/DATABASE_SCHEMA.md](docs/DATABASE_SCHEMA.md): the control plane's tables, secrets at rest, state machines.
 - [docs/DECISIONS.md](docs/DECISIONS.md): what was decided and what it ruled out, cited as `DECISIONS #N`.
 - [docs/ROADMAP.md](docs/ROADMAP.md): next steps.
 - [docs/CYCLES.md](docs/CYCLES.md): what was done and when.

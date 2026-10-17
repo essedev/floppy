@@ -12,7 +12,7 @@ Floppy is chosen and the repository is renamed (DECISIONS #14). Left: check it d
 
 ## 3. Build
 
-- **Design on paper**: the team architecture from [architecture.html](architecture.html) into ARCHITECTURE.md, and `docs/DATABASE_SCHEMA.md` for the control plane.
+- **Design on paper**: [DATABASE_SCHEMA.md](DATABASE_SCHEMA.md) for the control plane is done and reviewed (DECISIONS #16-#21), and ARCHITECTURE.md has the control plane, access and resilience parts. Left: the rest of the team architecture from [architecture.html](architecture.html) into ARCHITECTURE.md (components, flows, app states, failure modes, the three ways to run it), and the app's device API, which the admin web's contract does not cover yet.
 - **Engine**: the patched JuiceFS (both patches: metadata replica, whole-block reads) and a Valkey replica in the VM's offline package set, `floppy status --json`, the metadata URL from the app instead of a config file, the SMB password in the Keychain.
 - **Fast failure when a file cannot be read**: with the network down, a read of blocks not in cache waits for JuiceFS's retries and for the Mac's SMB timeout, which Floppy raised to 600 s. It should fail at once, the way JuiceMount refuses reads of files not kept offline in 4-67 ms from a local index. It needs to know, per path, what is in the cache; `floppy warmup` loads it but does not record it.
 - **The Mac stays awake while data moves**: `caffeinate -i` during a copy, an upload or a warmup, released a couple of minutes after the traffic stops (as JuiceMount does), so sleep does not cut a transfer halfway. No administrator rights needed.
