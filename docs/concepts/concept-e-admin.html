@@ -49,11 +49,24 @@
   sono la configurazione vera (docs/ARCHITECTURE.md).
 
   Decisioni aperte, con raccomandazione:
-  D1 navigazione: barra laterale (consigliata) o schede in alto.
   D2 dopo la rimozione di una persona: rotazione che parte da sola, o promemoria fisso con il bottone
      "Cambia chiave adesso" nella conferma (consigliato).
   D3 cosa vede un membro: Persone e Mac in sola lettura, o solo "I miei Mac" con la revoca del proprio
      Mac perso (consigliato).
+
+  Giro 2: "troppi badge, sono AI slop", "le card di altezze diverse in colonna non vanno", "solo barra
+  laterale". Tolte tutte le pill: uno stato si dice con il LED e testo semplice nel colore del testo,
+  mai con un'etichetta tinta, e niente che ripeta il titolo o il LED. Panoramica riorganizzata a righe:
+  dischi, servizi su una riga intera, poi Mac collegati e attività con la stessa altezza e contenuto
+  pari. Tolto il pallino sulla voce "Chiave dell'archivio": il promemoria vive in Panoramica.
+  D1 chiusa: barra laterale. Tolti l'alternativa con le schede in alto e il suo selettore.
+  Giro 3: "i pallini colorati che brillano sono slop come le pill, ma i dettagli mi piacciono".
+  Ogni dettaglio generico passa al vocabolario di concept-c-app, CSS copiato così com'è: LED in
+  ghiera per ogni stato (anche nei frontali SVG, senza alone), lettura in Departure Mono per il
+  testo di stato, mai testo colorato, fessura davanti a elenchi e note, avvisi ed errori su fondo
+  incassato neutro, "Consigliata" come LED verde più lettura. Il segno sulla voce "Chiave
+  dell'archivio" torna come LED in ghiera acceso arancione finché la finestra è aperta. Tolto
+  l'alone dal puntino della i nel logo.
 -->
 <style>
 @font-face { font-family: "Departure Mono"; src: url("https://cdn.jsdelivr.net/gh/rektdeckard/departure-mono@v1.500/public/assets/DepartureMono-Regular.woff2") format("woff2"); font-display: swap; }
@@ -66,8 +79,6 @@
   --brand: #ff5b1f; --on-brand: #1d1c1a; --good: #2b9d4b; --bad: #e0402a; --track: #e2ded6; --idle: #c9c5bb;
   --face-hi: #fdfcfa; --face-lo: #e9e6df; --face-edge: #d3cfc5; --slot: #2a2927; --slot-fill: #8e897f;
   --led-ok: #2fbf57; --led-dl: #ff5b1f; --led-err: #ff3b24; --led-idle: #cfcbc2;
-  /* Text on tinted pills: darker steps of the LED hues, AA on their tint */
-  --t-ok: #1c6e36; --t-act: #a8380b; --t-err: #ad2a17; --t-idle: #5a5750;
   --danger: #b8301f; --on-danger: #ffffff;
   --scrim: rgba(29, 28, 26, 0.36);
   --pop: 0 0 0 0.5px rgba(40, 30, 20, 0.16), 0 30px 70px -26px rgba(50, 35, 20, 0.5);
@@ -78,7 +89,6 @@
   --brand: #ff6a2e; --good: #3cc864; --bad: #ff5a43; --track: #2a2926; --idle: #44423d;
   --face-hi: #2c2b28; --face-lo: #201f1d; --face-edge: #393733; --slot: #0b0b0a; --slot-fill: #6f6b63;
   --led-ok: #3fdc6c; --led-dl: #ff6a2e; --led-err: #ff4b33; --led-idle: #3a3834;
-  --t-ok: #5fe08a; --t-act: #ff9a70; --t-err: #ff8a78; --t-idle: #b5b1a8;
   --danger: #ff5a43; --on-danger: #1d1c1a;
   --scrim: rgba(0, 0, 0, 0.55);
   --pop: 0 0 0 0.5px rgba(0, 0, 0, 0.8), 0 30px 70px -26px rgba(0, 0, 0, 0.85);
@@ -124,7 +134,6 @@ body[data-chrome="off"] .board { grid-template-columns: minmax(0, 1fr); }
 
 /* App shell */
 .app { display: grid; grid-template-columns: 232px minmax(0, 1fr); min-height: 640px; }
-.app.tabs { grid-template-columns: minmax(0, 1fr); }
 .side { background: var(--sunken); padding: 18px 12px; display: flex; flex-direction: column; gap: 2px; }
 .side .wm { margin: 2px 8px 18px; }
 .org { margin: 0 8px 14px; padding: 10px 12px; border-radius: 12px; background: var(--raised); display: flex; justify-content: space-between; align-items: center; font-size: 14px; font-weight: 600; }
@@ -133,7 +142,7 @@ body[data-chrome="off"] .board { grid-template-columns: minmax(0, 1fr); }
 .nav:hover { color: var(--ink); background: color-mix(in srgb, var(--raised) 60%, transparent); }
 .nav.on { background: var(--raised); color: var(--ink); font-weight: 600; }
 .nav .cnt { margin-left: auto; font: 12px var(--f-ro); color: var(--ink-3); }
-.nav .dotn { margin-left: auto; width: 8px; height: 8px; border-radius: 50%; background: var(--led-dl); }
+.nav .led { margin-left: auto; }
 .me { margin-top: auto; padding: 12px 10px 0; display: flex; align-items: center; gap: 10px; font-size: 13px; }
 .me .av { width: 30px; height: 30px; background: var(--raised); color: var(--ink-2); }
 .me span { color: var(--ink-3); display: block; font-size: 12px; }
@@ -142,9 +151,6 @@ body[data-chrome="off"] .board { grid-template-columns: minmax(0, 1fr); }
 .ph h1 { margin: 0; font: 700 28px/1.15 var(--f-head); letter-spacing: -0.025em; }
 .ph p { margin: 6px 0 0; color: var(--ink-2); font-size: 14px; }
 .ph .acts { display: flex; gap: 8px; }
-.topnav { display: flex; align-items: center; gap: 6px; padding: 12px 24px; background: var(--sunken); }
-.topnav .wm { margin-right: 18px; }
-.topnav .nav { width: auto; }
 
 /* Controls */
 .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 40px; padding: 0 16px; border-radius: 11px; border: 0; cursor: pointer; font: 600 14px var(--f-ui); white-space: nowrap; }
@@ -167,15 +173,25 @@ body[data-chrome="off"] .board { grid-template-columns: minmax(0, 1fr); }
 .opt span { font-size: 13px; color: var(--ink-2); }
 .opt[aria-pressed="true"] { box-shadow: inset 0 0 0 2px var(--ink); }
 
-/* Pills with a LED */
-.pill { display: inline-flex; align-items: center; gap: 7px; height: 26px; padding: 0 10px 0 8px; border-radius: 99px; font-size: 13px; font-weight: 600; white-space: nowrap; }
-.pill::before { content: ""; width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-.pill.ok { background: color-mix(in srgb, var(--led-ok) 14%, transparent); color: var(--t-ok); } .pill.ok::before { background: var(--led-ok); box-shadow: 0 0 6px var(--led-ok); }
-.pill.act { background: color-mix(in srgb, var(--led-dl) 14%, transparent); color: var(--t-act); } .pill.act::before { background: var(--led-dl); box-shadow: 0 0 6px var(--led-dl); }
-.pill.err { background: color-mix(in srgb, var(--led-err) 13%, transparent); color: var(--t-err); } .pill.err::before { background: var(--led-err); box-shadow: 0 0 6px var(--led-err); }
-.pill.idle { background: var(--sunken); color: var(--t-idle); } .pill.idle::before { box-shadow: inset 0 0 0 1.5px var(--t-idle); }
-.led { display: inline-block; width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-.led.ok { background: var(--led-ok); box-shadow: 0 0 6px var(--led-ok); } .led.idle { box-shadow: inset 0 0 0 1.5px var(--ink-3); } .led.act { background: var(--led-dl); box-shadow: 0 0 6px var(--led-dl); }
+/* Details vocabulary, set A (copied verbatim from concept-c-app.html) */
+:root { --bezel: #dcd8ce; --bezel-hl: rgba(255, 255, 255, 0.55); --lens-off: rgba(138, 134, 125, 0.35); }
+:root[data-theme="dark"] { --bezel: #0f0f0e; --bezel-hl: rgba(255, 255, 255, 0.06); }
+@keyframes blink { 50% { opacity: 0.15; } }
+.led { width: 14px; height: 14px; border-radius: 50%; flex-shrink: 0; display: inline-grid; place-items: center; vertical-align: middle; background: var(--bezel); box-shadow: inset 0 1px 1.5px rgba(0, 0, 0, 0.35), 0 1px 0 var(--bezel-hl); }
+.led::after { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--lens-off); }
+.led.ok::after, .led.dl::after, .led.err::after { box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.55), inset 0 -1px 1px rgba(0, 0, 0, 0.25); }
+.led.ok::after { background: var(--led-ok); } .led.dl::after { background: var(--led-dl); } .led.err::after { background: var(--led-err); }
+.led.blinking::after { animation: blink 1.1s steps(2, jump-none) infinite; }
+@media (prefers-reduced-motion: reduce) { .led.blinking::after { animation: none; } }
+.lettura { font: 11.5px var(--f-ro); text-transform: uppercase; letter-spacing: 0.04em; color: var(--ink-2); }
+.fessura { display: inline-block; width: 12px; height: 4px; border-radius: 2px; flex-shrink: 0; background: var(--ink-3); box-shadow: inset 0 1px 1px rgba(0, 0, 0, 0.3); }
+.mk { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 4px; color: var(--ink-2); font-size: 13.5px; }
+.mk li { display: flex; gap: 10px; align-items: baseline; }
+.mk li .fessura { transform: translateY(-2px); }
+/* A state: LED in ghiera followed by its lettura */
+.st { display: inline-flex; align-items: center; gap: 9px; white-space: nowrap; }
+.note { display: flex; gap: 10px; align-items: baseline; }
+.note .fessura { transform: translateY(-2px); }
 .av { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; flex-shrink: 0; font-size: 13px; font-weight: 700; background: var(--sunken); color: var(--ink-2); }
 
 /* Tables */
@@ -194,7 +210,9 @@ body[data-chrome="off"] .board { grid-template-columns: minmax(0, 1fr); }
 .well { background: var(--raised); border-radius: 16px; padding: 18px 20px; }
 .well h3 { margin: 0 0 12px; font-size: 12px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-3); }
 .grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
-.grid3 { display: grid; grid-template-columns: 1.3fr 1fr; gap: 14px; align-items: start; }
+.grid3 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.grid3 .well { display: flex; flex-direction: column; }
+.grid3 .macs, .grid3 .feed { flex: 1; align-content: space-between; }
 .kv { display: grid; grid-template-columns: auto 1fr; gap: 6px 18px; font-size: 14px; }
 .kv dt { color: var(--ink-2); } .kv dd { margin: 0; }
 
@@ -205,28 +223,27 @@ body[data-chrome="off"] .board { grid-template-columns: minmax(0, 1fr); }
 .disk .nums div { font-size: 12.5px; color: var(--ink-2); }
 .disk .nums b { display: block; font: 20px var(--f-ro); color: var(--ink); font-weight: 400; white-space: nowrap; }
 .disk .nums div { white-space: nowrap; }
-.svc { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; padding: 12px 0; border-top: 1px solid var(--line); font-size: 14px; }
-.svc:first-of-type { border-top: 0; padding-top: 0; }
-.svc > span:last-child { color: var(--ink-2); font-size: 13px; grid-column: 1 / -1; }
-.svc .pill { justify-self: end; }
-.macs { display: grid; gap: 9px; font-size: 14px; }
+.svcs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0 28px; }
+.svc { display: grid; gap: 4px; font-size: 14px; align-content: start; }
+.svc > span:last-child { color: var(--ink-2); font-size: 13.5px; }
+.macs { display: grid; gap: 13px; font-size: 14px; }
 .macs div { display: flex; align-items: center; gap: 10px; }
 .macs em { margin-left: auto; font-style: normal; font: 12px var(--f-ro); color: var(--ink-2); }
 .feed { display: grid; gap: 0; font-size: 14px; }
 .feed div { display: grid; grid-template-columns: 92px 1fr; gap: 12px; padding: 9px 0; border-top: 1px solid var(--line); }
 .feed div:first-child { border-top: 0; padding-top: 0; }
 .feed time { font: 12px var(--f-ro); color: var(--ink-2); padding-top: 2px; }
-.notice { display: flex; align-items: center; gap: 16px; padding: 14px 18px; border-radius: 14px; background: color-mix(in srgb, var(--led-dl) 10%, var(--raised)); margin-bottom: 18px; font-size: 14px; }
-.notice p { margin: 0; flex: 1; }
-.notice .timer { font: 13px var(--f-ro); color: var(--t-act); white-space: nowrap; }
-.offpath { font-size: 13.5px; color: var(--ink-2); margin: 14px 0 0; }
+.notice { display: flex; align-items: center; gap: 16px; padding: 14px 18px; border-radius: 14px; background: var(--sunken); margin-bottom: 14px; font-size: 14px; }
+.notice p { margin: 0; flex: 1; white-space: normal; }
+.notice .timer { font: 13px var(--f-ro); color: var(--ink-2); white-space: nowrap; }
+.offpath { font-size: 13.5px; color: var(--ink-2); margin: 16px 0 0; padding: 12px 14px; border-radius: 12px; background: var(--sunken); }
 
 /* Dialog inside a frame */
 .scrim { position: absolute; inset: 0; background: var(--scrim); display: grid; place-items: center; padding: 24px; }
 .dlg { width: 480px; background: var(--surface); border-radius: 20px; padding: 24px; box-shadow: var(--pop); display: grid; gap: 16px; }
 .dlg h3 { margin: 0; font: 700 21px/1.2 var(--f-head); letter-spacing: -0.02em; }
 .dlg p { margin: 0; color: var(--ink-2); font-size: 14.5px; }
-.dlg ul { margin: 0; padding-left: 18px; color: var(--ink-2); font-size: 14.5px; display: grid; gap: 6px; }
+.dlg ul.mk { margin: 0; color: var(--ink-2); font-size: 14.5px; gap: 8px; }
 .dlg .row { display: flex; gap: 8px; justify-content: flex-end; }
 
 /* Steps (key rotation) */
@@ -234,24 +251,25 @@ body[data-chrome="off"] .board { grid-template-columns: minmax(0, 1fr); }
 .step { display: grid; grid-template-columns: 34px 1fr; gap: 14px; padding: 16px 18px; border-radius: 16px; background: var(--raised); }
 .step.todo { background: transparent; box-shadow: inset 0 0 0 1px var(--line); }
 .step .n { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; font: 13px var(--f-ro); background: var(--sunken); color: var(--ink-2); }
-.step.done .n { background: color-mix(in srgb, var(--led-ok) 18%, transparent); color: var(--t-ok); }
+.step.done .n { background: var(--sunken); color: var(--ink); }
 .step.cur .n { background: var(--ink); color: var(--surface); }
 .step h4 { margin: 4px 0 4px; font-size: 16px; }
 .step p { margin: 0; color: var(--ink-2); font-size: 14px; max-width: 64ch; }
 .step .body { display: grid; gap: 14px; margin-top: 10px; }
 .progress { display: grid; gap: 8px; font-size: 14px; }
 .progress div { display: flex; align-items: center; gap: 10px; }
-.progress .ro { margin-left: auto; font-size: 12.5px; color: var(--ink-2); }
-.risk { display: flex; gap: 18px; align-items: center; padding: 16px 18px; border-radius: 16px; background: var(--sunken); margin-bottom: 16px; max-width: 760px; }
-.risk p { margin: 0; font-size: 14px; color: var(--ink-2); flex: 1; }
-.risk p b { color: var(--ink); }
-.risk .clock { text-align: right; }
-.risk .clock b { display: block; font: 22px var(--f-ro); color: var(--t-act); font-weight: 400; }
-.risk .clock span { font-size: 12.5px; color: var(--ink-2); }
+.progress .ro { margin-left: auto; font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--ink-2); }
+.risk { display: grid; gap: 8px; padding: 16px 18px; border-radius: 16px; background: var(--sunken); margin-bottom: 16px; max-width: 760px; }
+.risk .head { display: flex; justify-content: space-between; align-items: baseline; gap: 18px; }
+
+.risk .clock { font: 15px var(--f-ro); color: var(--ink); }
+.risk p { margin: 0; font-size: 14px; color: var(--ink-2); max-width: 66ch; }
 .check { display: flex; align-items: center; gap: 10px; font-size: 14px; cursor: pointer; }
 .check input { width: 18px; height: 18px; accent-color: var(--ink); }
-.errbox { padding: 12px 14px; border-radius: 12px; background: color-mix(in srgb, var(--led-err) 10%, var(--raised)); font-size: 14px; display: grid; gap: 6px; }
-.errbox code { font: 12.5px var(--f-ro); color: var(--t-err); }
+.errbox { padding: 14px 16px; border-radius: 12px; background: var(--sunken); font-size: 14px; display: grid; gap: 6px; }
+.errbox > span:not(.st) { color: var(--ink-2); }
+.errbox .st { margin-bottom: 2px; }
+.errbox code { font: 12.5px var(--f-ro); color: var(--ink-2); }
 
 /* Volumes */
 .split { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 18px; align-items: start; }
@@ -291,7 +309,7 @@ body[data-chrome="off"] .board { grid-template-columns: minmax(0, 1fr); }
 /* Wordmark */
 .wm { display: inline-flex; align-items: center; gap: 9px; font: 800 21px/1 var(--f-head); letter-spacing: -0.035em; color: var(--ink); }
 .wm .i { position: relative; }
-.wm .i i { position: absolute; left: 50%; top: .26em; width: .16em; height: .16em; border-radius: 50%; transform: translateX(-50%); background: var(--brand); box-shadow: 0 0 8px var(--brand); }
+.wm .i i { position: absolute; left: 50%; top: .26em; width: .16em; height: .16em; border-radius: 50%; transform: translateX(-50%); background: var(--brand); }
 
 /* Decisions */
 .dec { display: grid; gap: 22px; }
@@ -302,13 +320,7 @@ body[data-chrome="off"] .board { grid-template-columns: minmax(0, 1fr); }
 .ab .tag { font: 12px var(--f-ro); color: var(--ink-2); }
 .ab b { font-size: 15px; }
 .ab p { margin: 0; font-size: 14px; color: var(--ink-2); }
-.ab .rec { font-size: 13px; font-weight: 600; color: var(--t-ok); display: inline-flex; align-items: center; gap: 7px; }
-.mini { border-radius: 10px; background: var(--page); padding: 8px; height: 120px; display: grid; gap: 6px; }
-.mini .s { display: grid; grid-template-columns: 54px 1fr; gap: 6px; height: 100%; }
-.mini i { display: block; border-radius: 4px; background: var(--sunken); }
-.mini i.on { background: var(--raised); }
-.mini .t { display: grid; grid-template-rows: 18px 1fr; gap: 6px; height: 100%; }
-.mini .tabsrow { display: flex; gap: 4px; } .mini .tabsrow i { flex: 1; }
+.ab .rec { display: inline-flex; align-items: center; gap: 7px; }
 
 @media (max-width: 900px) {
   .board { grid-template-columns: minmax(0, 1fr); padding: 18px 16px 60px; gap: 18px; }
@@ -367,7 +379,7 @@ const ic = (n, s = 18) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" f
 const driveMark = (h, led = "var(--led-dl)") => `<svg width="${h * 1.6}" height="${h}" viewBox="0 0 64 40" aria-hidden="true"><rect x="2" y="3" width="60" height="34" rx="9" fill="var(--ink)"/><rect x="10" y="13" width="34" height="6" rx="3" fill="var(--surface)"/><circle cx="51" cy="27" r="3.6" fill="${led}"/></svg>`;
 const wm = (size = 21) => `<span class="wm" style="font-size:${size}px">${driveMark(Math.round(size * 0.95))}<span>flu<span class="i">ı<i></i></span>x</span></span>`;
 // A small faceplate: the identity's drive, with its LED as the disk's state
-const face = (led) => `<svg width="96" height="58" viewBox="0 0 96 58" aria-hidden="true"><defs><linearGradient id="fg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--face-hi)"/><stop offset="1" stop-color="var(--face-lo)"/></linearGradient></defs><rect x=".5" y=".5" width="95" height="57" rx="10" fill="url(#fg)" stroke="var(--face-edge)"/><rect x="12" y="18" width="52" height="7" rx="3.5" fill="var(--slot)"/><circle cx="78" cy="21.5" r="4" fill="${led}" style="filter:drop-shadow(0 0 4px ${led})"/><path d="M12 42H84" stroke="var(--face-edge)"/></svg>`;
+const face = (led) => `<svg width="96" height="58" viewBox="0 0 96 58" aria-hidden="true"><defs><linearGradient id="fg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--face-hi)"/><stop offset="1" stop-color="var(--face-lo)"/></linearGradient></defs><rect x=".5" y=".5" width="95" height="57" rx="10" fill="url(#fg)" stroke="var(--face-edge)"/><rect x="12" y="18" width="52" height="7" rx="3.5" fill="var(--slot)"/><circle cx="78" cy="21.5" r="6.5" fill="var(--slot)"/><circle cx="78" cy="21.5" r="3.8" fill="${led}"/>${led.includes("lens-off") ? "" : `<ellipse cx="78" cy="19.8" rx="1.8" ry="1" fill="#fff" opacity=".5"/>`}<path d="M12 42H84" stroke="var(--face-edge)"/></svg>`;
 
 const PEOPLE = [
   { id: "giulia", n: "Giulia Ferri", e: "giulia@studio.example", role: "Admin", st: "ok", macs: 2, last: "adesso" },
@@ -388,10 +400,12 @@ const MACS = [
   { n: "MacBook Air di Anna", o: "Anna Villa", os: "27.0.1", app: "0.4.2", seen: "2 giorni fa", on: false },
   { n: "MacBook Pro di Paolo", o: "Paolo Greco", os: "27.0", app: "0.4.1", seen: "revocato il 14 ott, 17:02", rev: true }
 ];
+// A state: LED in ghiera (ok | dl | err | "" for off) and its lettura
+const stx = (cls, text, blink = false) => `<span class="st"><span class="led ${cls}${blink ? " blinking" : ""}"></span><span class="lettura">${text}</span></span>`;
 const initials = (n) => n.split(" ").map((w) => w[0]).join("");
 const T0 = Date.now() - (2 * 3600 + 14 * 60 + 5) * 1000; // window opened 2 h 14 min ago
 
-const S = { accesso: "form", panoramica: "promemoria", persone: "tabella", mac: "tabella", chiave: "incolla", dischi: "elenco", registro: "dati", impostazioni: "errore", nav: "side" };
+const S = { accesso: "form", panoramica: "promemoria", persone: "tabella", mac: "tabella", chiave: "incolla", dischi: "elenco", registro: "dati", impostazioni: "errore" };
 let run = 0; // progress index of the key rotation
 
 function frame(path, inner) {
@@ -399,7 +413,7 @@ function frame(path, inner) {
 }
 const NAV = [["panoramica", "home", "Panoramica"], ["persone", "users", "Persone"], ["mac", "laptop", "Mac"], ["dischi", "drive", "Dischi"], ["chiave", "key", "Chiave dell'archivio"], ["registro", "list", "Registro"], ["impostazioni", "sliders", "Impostazioni"]];
 function shell(active, body, overlay = "", pending = true) {
-  const extra = (k) => k === "persone" ? `<span class="cnt">7</span>` : k === "mac" ? `<span class="cnt">7</span>` : k === "chiave" && pending ? `<span class="dotn" title="Da cambiare"></span>` : "";
+  const extra = (k) => k === "persone" ? `<span class="cnt">7</span>` : k === "mac" ? `<span class="cnt">7</span>` : k === "chiave" && pending ? `<span class="led dl" title="Finestra aperta"></span>` : "";
   const items = NAV.map(([k, i, t]) => `<button class="nav${k === active ? " on" : ""}" data-jump="${k}">${ic(i)}${t}${extra(k)}</button>`).join("");
   return `<div class="app"><aside class="side">${wm()}<div class="org"><div>Studio Esempio<span>2 dischi · 7 persone</span></div>${ic("down", 16)}</div>${items}<div class="me"><span class="av">GF</span><div>Giulia Ferri<span>Admin</span></div></div></aside><div class="main">${body}</div></div>${overlay}`;
 }
@@ -417,10 +431,9 @@ function accesso() {
     <button class="btn btn-ink" data-go="accesso:inviato">${ic("mail", 17)}Mandami il link</button>
     <div class="foot">Per entrare serve un invito di un admin del tuo studio.</div>`;
   else if (s === "inviato") card = `${wm(24)}<div><h1>Controlla la posta</h1><p style="margin-top:6px">Abbiamo mandato un link a <b style="color:var(--ink)">giulia@studio.example</b>. Vale 15 minuti e funziona una volta sola.</p></div>
-    <div class="well" style="background:var(--sunken);display:flex;gap:12px;align-items:center"><span class="pill act">In attesa</span><span style="font-size:14px;color:var(--ink-2)">Questa pagina si aggiorna da sola quando apri il link.</span></div>
+    <div style="display:grid;gap:6px">${stx("dl", "In attesa del link", true)}<span style="font-size:14px;color:var(--ink-2)">Questa pagina si aggiorna da sola quando apri il link.</span></div>
     <div style="display:flex;gap:8px"><button class="btn btn-soft" data-go="accesso:form">Usa un'altra email</button><button class="btn btn-ghost">Rimanda il link</button></div>`;
-  else card = `${wm(24)}<div><h1>Questo link è scaduto</h1><p style="margin-top:6px">I link valgono 15 minuti e una volta sola. Chiedine uno nuovo: arriva in pochi secondi.</p></div>
-    <span class="pill err" style="justify-self:start">Link scaduto alle 10:27</span>
+  else card = `${wm(24)}<div><h1>Questo link è scaduto</h1><p style="margin-top:6px">È scaduto alle 10:27: i link valgono 15 minuti e una volta sola. Chiedine uno nuovo, arriva in pochi secondi.</p></div>
     <button class="btn btn-ink" data-go="accesso:inviato">${ic("mail", 17)}Mandami un link nuovo</button>`;
   return frame("/accedi", `<div class="signin"><div class="card">${card}</div></div>`);
 }
@@ -428,26 +441,27 @@ function accesso() {
 /* 2. Panoramica */
 function panoramica() {
   const rem = S.panoramica === "promemoria";
-  const notice = rem ? `<div class="notice"><span class="pill act">Chiave da cambiare</span><p>Paolo Greco è stato rimosso il 14 ottobre. La chiave dell'archivio è ancora quella di prima.</p><span class="timer">aperta da ${timer()}</span><button class="btn btn-ink btn-sm" data-jump="chiave">Cambia chiave</button></div>` : "";
-  const disk = (n, tb, files, last, macs) => `<div class="well disk">${face("var(--led-ok)")}<div><h4>${n}<span class="pill ok">In linea</span></h4><div class="nums"><div><b>${tb}</b>usati</div><div><b>${files}</b>file</div><div><b>${macs}</b>Mac</div></div><div style="font-size:13px;color:var(--ink-2);margin-top:8px">Ultima scrittura ${last}</div></div></div>`;
-  const online = MACS.filter((m) => !m.rev).map((m) => `<div><span class="led ${m.on ? "ok" : "idle"}"></span>${m.n}<em>${m.seen}</em></div>`).join("");
+  const notice = rem ? `<div class="notice">${stx("dl", "Chiave da cambiare")}<p>Paolo Greco è stato rimosso il 14 ottobre e la chiave dell'archivio è ancora quella di prima.</p><span class="timer">da ${timer()}</span><button class="btn btn-ink btn-sm" data-jump="chiave">Cambia chiave</button></div>` : "";
+  const disk = (n, tb, files, last, macs) => `<div class="well disk">${face("var(--led-ok)")}<div><h4>${n}</h4><div style="font-size:13.5px;color:var(--ink-2);margin-top:2px">In linea, ultima scrittura ${last}</div><div class="nums"><div><b>${tb}</b>usati</div><div><b>${files}</b>file</div><div><b>${macs}</b>Mac</div></div></div></div>`;
+  const online = MACS.filter((m) => !m.rev).map((m) => `<div><span class="led ${m.on ? "ok" : ""}"></span>${m.n}<em>${m.seen}</em></div>`).join("");
   const body = `${ph("Panoramica", "Studio Esempio")}${notice}
     <div class="grid2" style="margin-bottom:14px">${disk("Progetti", "4,82 TB", "38.214", "3 min fa", 5)}${disk("Archivio 2025", "2,10 TB", "9.877", "6 giorni fa", 2)}</div>
+    <div class="well" style="margin-bottom:14px"><h3>Servizi, visti da qui</h3><div class="svcs">
+        <div class="svc"><b>Database dei metadata</b>${stx("ok", "Risponde · 4 ms")}<span>Controllato 30 s fa</span></div>
+        <div class="svc"><b>Archivio S3</b>${stx("ok", "Scrive")}<span>Scrittura di prova riuscita 2 min fa</span></div>
+        <div class="svc"><b>Email per i link</b>${stx("ok", "Configurata")}<span>Ultimo invio oggi alle 10:41</span></div></div>
+        <p class="offpath note"><span class="fessura"></span><span>Fluix non passa di qui per leggere o scrivere i file. Se questo sito si ferma, i dischi già montati continuano a funzionare; si fermano accessi nuovi, inviti e revoche.</span></p>
+      </div>
     <div class="grid3">
       <div class="well"><h3>Mac collegati adesso · 3 di 7</h3><div class="macs">${online}</div></div>
-      <div class="well"><h3>Servizi, visti da qui</h3>
-        <div class="svc"><b>Database dei metadata</b><span class="pill ok">Risponde</span><span>4 ms · controllato 30 s fa</span></div>
-        <div class="svc"><b>Archivio S3</b><span class="pill ok">Scrive</span><span>Scrittura di prova riuscita 2 min fa</span></div>
-        <div class="svc"><b>Email per i link</b><span class="pill ok">Configurata</span><span>smtp.studio.example</span></div>
-        <p class="offpath">Fluix non passa di qui per leggere o scrivere i file. Se questo sito si ferma, i dischi già montati continuano a funzionare; si fermano accessi nuovi, inviti e revoche.</p>
-      </div>
-    </div>
-    <div class="well" style="margin-top:14px"><h3>Attività recente</h3><div class="feed">
+      <div class="well"><h3>Attività recente</h3><div class="feed">
       <div><time>oggi 10:41</time><span>Giulia Ferri ha invitato <b>Luca Moretti</b></span></div>
-      <div><time>oggi 09:12</time><span>Nuovo Mac collegato: <b>MacBook Pro di Elena</b></span></div>
+      <div><time>oggi 09:12</time><span>Primo accesso da <b>MacBook Pro di Elena</b></span></div>
       <div><time>ieri 18:40</time><span>Ultimo contatto di <b>iMac di Sara</b>, app 0.4.0</span></div>
-      <div><time>14 ott 17:02</time><span>Giulia Ferri ha rimosso <b>Paolo Greco</b> e revocato 1 Mac</span></div>
-    </div></div>`;
+      <div><time>14 ott 17:02</time><span>Giulia Ferri ha rimosso <b>Paolo Greco</b></span></div>
+      <div><time>14 ott 17:02</time><span>Revocato <b>MacBook Pro di Paolo</b></span></div>
+      <div><time>12 ott 11:20</time><span>Anna Villa ha creato <b>Archivio 2025</b></span></div>
+    </div></div></div>`;
   return frame("/", shell("panoramica", body, "", rem));
 }
 
@@ -456,22 +470,22 @@ function persone() {
   const s = S.persone, after = s === "dopo";
   const rows = PEOPLE.map((p) => {
     const st = after && p.id === "marco" ? "rem" : p.st;
-    const pill = st === "ok" ? `<span class="pill ok">Attiva</span>` : st === "inv" ? `<span class="pill idle">Invito inviato</span>` : `<span class="pill err">Rimossa</span>`;
+    const pill = st === "ok" ? stx("ok", "Attiva") : st === "inv" ? stx("", "Invito inviato") : stx("err", "Rimossa");
     const last = after && p.id === "marco" ? "rimosso adesso" : p.last;
     return `<tr class="${st === "rem" ? "dim" : ""}"><td><div class="who"><span class="av">${initials(p.n)}</span><div><b>${p.n}</b><span>${p.e}</span></div></div></td>
-      <td>${st === "rem" ? p.role : `<button class="role">${p.role}${ic("down", 15)}</button>`}</td><td>${pill}</td><td class="r ro">${st === "rem" ? 0 : p.macs}</td><td>${last}</td>
+      <td>${st === "rem" ? `<span style="padding:0 8px">${p.role}</span>` : `<button class="role">${p.role}${ic("down", 15)}</button>`}</td><td>${pill}</td><td class="r ro">${st === "rem" ? 0 : p.macs}</td><td>${last}</td>
       <td class="r">${st === "rem" ? "" : `<button class="icon-btn" aria-label="Azioni per ${p.n}" ${p.id === "marco" ? 'data-go="persone:rimuovi"' : ""}>${ic("more")}</button>`}</td></tr>`;
   }).join("");
-  const notice = after ? `<div class="notice"><span class="pill act">Chiave da cambiare</span><p>Marco Bassi non ha più accesso al disco. Chi ha copiato la chiave dell'archivio può ancora usarla finché non la cambi.</p><button class="btn btn-ink btn-sm" data-jump="chiave">Cambia chiave adesso</button></div>` : "";
+  const notice = after ? `<div class="notice">${stx("dl", "Chiave da cambiare")}<p>Marco Bassi non ha più accesso al disco; chi avesse copiato la chiave dell'archivio può ancora usarla finché non la cambi.</p><button class="btn btn-ink btn-sm" data-jump="chiave">Cambia chiave adesso</button></div>` : "";
   const table = `${ph("Persone", "Chi può usare i dischi di Studio Esempio", `<button class="btn btn-ink" data-go="persone:invita">${ic("plus", 17)}Invita persona</button>`)}${notice}
     <table class="tbl"><thead><tr><th>Persona</th><th>Ruolo</th><th>Stato</th><th class="r">Mac</th><th>Ultimo accesso</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
   let overlay = "";
   if (s === "invita") overlay = dlg("Invita una persona", `<div class="field"><label>Email</label><input class="input" value="chiara@studio.example"></div>
     <div class="field"><label>Ruolo</label><div class="choice"><button class="opt" aria-pressed="true"><b>Membro</b><span>Usa il disco e gestisce i suoi Mac</span></button><button class="opt" aria-pressed="false"><b>Admin</b><span>Gestisce persone, Mac, dischi e chiave</span></button></div></div>
     <p>Riceve un'email con un link per installare Fluix e accedere. L'invito vale 7 giorni.</p>`, `<button class="btn btn-ghost" data-go="persone:tabella">Annulla</button><button class="btn btn-ink" data-go="persone:tabella">Manda invito</button>`);
-  if (s === "rimuovi") overlay = dlg("Rimuovere Marco Bassi?", `<ul><li>Perde l'accesso subito: cancelliamo l'accesso al database del suo Mac, <b style="color:var(--ink)">MacBook Air di Marco</b>, e lì il disco smette di rispondere.</li>
-    <li>Al prossimo contatto l'app sul suo Mac si spegne e svuota la cache.</li>
-    <li>La chiave dell'archivio resta valida finché non la cambi. Chi l'avesse copiata potrebbe ancora scaricare o cancellare pezzi di file dal bucket.</li></ul>`,
+  if (s === "rimuovi") overlay = dlg("Rimuovere Marco Bassi?", `<ul class="mk"><li><span class="fessura"></span><span>Perde l'accesso subito: cancelliamo l'accesso al database del suo Mac, <b style="color:var(--ink)">MacBook Air di Marco</b>, e lì il disco smette di rispondere.</span></li>
+    <li><span class="fessura"></span><span>Al prossimo contatto l'app sul suo Mac si spegne e svuota la cache.</span></li>
+    <li><span class="fessura"></span><span>La chiave dell'archivio resta valida finché non la cambi. Chi l'avesse copiata potrebbe ancora scaricare o cancellare pezzi di file dal bucket.</span></li></ul>`,
     `<button class="btn btn-ghost" data-go="persone:tabella">Annulla</button><button class="btn btn-danger" data-go="persone:dopo">Rimuovi Marco</button>`);
   return frame("/persone", shell("persone", table, overlay));
 }
@@ -480,13 +494,13 @@ function persone() {
 function mac() {
   const s = S.mac;
   if (s === "vuoto") {
-    const body = `${ph("Mac", "I Mac da cui si accede ai dischi")}<div class="empty">${face("var(--led-idle)")}<h3>Nessun Mac collegato</h3><p>Quando qualcuno accede dall'app Fluix sul suo Mac, il Mac compare qui con il suo ultimo contatto. Da qui lo puoi revocare.</p><button class="btn btn-ink" data-jump="persone">${ic("users", 17)}Invita persone</button></div>`;
+    const body = `${ph("Mac", "I Mac da cui si accede ai dischi")}<div class="empty">${face("var(--lens-off)")}<h3>Nessun Mac collegato</h3><p>Quando qualcuno accede dall'app Fluix sul suo Mac, il Mac compare qui con il suo ultimo contatto. Da qui lo puoi revocare.</p><button class="btn btn-ink" data-jump="persone">${ic("users", 17)}Invita persone</button></div>`;
     return frame("/mac", shell("mac", body));
   }
   const rows = MACS.map((m) => {
-    if (m.rev) return `<tr class="dim"><td><b style="font-weight:600">${m.n}</b></td><td>${m.o}</td><td class="ro">${m.os}</td><td class="ro">${m.app}</td><td><span class="pill err">Revocato</span> <span style="font-size:13px;margin-left:6px">${m.seen.replace("revocato ", "")}</span></td><td></td></tr>`;
-    const app = m.old ? `<span class="ro">${m.app}</span> <span class="pill idle" style="margin-left:6px">da aggiornare</span>` : `<span class="ro">${m.app}</span>`;
-    return `<tr><td><div class="who"><span class="led ${m.on ? "ok" : "idle"}"></span><b>${m.n}</b></div></td><td>${m.o}</td><td class="ro">${m.os}</td><td>${app}</td><td>${m.seen}</td>
+    if (m.rev) return `<tr class="dim"><td><b style="font-weight:600">${m.n}</b></td><td>${m.o}</td><td class="ro">${m.os}</td><td class="ro">${m.app}</td><td>${stx("err", "Revocato " + m.seen.replace("revocato il ", ""))}</td><td></td></tr>`;
+    const app = m.old ? `<span class="ro">${m.app}</span> <span class="lettura" style="margin-left:6px">da aggiornare</span>` : `<span class="ro">${m.app}</span>`;
+    return `<tr><td><div class="who"><span class="led ${m.on ? "ok" : ""}"></span><b>${m.n}</b></div></td><td>${m.o}</td><td class="ro">${m.os}</td><td>${app}</td><td>${m.seen}</td>
       <td class="r"><button class="btn btn-soft btn-sm" ${m.n.includes("Pro di Sara") ? 'data-go="mac:revoca"' : ""}>Revoca</button></td></tr>`;
   }).join("");
   const body = `${ph("Mac", "Ogni Mac ha il suo accesso al database: revocarne uno non tocca gli altri")}
@@ -501,8 +515,8 @@ function chiave() {
   const s = S.chiave;
   const closed = s === "chiusa";
   const risk = closed
-    ? `<div class="risk"><span class="pill ok">Finestra chiusa</span><p>La chiave vecchia non esiste più. Ultimo cambio: <b>oggi alle 12:56</b>, dopo la rimozione di Paolo Greco.</p></div>`
-    : `<div class="risk"><span class="pill act">Finestra aperta</span><p><b>Paolo Greco non ha più accesso al disco</b>, ma la chiave dell'archivio è quella di prima. Chi l'avesse copiata può ancora scaricare o cancellare pezzi di file dal bucket, senza nomi né cartelle. Si chiude cambiando chiave.</p><div class="clock"><b>${timer()}</b><span>da quando è stato rimosso</span></div></div>`;
+    ? `<div class="risk"><div class="head">${stx("ok", "Finestra chiusa")}</div><p>La chiave vecchia non esiste più. Ultimo cambio oggi alle 12:56, dopo la rimozione di Paolo Greco.</p></div>`
+    : `<div class="risk"><div class="head">${stx("dl", "Finestra aperta")}<span class="clock">da ${timer()}</span></div><p>Paolo Greco non ha più accesso al disco, ma la chiave dell'archivio è quella di prima. Chi l'avesse copiata può ancora scaricare o cancellare pezzi di file dal bucket, senza nomi né cartelle. Si chiude cambiando chiave.</p></div>`;
   const st = (k) => {
     const order = ["crea", "incolla", "applica", "cancella"];
     const cur = closed ? 4 : s === "errore" ? 1 : s === "incolla" ? 1 : s === "applica" ? 2 : 3;
@@ -512,13 +526,13 @@ function chiave() {
   const n = (k, i) => `<span class="n">${st(k) === "done" ? ic("check", 15) : i}</span>`;
   const paste = s === "incolla" || s === "errore"
     ? `<div class="body"><div class="cols"><div class="field"><label>Access key</label><input class="input ro" value="EXAMPLE7Q2K9W3ZT0HVA"></div><div class="field"><label>Secret key</label><input class="input ro" type="password" value="xxxxxxxxxxxxxxxxxxxxxxxx"></div></div>
-      ${s === "errore" ? `<div class="errbox"><span class="pill err" style="justify-self:start">Scrittura di prova fallita</span><span>Il bucket ha rifiutato la chiave nuova. Controlla che abbia il permesso di scrivere su <b>studio-esempio-fluix</b>; nella console va assegnata al bucket, non solo creata.</span><code>AccessDenied · PUT /fluix-probe-7f3a</code></div>` : ""}
+      ${s === "errore" ? `<div class="errbox">${stx("err", "Scrittura di prova fallita")}<span>Il bucket ha rifiutato la chiave nuova. Controlla che abbia il permesso di scrivere su <b>studio-esempio-fluix</b>; nella console va assegnata al bucket, non solo creata.</span><code>AccessDenied · PUT /fluix-probe-7f3a</code></div>` : ""}
       <div><button class="btn btn-ink" data-go="chiave:applica">Prova e applica</button></div></div>` : "";
   const prog = s === "applica" ? `<div class="body progress">
-      <div><span class="led ${run > 0 ? "ok" : "act"}"></span>Scrittura di prova con la chiave nuova<span class="ro">${run > 0 ? "ok" : "..."}</span></div>
-      <div><span class="led ${run > 1 ? "ok" : run === 1 ? "act" : "idle"}"></span>Disco Progetti aggiornato<span class="ro">${run > 1 ? "ok" : ""}</span></div>
-      <div><span class="led ${run > 2 ? "ok" : run === 2 ? "act" : "idle"}"></span>Disco Archivio 2025 aggiornato<span class="ro">${run > 2 ? "ok" : ""}</span></div>
-      <div><span class="led ${run > 3 ? "ok" : run === 3 ? "act" : "idle"}"></span>Mac collegati con la chiave nuova<span class="ro">${run > 3 ? "3 di 3" : run === 3 ? "1 di 3" : ""}</span></div></div>` : "";
+      <div><span class="led ${run > 0 ? "ok" : "dl blinking"}"></span>Scrittura di prova con la chiave nuova<span class="ro">${run > 0 ? "ok" : "..."}</span></div>
+      <div><span class="led ${run > 1 ? "ok" : run === 1 ? "dl blinking" : ""}"></span>Disco Progetti aggiornato<span class="ro">${run > 1 ? "ok" : ""}</span></div>
+      <div><span class="led ${run > 2 ? "ok" : run === 2 ? "dl blinking" : ""}"></span>Disco Archivio 2025 aggiornato<span class="ro">${run > 2 ? "ok" : ""}</span></div>
+      <div><span class="led ${run > 3 ? "ok" : run === 3 ? "dl blinking" : ""}"></span>Mac collegati con la chiave nuova<span class="ro">${run > 3 ? "3 di 3" : run === 3 ? "1 di 3" : ""}</span></div></div>` : "";
   const del = s === "cancella" ? `<div class="body"><label class="check"><input type="checkbox" data-go="chiave:chiusa">Ho cancellato la chiave vecchia (finisce per <span class="ro">...ZT0QK</span>)</label></div>` : "";
   const body = `${ph("Chiave dell'archivio", "Cambiala dopo ogni rimozione o revoca: è l'ultima cosa che un ex membro potrebbe avere")}${risk}
     <div class="steps">
@@ -535,8 +549,8 @@ function dischi() {
   const s = S.dischi;
   const body = `${ph("Dischi", "Ogni disco ha i suoi metadata; i file stanno tutti nello stesso bucket", `<button class="btn btn-ink" data-go="dischi:nuovo">${ic("plus", 17)}Nuovo disco</button>`)}
     <div class="split"><table class="tbl"><thead><tr><th>Disco</th><th>Stato</th><th class="r">Usati</th><th class="r">File</th><th>Ultima scrittura</th></tr></thead><tbody>
-      <tr class="sel"><td><b style="font-weight:600">Progetti</b></td><td><span class="pill ok">In linea</span></td><td class="r ro">4,82 TB</td><td class="r ro">38.214</td><td>3 min fa</td></tr>
-      <tr><td><b style="font-weight:600">Archivio 2025</b></td><td><span class="pill ok">In linea</span></td><td class="r ro">2,10 TB</td><td class="r ro">9.877</td><td>6 giorni fa</td></tr>
+      <tr class="sel"><td><b style="font-weight:600">Progetti</b></td><td>${stx("ok", "In linea")}</td><td class="r ro">4,82 TB</td><td class="r ro">38.214</td><td>3 min fa</td></tr>
+      <tr><td><b style="font-weight:600">Archivio 2025</b></td><td>${stx("ok", "In linea")}</td><td class="r ro">2,10 TB</td><td class="r ro">9.877</td><td>6 giorni fa</td></tr>
     </tbody></table>
     <div class="well"><h3>Progetti</h3><dl class="kv">
       <dt>Nel bucket</dt><dd class="ro">studio-esempio-fluix/progetti</dd>
@@ -545,7 +559,7 @@ function dischi() {
       <dt>Cestino</dt><dd>7 giorni · <span class="ro">212 GB</span></dd>
       <dt>Montato da</dt><dd>5 Mac</dd>
       <dt>Creato</dt><dd>6 ott 2026, Giulia Ferri</dd></dl>
-      <p style="margin:16px 0 0;font-size:13px;color:var(--ink-2)">Il nome compare nel Finder dentro Fluix. Rinominare un disco rompe i percorsi dei progetti CapCut: per questo qui non si rinomina.</p></div></div>`;
+      <p class="note" style="margin:16px 0 0;font-size:13px;color:var(--ink-2)"><span class="fessura"></span><span>Il nome compare nel Finder dentro Fluix. Rinominare un disco rompe i percorsi dei progetti CapCut: per questo qui non si rinomina.</span></p></div></div>`;
   const overlay = s === "nuovo" ? dlg("Nuovo disco", `<div class="field"><label>Nome</label><input class="input" value="Clienti 2026"><span class="hint">Compare nel Finder dentro Fluix. Non si potrà cambiare.</span></div>
     <div class="field"><label>Posizione nel bucket</label><input class="input ro" value="studio-esempio-fluix/clienti-2026"></div>
     <div class="field"><label>Dimensione dei blocchi</label><div class="choice"><button class="opt" aria-pressed="true"><b>4 MB</b><span>Consigliato per i video: misurato</span></button><button class="opt" aria-pressed="false"><b>1 MB</b><span>Salti più rapidi nei video mai aperti, più richieste</span></button></div></div>
@@ -581,8 +595,8 @@ function registro() {
 function impostazioni() {
   const err = S.impostazioni === "errore";
   const s3res = err
-    ? `<div class="errbox"><span class="pill err" style="justify-self:start">Prova fallita</span><span>Il bucket <b>studio-esempio-fluix-2</b> non esiste in questa regione, o la chiave non può vederlo. I dischi esistenti non sono toccati: questa è solo una prova.</span><code>NoSuchBucket · eu-south-mil</code></div>`
-    : `<div><span class="pill ok">Scrittura di prova riuscita</span></div>`;
+    ? `<div class="errbox">${stx("err", "Prova fallita")}<span>Il bucket <b>studio-esempio-fluix-2</b> non esiste in questa regione, o la chiave non può vederlo. I dischi esistenti non sono toccati: questa è solo una prova.</span><code>NoSuchBucket · eu-south-mil</code></div>`
+    : `<div>${stx("ok", "Scrittura di prova riuscita")}</div>`;
   const body = `${ph("Impostazioni", "Studio Esempio")}
     <div class="form">
       <section><h3>Organizzazione</h3><div class="field"><label>Nome</label><input class="input" value="Studio Esempio"></div></section>
@@ -602,31 +616,16 @@ function impostazioni() {
 
 /* Decisions */
 function decisioni() {
-  const rec = `<span class="rec"><span class="led ok"></span>Consigliata</span>`;
-  const side = `<div class="mini"><div class="s"><i></i><i class="on"></i></div></div>`;
-  const tabs = `<div class="mini"><div class="t"><div class="tabsrow"><i></i><i class="on"></i><i></i><i></i></div><i class="on"></i></div></div>`;
+  const rec = '<span class="rec"><span class="led ok"></span><span class="lettura">Consigliata</span></span>';
   return `<div class="dec">
-    <article><h3>D1 · Navigazione</h3><div class="ab">
-      <div><span class="tag">A</span>${side}<b>Barra laterale</b><p>Sette sezioni con contatori, il selettore dell'organizzazione in alto e chi sei in basso. Regge un'ottava sezione e, nel servizio ospitato, più organizzazioni.</p>${rec}</div>
-      <div><span class="tag">B</span>${tabs}<b>Schede in alto</b><p>Più spazio alle tabelle, ma sette schede affollano la riga e il selettore dell'organizzazione non ha un posto naturale.</p></div></div>
-      <div class="seg" style="margin:0"><span>prova:</span><button data-nav="side" aria-pressed="${S.nav === "side"}">A barra laterale</button><button data-nav="tabs" aria-pressed="${S.nav === "tabs"}">B schede</button></div>
-      <div id="navDemo"></div></article>
     <article><h3>D2 · Dopo la rimozione di una persona</h3><div class="ab">
       <div><span class="tag">A</span><b>La rotazione parte da sola</b><p>Chiusa la conferma, si apre il cambio della chiave. Nessuna finestra dimenticata, ma se rimuovi tre persone di fila la rifai tre volte, e non sempre hai la console del provider a portata.</p></div>
-      <div><span class="tag">B</span><b>Promemoria fisso, bottone nella conferma</b><p>Dopo la rimozione: "Cambia chiave adesso" in primo piano. Se rimandi, il promemoria resta in Panoramica e nella barra laterale con il tempo che scorre, finché la chiave vecchia non è cancellata.</p>${rec}</div></div></article>
+      <div><span class="tag">B</span><b>Promemoria fisso, bottone nella conferma</b><p>Dopo la rimozione: "Cambia chiave adesso" in primo piano. Se rimandi, il promemoria resta in cima alla Panoramica con il tempo che scorre, finché la chiave vecchia non è cancellata.</p>${rec}</div></div></article>
     <article><h3>D3 · Cosa vede un membro</h3><div class="ab">
       <div><span class="tag">A</span><b>Persone e Mac in sola lettura</b><p>Trasparenza: tutti vedono chi ha accesso. Ma mostra email e Mac di tutti a chi non deve agire, e aggiunge sezioni che un membro non userà.</p></div>
       <div><span class="tag">B</span><b>Solo "I miei Mac"</b><p>Il membro vede i suoi Mac e può revocarne uno perso o rubato da solo, subito, senza aspettare un admin. Persone, dischi, chiave e registro restano agli admin.</p>${rec}</div></div></article>
   </div>`;
 }
-function navDemo() {
-  const el = document.getElementById("navDemo");
-  if (!el) return;
-  if (S.nav === "side") { el.innerHTML = ""; return; }
-  const items = NAV.map(([k, i, t]) => `<button class="nav${k === "persone" ? " on" : ""}">${ic(i, 16)}${t}</button>`).join("");
-  el.innerHTML = frame("/persone", `<div class="topnav">${wm()}${items}</div><div class="main" style="min-height:220px">${ph("Persone", "Chi può usare i dischi di Studio Esempio", `<button class="btn btn-ink">${ic("plus", 17)}Invita persona</button>`)}<p style="color:var(--ink-2);font-size:14px">La stessa pagina con le schede in alto: la tabella guadagna 232 px, la riga di navigazione si riempie.</p></div>`);
-}
-
 const SCREENS = [
   ["accesso", "Accesso", "Email e link, senza password. Il link vale 15 minuti e una volta sola; la pagina aspetta e si aggiorna da sola.", [["form", "Modulo"], ["inviato", "Link inviato"], ["scaduto", "Link scaduto"]], accesso],
   ["panoramica", "Panoramica", "Quello che un admin guarda aprendo il sito: i dischi, chi è collegato, se i servizi rispondono, cosa è successo. Lo stato dei servizi è quello visto dal control plane.", [["promemoria", "Con promemoria della chiave"], ["normale", "Normale"]], panoramica],
@@ -648,12 +647,12 @@ function build() {
   const main = document.getElementById("screens");
   main.innerHTML = SCREENS.map(([id, t, note, states]) => `<section class="scr" id="s-${id}"><h2>${t}</h2><p class="scr-note">${note}</p>
     <div class="seg"><span>stato:</span>${states.map(([k, l]) => `<button data-screen="${id}" data-state="${k}" aria-pressed="false">${l}</button>`).join("")}</div><div class="stage"></div></section>`).join("")
-    + `<section class="scr" id="s-decisioni"><h2>Decisioni aperte</h2><p class="scr-note">Tre scelte che cambiano il comportamento, con la mia raccomandazione.</p><div id="decBody"></div></section>`;
+    + `<section class="scr" id="s-decisioni"><h2>Decisioni aperte</h2><p class="scr-note">Due scelte che cambiano il comportamento, con la mia raccomandazione. La navigazione è chiusa: barra laterale.</p><div id="decBody"></div></section>`;
   SCREENS.forEach(([id]) => renderScreen(id));
   renderDecisions();
   document.getElementById("idxMark").innerHTML = wm(19);
 }
-function renderDecisions() { document.getElementById("decBody").innerHTML = decisioni(); navDemo(); }
+function renderDecisions() { document.getElementById("decBody").innerHTML = decisioni(); }
 
 function setState(id, st) {
   S[id] = st;
@@ -678,8 +677,6 @@ document.addEventListener("click", (e) => {
   if (go) { const [id, st] = go.dataset.go.split(":"); return setState(id, st); }
   const jump = e.target.closest("[data-jump]");
   if (jump) { document.getElementById(`s-${jump.dataset.jump}`).scrollIntoView(); return; }
-  const nav = e.target.closest("[data-nav]");
-  if (nav) { S.nav = nav.dataset.nav; renderDecisions(); }
 });
 setInterval(() => document.querySelectorAll("[data-timer]").forEach((t) => (t.textContent = fmt(Date.now() - T0))), 1000);
 
