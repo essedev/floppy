@@ -5,20 +5,23 @@ set -euo pipefail
 . /etc/floppy/config.env
 export ACCESS_KEY SECRET_KEY
 
+# 1 MB blocks: a cold seek downloads one small block (DECISIONS #15). Fixed
+# when the volume is created; an existing volume keeps its block size.
 if ! juicefs status "$META_URL" >/dev/null 2>&1; then
   juicefs format --storage s3 --bucket "$BUCKET_URL" \
-    --compress none --trash-days 7 "$META_URL" "$VOLUME_NAME"
+    --compress none --block-size 1024 --trash-days 7 "$META_URL" "$VOLUME_NAME"
 fi
 
 mkdir -p /mnt/drive
-# The buffer is JuiceFS memory inside a 1 GiB VM. Reads use 32 MB of
-# readahead whatever its size, and copies are bound by the upload link:
-# 256 MB measured as fast as 1024 MB.
+# The buffer is JuiceFS memory inside a 1 GiB VM; copies are bound by the
+# upload link: 256 MB measured as fast as 1024 MB. Readahead stays at 4 MB:
+# after a jump in the timeline, a longer one keeps downloading the position
+# the editor left and delays the new one (DECISIONS #15).
 exec juicefs mount "$META_URL" /mnt/drive \
   --bucket "$BUCKET_URL" \
   --cache-dir /var/cache/floppy --cache-size "${CACHE_SIZE_MB:-102400}" \
   --cache-expire "${CACHE_EXPIRE:-720h}" \
   --cache-large-write \
-  --prefetch "${PREFETCH:-8}" --buffer-size "${BUFFER_SIZE_MB:-256}" \
+  --prefetch "${PREFETCH:-8}" --buffer-size "${BUFFER_SIZE_MB:-256}" --max-readahead 4 \
   --upload-limit "${UPLOAD_LIMIT_MBPS:-0}" --download-limit "${DOWNLOAD_LIMIT_MBPS:-0}" \
   --enable-xattr

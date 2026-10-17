@@ -88,10 +88,27 @@ The cache lives on each Mac's SSD, inside the Linux machine's disk, managed by t
 | Warmup of a 434 MB clip | 30 s (14.3 MB/s) |
 
 - **Playback holds up even out of cache**: 12.1 MB/s against the 7.5 a 60 Mbps clip needs.
-- **Scrubbing a clip never opened is slow**: almost a second per seek. Warmup removes it (3 ms). The next parameter to try is a block smaller than 4 MB, which makes a cold seek cheaper at the cost of more requests.
+- **Scrubbing a clip never opened is slow**: almost a second per seek. Warmup removes it (3 ms). The data-path spike below cuts it with 1 MB blocks and a shorter readahead; to confirm here.
 - SMB still has a cost: the line gives about 21 MB/s, the Mac gets 12 cold.
 
-**Local spike** (simulation, before OVH):
+**Local spike, data path** (17/10/2026, `spike/data-bench.sh` and `t03` of `spike/acceptance.py`): 1 MB blocks, 4 MB readahead, the patched JuiceFS (DECISIONS #15). The link is one token bucket on everything Toxiproxy sends (`--profile shaped`) and 25 ms to S3; clips of 455 MB.
+
+| Operation | 100 Mbps link | 1 Gbps link |
+|---|---|---|
+| Cold read from the Mac, 1 MB reads | 11.6 MB/s (93% of the line) | 103 MB/s (82%) |
+| Cold read of a clip with `dd` (`t03`) | 10.8 MB/s (86%) | not measured |
+| Seek (1 MB read) not in cache | mean 0.38 s, max 0.66 s | mean 0.09 s |
+| Scrubbing: first read after a jump | mean 0.40 s, max 0.64 s | mean 0.08 s |
+| Warmup of a clip | 38 s (95% of the line) | not measured |
+| Copying a clip to the disk (300 Mbps upload limit) | 31.7 MB/s | not measured |
+
+- **1 MB blocks halve a cold seek**: from 0.68 to 0.39 s at 100 Mbps, same link and readahead. A cold read downloads the whole block that holds it, 4 MB before. Uploads and warmup are as fast as with 4 MB blocks, and OVH bills neither requests nor traffic, so four times the requests cost nothing.
+- **A short readahead keeps scrubbing fast**: after a jump, the readahead of the position just left keeps the line busy. First read after a jump at 100 Mbps: 0.40 s with 4 MB, 0.55 s with 16 MB, 0.78 s with JuiceFS's default (8 blocks). At 1 Gbps 4 MB costs sequential speed (82% of the line against 90%), still 13 times what a 60 Mbps clip needs.
+- **The Mac reads ahead by itself**: through its cache the macOS SMB client sends 128 KB pieces, out of order and up to 40 MB ahead. JuiceFS turned the pieces into range requests, not cached, and downloaded the same blocks again: 12-13% extra. The second patch reads whole blocks inside a sequential stream: 4-6% extra, and GETs from 722 to about 550 for a clip.
+- **"SMB costs half the line" was mostly the simulation**: JuiceFS's `--download-limit` lets the first megabyte through at once and then stalls, and the 4 MB blocks made every out-of-order piece expensive. On a real queue the Mac over SMB reads at 86-93% of the line, so SMB multichannel is not needed.
+- **No read over 1.5 s** in any run, and no I/O error: the old `t03` failure does not come back.
+
+**Local spike, first round** (06/10/2026, simulation before OVH, 4 MB blocks):
 
 Measures from the 06/10/2026 spike (`spike/bench.sh`): an Apple Silicon Mac, Garage in Docker as S3, 25 ms of latency simulated with Toxiproxy, bandwidth limited with JuiceFS's `--download-limit` and `--upload-limit`. Test clips: 4K HEVC at 60 Mbps, 434 MB each, close to phone footage.
 
@@ -106,7 +123,7 @@ Measures from the 06/10/2026 spike (`spike/bench.sh`): an Apple Silicon Mac, Gar
 
 - **In cache it is like a local disk**: the cache sits in the Linux machine and SMB on `localhost` sustains about 160-290 MB/s.
 - **Out of cache the line decides**: a 60 Mbps clip needs 7.5 MB/s. At 1 Gbps uncached playback has 4 times the margin; at 100 Mbps it does not hold (6.7 MB/s) and warming up before editing becomes mandatory.
-- **SMB costs half the cold bandwidth**: inside the Linux machine JuiceFS reads at 10.7 MB/s on 100 Mbps, over SMB the Mac gets 6.7. The macOS SMB client keeps few reads in flight; a higher prefetch helps little (3: 5 MB/s, 8: 6.7 MB/s, 16: 6.3 MB/s).
+- **SMB seemed to cost half the cold bandwidth**: inside the Linux machine 10.7 MB/s on 100 Mbps, over SMB 6.7. The data-path spike (above) found the cause in the simulated link and in 4 MB blocks.
 - **A cold seek pays for the whole block**: reading 1 MB at a new point downloads the 4 MB block that holds it.
 - Local Garage in Docker is not OVH: the measures isolate latency and bandwidth, not the real service's performance. They were repeated on OVH (above).
 - The first opening of a folder with many videos is slow, because the Finder and CapCut read a piece of every file for the previews. Not measured yet.
@@ -116,13 +133,14 @@ Measures from the 06/10/2026 spike (`spike/bench.sh`): an Apple Silicon Mac, Gar
 | Setting | Value | Reason |
 |---|---|---|
 | Compression | off | Video is already compressed |
-| Block size | 4 MB (default) | Balances sequential reads and seeks |
+| Block size | 1 MB | Halves a cold seek against the 4 MB default, with uploads and warmup as fast (DECISIONS #15). Fixed when the volume is created |
 | Trash | 7 days | Recovery from accidental deletions |
 | `writeback` | off | A file counts as saved only once it is on S3. Slower copies, but no file left only on a Mac closed halfway through an upload |
 | `--cache-size` | computed at every `setup`, at most `CACHE_SIZE_MB` (100 GB by default) | Half of what the Mac can spare above a reserve (see [macOS package](#macos-package)) |
 | `--cache-expire` | 30 days | Old projects free themselves |
 | `--cache-large-write` | on | Whoever uploads footage usually edits it: uploaded blocks stay cached. By default JuiceFS does not keep them |
-| `--prefetch` | 8 | Measured: the best value cold over SMB |
+| `--prefetch` | 8 | Measured with 4 MB blocks as the best value cold over SMB; with 1 MB blocks 1, 3 and 8 measure the same |
+| `--max-readahead` | 4 MB | Scrubbing: the first read after a jump at 100 Mbps in 0.40 s against 0.78 s with the default (DECISIONS #15) |
 | `--buffer-size` | 256 MB | Measured: as fast as 1 GB and leaves room in a 1 GiB VM (see "Footprint") |
 | `--enable-xattr` | on | Samba stores the Finder's metadata there; without it, deleting from the Mac fails with "Operation not supported" |
 | Metadata cache | JuiceFS defaults | With the local replica reads are local, so longer kernel caches buy little and would delay other people's changes. JuiceFS 1.4's Redis client-side cache (`client-cache=true`) stays off: the patch refuses it (DECISIONS #5) |
