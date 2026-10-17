@@ -17,9 +17,12 @@ app-check: ## The menu bar app: typecheck and build, frontend and Rust tests, cl
 	cd app && pnpm install --frozen-lockfile && pnpm build && pnpm test
 	cd app && cargo clippy --all-targets -- -D warnings && cargo test
 
+web-check: ## The admin web: typecheck, lint and build
+	cd web && pnpm install --frozen-lockfile && pnpm typecheck && pnpm lint && pnpm build
+
 site-check: ## The site: Astro check and build
 	cd site && pnpm install --frozen-lockfile && pnpm check && pnpm build
 
-check: lint app-check site-check ## The full quality pass
+check: lint app-check web-check site-check ## The full quality pass
 
-.PHONY: help lint app-check site-check check
+.PHONY: help lint app-check web-check site-check check

@@ -30,13 +30,13 @@ export LIMA_HOME=~/.floppy/vms
 ~/.floppy/lima/bin/limactl shell --workdir / floppy <cmd>   # e.g. sudo journalctl -u floppy-mount
 
 # Local spike
-spike/setup.sh                 # Garage, PostgreSQL, Toxiproxy, drive container; secrets in spike/.env
+spike/setup.sh                 # Garage, PostgreSQL, Toxiproxy, drive; secrets in spike/.env
 spike/bench.sh                 # upload, cold/warm reads, seeks, warmup
 LINE_MBPS=100 docker compose -f spike/docker-compose.yml --profile shaped up -d shaper   # one real link queue
 DOWNLOAD_LIMIT_MBPS=0 spike/data-bench.sh  # cold reads inside the box and from the Mac, seeks, scrubbing
-spike/meta-bench.sh            # metadata from the Mac over SMB: SQLite vs PostgreSQL at 0/15/30 ms
-spike/juicefs-replica/build.sh # patched juicefs (read replica, optimistic writes) into dist/
-spike/juicefs-replica/test.sh  # the patch's Go tests against Valkey master + replica
+spike/meta-bench.sh            # metadata over SMB: SQLite vs PostgreSQL
+spike/juicefs-replica/build.sh # patched juicefs into dist/
+spike/juicefs-replica/test.sh  # the patches' Go tests
 JUICEFS_SOURCE=replica docker compose -f spike/docker-compose.yml --profile replica build drive drive-b
 spike/acceptance.py [--baseline] [t01 ...]   # two clients, central Valkey + replicas, 17 checks
 
@@ -47,6 +47,9 @@ cd site && pnpm dev            # pnpm build, pnpm check
 cd app && FLOPPY_BIN=/path/to/fake-floppy pnpm tauri dev   # without FLOPPY_BIN: ~/.floppy/bin/floppy
 cd app && pnpm dev             # views in a browser: ?view=panel|settings|welcome&scenario=...
 app/scripts/render-marks.sh    # tray PNGs and app icons from design/mark/
+
+# Admin web of the control plane (frontend; dev uses the fake API, VITE_API=http the real one)
+cd web && pnpm dev             # http://localhost:4508; pnpm typecheck, lint, build
 ```
 
 ## Gotchas
