@@ -64,6 +64,36 @@
   per quattro elementi, A consigliata e applicata in tutto lo storyboard. Tolti anche il bagliore
   dei LED nei frontali, il colore dei testi di stato e gli sfondi colorati degli avvisi.
 
+  Giro 5: il concept diventa dinamico. Una riga "Scelte" nei controlli del concept (non fa parte
+  del design) cambia frontale, icone, i quattro dettagli e le quattro decisioni del pannello, e
+  ogni frame si ridisegna. Le scelte stanno nell'hash (#f=grafite&i=essenziale&led=ghiera...),
+  quindi un link riproduce una configurazione, e in localStorage; "Ripristina consigliate"
+  torna ai valori scelti. I blocchi di decisione restano il confronto fisso fra A e B.
+  Aggiunto il frame R4 Cache piena, che segue la scelta.
+
+  Giro 4: Simone sceglie Grafite per frontale, pannello e finestre, con le icone di Essenziale:
+  niente contorno, solo fessura e LED sullo stesso asse orizzontale, come nel frontale. Tutto lo
+  storyboard passa a Grafite. Icona dell'app su squircle grafite con la fessura chiara in una
+  scanalatura scura e il LED nella ghiera; contrasto misurato su rendering a 128, 32 e 16 px
+  (WCAG 1.4.11, almeno 3:1 per fessura e LED). Icona della barra dei menu: fessura alta 3 px,
+  punto da 4,5 px, 2,75 px di distanza. Il set A dei dettagli resta.
+  Scelta: Grafite con le icone di Essenziale.
+
+  Marchio definitivo (da copiare così com'è; colori letterali, nessuna variabile).
+  Icona dell'app, viewBox 124, squircle grafite, fessura chiara e LED sullo stesso asse y=62:
+  <svg width="128" height="128" viewBox="0 0 124 124"><defs><linearGradient id="fx-sq" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3a3835"/><stop offset="1" stop-color="#1c1b19"/></linearGradient></defs><rect x="4" y="4" width="116" height="116" rx="27" fill="url(#fx-sq)"/><rect x="4.5" y="4.5" width="115" height="115" rx="26.5" fill="none" stroke="#fff" stroke-opacity=".08"/><rect x="16" y="51" width="68" height="22" rx="11" fill="#0b0b0a"/><rect x="20" y="55" width="42" height="14" rx="7" fill="#d9d4c8"/><circle cx="100" cy="62" r="12.5" fill="#0b0b0a"/><circle cx="100" cy="62" r="8.5" fill="#ff6a2e"/><ellipse cx="100" cy="58.2" rx="4" ry="2" fill="#fff" opacity=".5"/></svg>
+  Icona della barra dei menu, immagine template 24x16 (nero più alfa; macOS la colora):
+  Collegato  <svg width="24" height="16" viewBox="0 0 24 16"><rect x="2" y="6.5" width="13" height="3" rx="1.5" fill="#000"/><circle cx="19.75" cy="8" r="2.25" fill="#000"/></svg>
+  Download   due immagini alternate ogni 0,55 s: la Collegato, e la stessa senza il cerchio
+  Non raggiungibile  <svg width="24" height="16" viewBox="0 0 24 16"><rect x="2" y="6.5" width="13" height="3" rx="1.5" fill="#000"/><circle cx="19.75" cy="8" r="1.65" fill="none" stroke="#000" stroke-width="1.2"/></svg>
+  Spento     <svg width="24" height="16" viewBox="0 0 24 16" opacity=".45"><rect x="2" y="6.5" width="13" height="3" rx="1.5" fill="#000"/></svg>
+  Avvio      due immagini alternate: <svg width="24" height="16" viewBox="0 0 24 16"><rect x="2.5" y="7" width="12" height="2" rx="1" fill="none" stroke="#000"/><circle cx="19.75" cy="8" r="1.65" fill="none" stroke="#000" stroke-width="1.2"/></svg> e la stessa senza il cerchio
+  Frontale Grafite in cima al pannello, stato Collegato (stesso corpo scuro in entrambi i temi;
+  la fessura si riempie con la cache, il LED sta sull'asse della fessura, y=40):
+  <svg viewBox="0 0 336 112"><defs><linearGradient id="fx-fd" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3a3835"/><stop offset="1" stop-color="#1c1b19"/></linearGradient></defs><rect x=".5" y=".5" width="335" height="111" rx="12" fill="url(#fx-fd)" stroke="#0f0f0e"/><rect x="1.5" y="1.5" width="333" height="109" rx="11" fill="none" stroke="#fff" stroke-opacity=".08"/><rect x="24" y="34" width="212" height="12" rx="6" fill="#0b0b0a"/><rect x="27" y="37" width="99" height="6" rx="3" fill="#d9d4c8"/><text x="24" y="76" font-family="Schibsted Grotesk" font-weight="800" font-size="15" letter-spacing="-.4" fill="#8f8b83">fluix</text><text x="236" y="76" text-anchor="end" font-family="Departure Mono" font-size="11" fill="#b3aea5">48,2 / 100 GB</text><circle cx="290" cy="40" r="10" fill="#0b0b0a"/><circle cx="290" cy="40" r="5.5" fill="#3fdc6c"/><ellipse cx="290" cy="37.6" rx="2.6" ry="1.4" fill="#fff" opacity=".5"/><text x="290" y="76" text-anchor="middle" font-family="Departure Mono" font-size="10" letter-spacing=".5" fill="#b3aea5">COLLEGATO</text></svg>
+  Colori del LED nel frontale scuro: Collegato #3fdc6c, attività #ff6a2e, errore #ff4b33, spento
+  #3a3834 senza riflesso.
+
   Vocabolario dei dettagli (set A, da copiare così com'è negli altri concept):
   - LED in ghiera, l'indicatore di stato. Ghiera: 14x14px, border-radius 50%, sfondo #dcd8ce in
     chiaro e #0f0f0e in scuro; box-shadow inset 0 1px 1.5px rgba(0,0,0,.35), 0 1px 0
@@ -112,7 +142,7 @@
   --win-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.9), 0 30px 70px -20px rgba(0, 0, 0, 0.8);
 }
 * { box-sizing: border-box; }
-html { scroll-behavior: smooth; scroll-padding-top: 64px; }
+html { scroll-behavior: smooth; scroll-padding-top: 120px; }
 html, body { margin: 0; }
 body { min-height: 100vh; background: var(--page); color: var(--ink); font: 15px/1.5 var(--f-ui); -webkit-font-smoothing: antialiased; }
 [hidden] { display: none !important; }
@@ -125,6 +155,12 @@ body { min-height: 100vh; background: var(--page); color: var(--ink); font: 15px
 .switch a { color: #ddd; text-decoration: none; padding: 5px 9px; border-radius: 6px; background: #262626; }
 .switch a:hover { background: #333; }
 .switch button { font: inherit; border: 0; padding: 5px 9px; border-radius: 6px; background: #262626; color: #eee; cursor: pointer; }
+.choices { flex-basis: 100%; display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; padding-top: 6px; border-top: 1px solid #262626; }
+.ch { display: inline-flex; align-items: center; gap: 2px; }
+.chl { color: #888; margin-right: 4px; }
+.choices button { padding: 3px 7px; }
+.choices button[aria-pressed="true"] { background: #eee; color: #111; }
+.choices .reset { margin-left: auto; background: #3a2a1f; }
 body[data-chrome="off"] .switch, body[data-chrome="off"] .cap, body[data-chrome="off"] .group-h p, body[data-chrome="off"] .why { display: none; }
 
 /* Storyboard */
@@ -158,6 +194,7 @@ body[data-chrome="off"] .switch, body[data-chrome="off"] .cap, body[data-chrome=
 .pop { position: relative; width: 352px; flex-shrink: 0; display: flex; flex-direction: column; overflow: hidden; background: var(--surface); color: var(--ink); font: 13px/1.45 var(--f-ui); border-radius: 20px; box-shadow: var(--pop-shadow); }
 .face { margin: 8px 8px 0; }
 .face svg { display: block; width: 100%; height: auto; }
+.face.ess { margin: 14px 8px 0; }
 .led-ok { fill: var(--led-ok); } .led-dl { fill: var(--led-dl); } .led-err { fill: var(--led-err); } .led-idle { fill: var(--led-idle); }
 .status { display: flex; flex-direction: column; gap: 16px; padding: 20px 20px 22px; }
 .status h3 { margin: 0; font: 700 20px/1.2 var(--f-ui); letter-spacing: -0.02em; }
@@ -239,6 +276,8 @@ body[data-chrome="off"] .switch, body[data-chrome="off"] .cap, body[data-chrome=
 .mk li .fessura { transform: translateY(-2px); }
 /* Set B, shown only in the details decision */
 .tacca { display: inline-block; width: 3px; height: 12px; border-radius: 1px; background: var(--track); box-shadow: inset 0 1px 1px rgba(0, 0, 0, 0.2); vertical-align: middle; }
+.tacca.blinking { animation: blink 1.1s steps(2, jump-none) infinite; }
+@media (prefers-reduced-motion: reduce) { .tacca.blinking { animation: none; } }
 .tacca.ok { background: var(--led-ok); } .tacca.dl { background: var(--led-dl); } .tacca.err { background: var(--led-err); }
 .targhetta { font: 11px var(--f-ro); text-transform: uppercase; letter-spacing: 0.04em; color: var(--ink-2); padding: 2px 6px; border-radius: 4px; background: var(--sunken); box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.18); }
 .passo { font: 11.5px var(--f-ro); color: var(--ink-3); }
@@ -319,6 +358,17 @@ input[type="range"] { width: 100%; accent-color: var(--ink); }
 .mbs .cap2 b { display: block; font-weight: 700; }
 .mbs .cap2 span { color: var(--ink-2); }
 
+/* Final icons */
+.appsizes { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 28px; margin-bottom: 18px; }
+.appsizes figure { margin: 0; max-width: 100%; overflow-x: auto; }
+.chosen-row { max-width: 100%; }
+.chosen-row > div { max-width: 100%; overflow-x: auto; }
+.appsizes figcaption { margin-top: 8px; font: 11.5px var(--f-ro); color: var(--ink-2); }
+.ai-wrap { display: flex; align-items: center; gap: 10px; }
+.ai-wrap svg { display: block; }
+.mb4 { zoom: 4; padding: 3px 6px; border-radius: 4px; background: #f3f3f5; color: #1d1d1f; gap: 6px; }
+.mb4.dk { background: #26262a; color: #f1f1f1; margin-top: 2px; }
+
 /* Decisions */
 .decision { margin: 6px 0 26px; padding: 20px; border-radius: 20px; background: var(--surface); box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.1); }
 :root[data-theme="dark"] .decision { box-shadow: 0 0 0 0.5px rgba(255, 255, 255, 0.07); }
@@ -356,6 +406,11 @@ input[type="range"] { width: 100%; accent-color: var(--ink); }
 .miniwin .mw-body p { margin: 12px 0 0; font-size: 13px; color: var(--ink-2); }
 .miniwin .mw-body p b { color: var(--ink); }
 .face.bare { margin: 0; padding: 18px 20px 0; }
+.chosen { padding: 0 0 22px; border-bottom: 1px solid var(--line); margin-bottom: 4px; }
+.chosen > .lettura { display: flex; align-items: center; gap: 8px; margin: 0 0 14px; font-size: 13px; color: var(--ink); }
+.chosen-row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 24px; }
+.chosen-row svg { display: block; }
+.chosen-row .pop { width: 352px; }
 @media (max-width: 1180px) { .fam { grid-template-columns: 352px 340px; justify-content: start; } }
 @media (max-width: 899px) { .fam { grid-template-columns: minmax(0, 1fr); } }
 .why { margin: 10px 2px 0; font-size: 13.5px; color: var(--ink-2); max-width: 60ch; }
@@ -376,6 +431,7 @@ input[type="range"] { width: 100%; accent-color: var(--ink); }
   </nav>
   <button data-theme-toggle>t tema</button>
   <button data-chrome-toggle>p pulito</button>
+  <div class="choices" id="choices" aria-label="Scelte"></div>
 </div>
 
 <main class="stage" id="stage"></main>
@@ -415,8 +471,42 @@ const ICONS = {
 };
 const icon = (n, s = 16) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[n]}</svg>`;
 
+// Choices that drive the whole storyboard (concept chrome sets them, hash and storage keep them)
+const CONTROLS = [
+  ["f", "Frontale", [["stucco", "Stucco"], ["grafite", "Grafite"], ["essenziale", "Essenziale"]]],
+  ["i", "Icone", [["stucco", "Stucco"], ["grafite", "Grafite"], ["essenziale", "Essenziale"]]],
+  ["led", "Indicatore", [["ghiera", "LED in ghiera"], ["tacca", "Tacca"]]],
+  ["txt", "Testo", [["lettura", "Lettura"], ["targhetta", "Targhetta"]]],
+  ["list", "Elenco", [["fessura", "Fessura"], ["numeri", "Numeri"]]],
+  ["rec", "Consigliata", [["led", "Lettura con LED"], ["tasto", "Tasto"]]],
+  ["word", "Azione", [["spegni", "Spegni"], ["espelli", "Espelli"]]],
+  ["cache", "Cache piena", [["libera", "Libera i meno recenti"], ["blocca", "Serve spazio"]]],
+  ["riconn", "Riconnessione", [["auto", "Automatica"], ["pulsante", "Solo pulsante"]]],
+  ["imp", "Impostazioni", [["finestra", "Finestra"], ["pagina", "Pagina nel pannello"]]]
+];
+const DEF = { f: "grafite", i: "essenziale", led: "ghiera", txt: "lettura", list: "fessura", rec: "led", word: "spegni", cache: "libera", riconn: "auto", imp: "finestra" };
+let C = { ...DEF };
+const ind = (st, blink) => (C.led === "tacca" ? `<span class="tacca${st ? " " + st : ""}${blink ? " blinking" : ""}"></span>` : `<span class="led${st ? " " + st : ""}${blink ? " blinking" : ""}"></span>`);
+const txtCls = () => (C.txt === "targhetta" ? "targhetta" : "lettura");
+const recMark = () => (C.rec === "tasto" ? '<span class="tasto">Consigliata</span>' : `<span class="rec">${ind("ok")}<span class="lettura">Consigliata</span></span>`);
+const listOf = (items) => `<ul class="mk">${items.map((t, i) => `<li>${C.list === "numeri" ? `<span class="passo">${String(i + 1).padStart(2, "0")}</span>` : '<span class="fessura"></span>'}${t}</li>`).join("")}</ul>`;
+const wordOf = () => (C.word === "espelli" ? "Espelli" : "Spegni");
+
 // Menu bar template icon, monochrome: the state lives in the shape
-function mbIcon(s) {
+function mbIcon(s, fam = C.i) {
+  if (fam === "stucco") return mbIconOld(s);
+  if (fam === "grafite") return famMb("b", s);
+  const c = "currentColor";
+  const op = s === "stop" ? ' opacity=".45"' : "";
+  const slot = s === "starting" ? `<rect x="2.5" y="7" width="12" height="2" rx="1" fill="none" stroke="${c}"/>` : `<rect x="2" y="6.5" width="13" height="3" rx="1.5" fill="${c}"/>`;
+  let dot = `<circle cx="19.75" cy="8" r="2.25" fill="${c}"/>`;
+  if (s === "dl") dot = `<circle cx="19.75" cy="8" r="2.25" fill="${c}" class="blink"/>`;
+  if (s === "off") dot = `<circle cx="19.75" cy="8" r="1.65" fill="none" stroke="${c}" stroke-width="1.2"/>`;
+  if (s === "starting") dot = `<circle cx="19.75" cy="8" r="1.65" fill="none" stroke="${c}" stroke-width="1.2" class="blink"/>`;
+  if (s === "stop") dot = "";
+  return `<svg width="24" height="16" viewBox="0 0 24 16"${op} aria-hidden="true">${slot}${dot}</svg>`;
+}
+function mbIconOld(s) {
   const c = "currentColor";
   const op = s === "stop" ? ' opacity=".45"' : "";
   let led = `<circle cx="17.5" cy="11.5" r="2.1" fill="${c}"/>`;
@@ -430,7 +520,13 @@ function mbIcon(s) {
 
 // App icon, the drive on putty
 let uid = 0;
-function appIcon(size) {
+function appIcon(size, fam = C.i) {
+  if (fam === "stucco") return famIcon("a", size).replace("<svg ", '<svg class="app" ');
+  if (fam === "grafite") return famIcon("b", size).replace("<svg ", '<svg class="app" ');
+  const k = "ai" + uid++;
+  return `<svg class="app" width="${size}" height="${size}" viewBox="0 0 124 124" aria-hidden="true"><defs><linearGradient id="${k}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3a3835"/><stop offset="1" stop-color="#1c1b19"/></linearGradient></defs><rect x="4" y="4" width="116" height="116" rx="27" fill="url(#${k})"/><rect x="4.5" y="4.5" width="115" height="115" rx="26.5" fill="none" stroke="#fff" stroke-opacity=".08"/><rect x="16" y="51" width="68" height="22" rx="11" fill="#0b0b0a"/><rect x="20" y="55" width="42" height="14" rx="7" fill="#d9d4c8"/><circle cx="100" cy="62" r="12.5" fill="#0b0b0a"/><circle cx="100" cy="62" r="8.5" fill="#ff6a2e"/><ellipse cx="100" cy="58.2" rx="4" ry="2" fill="#fff" opacity=".5"/></svg>`;
+}
+function appIconOld(size) {
   const k = "ai" + uid++;
   return `<svg class="app" width="${size}" height="${size}" viewBox="0 0 124 124" aria-hidden="true"><defs><linearGradient id="${k}a" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f7f5f0"/><stop offset="1" stop-color="#dcd7cc"/></linearGradient><linearGradient id="${k}b" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3a3835"/><stop offset="1" stop-color="#1c1b19"/></linearGradient></defs><rect x="4" y="4" width="116" height="116" rx="27" fill="url(#${k}a)"/><rect x="20" y="40" width="84" height="48" rx="12" fill="url(#${k}b)"/><rect x="32" y="55" width="44" height="7" rx="3.5" fill="#0d0d0c"/><rect x="33" y="56" width="21" height="5" rx="2.5" fill="#8e897f"/><circle cx="90" cy="73" r="5" fill="#ff5b1f"/></svg>`;
 }
@@ -480,11 +576,12 @@ function famIcon(fam, size) {
 function famMb(fam, s) {
   const c = "currentColor";
   const op = s === "stop" ? ' opacity=".45"' : "";
-  if (fam === "a") return mbIcon(s);
+  if (fam === "a") return mbIconOld(s);
   if (fam === "b") {
     const m = "m" + uid++;
     const hole = s === "stop" ? "" : `<circle cx="17.5" cy="10.6" r="3" fill="#000"/>`;
     const dot = s === "ok" ? `<circle cx="17.5" cy="10.6" r="1.5" fill="${c}"/>` : s === "dl" ? `<circle cx="17.5" cy="10.6" r="1.5" fill="${c}" class="blink"/>` : "";
+    if (s === "starting") return `<svg width="24" height="16" viewBox="0 0 24 16" aria-hidden="true"><rect x="1.5" y="1.5" width="21" height="13" rx="3.5" fill="none" stroke="${c}" stroke-width="1.2"/><rect x="4.5" y="4.4" width="11" height="2.6" rx="1.3" fill="none" stroke="${c}"/><circle cx="17.5" cy="10.6" r="1.6" fill="none" stroke="${c}" class="blink"/></svg>`;
     return `<svg width="24" height="16" viewBox="0 0 24 16"${op} aria-hidden="true"><defs><mask id="${m}"><rect width="24" height="16" fill="#fff"/><rect x="4.5" y="4.4" width="11" height="2.6" rx="1.3" fill="#000"/>${hole}</mask></defs><rect x="1" y="1" width="22" height="14" rx="4" fill="${c}" mask="url(#${m})"/>${dot}</svg>`;
   }
   let led = `<circle cx="19" cy="8" r="2.6" fill="${c}"/>`;
@@ -500,7 +597,7 @@ function famRow(fam, name, bet, recommended) {
   const states = [["ok", "Collegato"], ["dl", "Download"], ["off", "Non raggiungibile"], ["stop", "Spento"]];
   const mb = states.map(([s, t]) => `<span class="l">${famMb(fam, s)}</span><span class="d">${famMb(fam, s)}</span><small>${t}</small>`).join("");
   return `<div class="fam" id="fam-${fam}">
-    <div class="fam-h"><b><span class="k">${fam.toUpperCase()}</span>${name}</b>${recommended ? '<span class="rec"><span class="led ok"></span><span class="lettura">Consigliata</span></span>' : ""}<p>${bet}</p></div>
+    <div class="fam-h"><b><span class="k">${fam.toUpperCase()}</span>${name}</b>${recommended ? recMark() : ""}<p>${bet}</p></div>
     <div class="fam-cell"><p class="lab">Icona dell'app</p><div class="icons">${famIcon(fam, 128)}${famIcon(fam, 32)}</div></div>
     <div class="fam-cell"><p class="lab">Barra dei menu</p><div class="mbcol">${mb}</div></div>
     <div class="fam-cell"><p class="lab">Pannello</p>${panelTop}</div>
@@ -509,42 +606,51 @@ function famRow(fam, name, bet, recommended) {
 }
 
 // Faceplate: the slot fills with the cache, the LED is the state
+// LED colors on the dark Grafite body, the same in both themes
+const GLED = { "led-ok": "#3fdc6c", "led-dl": "#ff6a2e", "led-err": "#ff4b33", "led-idle": "#3a3834" };
 const LED = { ok: "led-ok", dl: "led-dl", starting: "led-dl", off: "led-err", stop: "led-idle", revoked: "led-idle", low: "led-ok" };
+const FACE = {
+  grafite: { hi: "#3a3835", lo: "#1c1b19", edge: "#0f0f0e", rim: ".08", slot: "#0b0b0a", fill: "#d9d4c8", word: "#8f8b83", ro: "#b3aea5", bezel: "#0b0b0a", led: (c) => GLED[c] },
+  stucco: { hi: "var(--face-hi)", lo: "var(--face-lo)", edge: "var(--face-edge)", rim: ".45", slot: "var(--slot)", fill: "var(--slot-fill)", word: "var(--ink-3)", ro: "var(--ink-2)", bezel: "var(--slot)", led: (c) => `var(--${c})` },
+  essenziale: { slot: "var(--slot)", fill: "var(--slot-fill)", word: "var(--ink-3)", ro: "var(--ink-2)", bezel: "var(--bezel)", led: (c) => `var(--${c})` }
+};
 function face(o) {
+  const F = FACE[o.fam || C.f];
+  const bare = !F.hi;
   const k = "fd" + uid++;
   const used = o.used;
   const w = o.state === "revoked" ? 0 : Math.max(6, (used / LIMIT) * 206);
   const ro = { ok: "COLLEGATO", dl: o.pct + "%", starting: "AVVIO", off: "SCOLLEGATO", stop: "SPENTO", revoked: "RIMOSSO", low: "MAC PIENO" }[o.state];
   const blink = o.state === "dl" || o.state === "starting";
   const lit = o.state !== "stop" && o.state !== "revoked";
-  const head = o.state === "dl" ? `<rect x="${27 + w - 14}" y="37" width="14" height="6" rx="3" fill="var(--led-dl)" class="blink"/>` : "";
+  const head = o.state === "dl" ? `<rect x="${27 + w - 14}" y="37" width="14" height="6" rx="3" fill="#ff6a2e" class="blink"/>` : "";
   const fillOp = o.state === "stop" ? ' opacity=".45"' : "";
-  return `<div class="face"><svg viewBox="0 0 336 112" aria-hidden="true">
-    <defs><linearGradient id="${k}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--face-hi)"/><stop offset="1" stop-color="var(--face-lo)"/></linearGradient></defs>
-    <rect x=".5" y=".5" width="335" height="111" rx="12" fill="url(#${k})" stroke="var(--face-edge)"/>
-    <rect x="1.5" y="1.5" width="333" height="109" rx="11" fill="none" stroke="#fff" stroke-opacity=".45"/>
-    <rect x="24" y="34" width="212" height="12" rx="6" fill="var(--slot)"/>
-    ${w ? `<rect x="27" y="37" width="${w}" height="6" rx="3" fill="var(--slot-fill)"${fillOp}/>` : ""}${head}
-    <text x="24" y="76" font-family="Schibsted Grotesk" font-weight="800" font-size="15" letter-spacing="-.4" fill="var(--ink-3)">fluix</text>
-    <text x="236" y="76" text-anchor="end" font-family="Departure Mono" font-size="11" fill="var(--ink-2)">${o.state === "revoked" ? "0" : num(used)} / ${LIMIT} GB</text>
-    <circle cx="290" cy="40" r="10" fill="var(--slot)" opacity=".9"/>
-    <circle cx="290" cy="40" r="5.5" class="${LED[o.state]}${blink ? " blink" : ""}"/>${lit ? '<ellipse cx="290" cy="37.6" rx="2.6" ry="1.4" fill="#fff" opacity=".5"/>' : ""}
-    <text x="290" y="76" text-anchor="middle" font-family="Departure Mono" font-size="10" letter-spacing=".5" fill="var(--ink-2)">${ro}</text>
+  return `<div class="face${bare ? " ess" : ""}"><svg viewBox="0 0 336 ${bare ? 92 : 112}" aria-hidden="true">
+    ${bare ? "" : `<defs><linearGradient id="${k}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${F.hi}"/><stop offset="1" stop-color="${F.lo}"/></linearGradient></defs>
+    <rect x=".5" y=".5" width="335" height="111" rx="12" fill="url(#${k})" stroke="${F.edge}"/>
+    <rect x="1.5" y="1.5" width="333" height="109" rx="11" fill="none" stroke="#fff" stroke-opacity="${F.rim}"/>`}
+    <rect x="24" y="34" width="212" height="12" rx="6" fill="${F.slot}"/>
+    ${w ? `<rect x="27" y="37" width="${w}" height="6" rx="3" fill="${F.fill}"${fillOp}/>` : ""}${head}
+    ${bare ? "" : `<text x="24" y="76" font-family="Schibsted Grotesk" font-weight="800" font-size="15" letter-spacing="-.4" fill="${F.word}">fluix</text>`}
+    <text x="${bare ? 24 : 236}" y="76" text-anchor="${bare ? "start" : "end"}" font-family="Departure Mono" font-size="11" fill="${F.ro}">${o.state === "revoked" ? "0" : num(used)} / ${LIMIT} GB</text>
+    <circle cx="290" cy="40" r="10" fill="${F.bezel}"/>
+    <circle cx="290" cy="40" r="5.5" class="${LED[o.state]}${blink ? " blink" : ""}" style="fill:${F.led(LED[o.state])}"/>${lit ? '<ellipse cx="290" cy="37.6" rx="2.6" ry="1.4" fill="#fff" opacity=".5"/>' : ""}
+    <text x="290" y="76" text-anchor="middle" font-family="Departure Mono" font-size="10" letter-spacing=".5" fill="${F.ro}">${ro}</text>
   </svg></div>`;
 }
 
 function marker(p, o) {
   const pct = (p.avail / p.size) * 100;
-  if (o.state === "dl" && p.id === o.target) return `<span class="led dl blinking"></span>`;
-  if (pct >= 100) return `<span class="led ok"></span>`;
-  return `<span class="led"></span>`;
+  if (o.state === "dl" && p.id === o.target) return ind("dl", true);
+  if (pct >= 100) return ind("ok");
+  return ind("");
 }
 function chip(p, o) {
-  if (o.state === "dl" && p.id === o.target) return `<span class="chip lettura dl">${Math.floor((p.avail / p.size) * 100)}%</span>`;
-  if (o.queue && o.queue.includes(p.id)) return `<span class="chip lettura">In coda</span>`;
-  if (p.avail >= p.size) return `<span class="chip lettura ready">Pronto</span>`;
-  if (p.avail > 0) return `<span class="chip lettura">${Math.round((p.avail / p.size) * 100)}%</span>`;
-  return `<span class="chip lettura">Online</span>`;
+  if (o.state === "dl" && p.id === o.target) return `<span class="chip ${txtCls()} dl">${Math.floor((p.avail / p.size) * 100)}%</span>`;
+  if (o.queue && o.queue.includes(p.id)) return `<span class="chip ${txtCls()}">In coda</span>`;
+  if (p.avail >= p.size) return `<span class="chip ${txtCls()} ready">Pronto</span>`;
+  if (p.avail > 0) return `<span class="chip ${txtCls()}">${Math.round((p.avail / p.size) * 100)}%</span>`;
+  return `<span class="chip ${txtCls()}">Online</span>`;
 }
 
 function rowMenu(p, o) {
@@ -554,7 +660,7 @@ function rowMenu(p, o) {
   if (p.size > LIMIT) {
     items.push(`<div class="mnote">Con ${gb(p.size)} è più grande dello spazio di Fluix su questo Mac (${LIMIT} GB). Si apre lo stesso dal Finder: ogni salto nel video aspetta circa un secondo.</div><div class="sep"></div>`);
   } else if (missing > 0) {
-    if (missing > cacheFree && o.fullMode === "block") {
+    if (missing > cacheFree && (o.fullMode || (C.cache === "blocca" ? "block" : "evict")) === "block") {
       items.push(`<button class="mi" disabled style="opacity:.5">Rendi disponibile<span class="aside">${gb(missing)}</span></button><div class="mnote">Serve spazio: su questo Mac restano ${gb(cacheFree)} per Fluix. Libera prima un progetto che non stai montando.</div>`);
     } else if (missing > cacheFree) {
       items.push(`<button class="mi hl">Rendi disponibile<span class="aside">${eta(missing)}</span></button><div class="mnote">Per fare posto Fluix libererà i file aperti meno di recente su questo Mac. Restano su Fluix e si riscaricano quando li apri.</div>`);
@@ -572,7 +678,7 @@ function panel(o) {
   o.used = o.used ?? P.reduce((s, p) => s + p.avail, 0) + OTHER;
   const tgt = P.find((p) => p.id === o.target);
   if (tgt) o.pct = Math.floor((tgt.avail / tgt.size) * 100);
-  const word = o.word || "Spegni";
+  const word = o.word || wordOf();
   let h, p = "", extra = "", btns;
   const prim = (ic, t, dis) => `<button class="btn btn-primary"${dis ? " disabled" : ""}>${icon(ic, 16)}${t}</button>`;
   switch (o.state) {
@@ -587,8 +693,8 @@ function panel(o) {
       btns = `<div class="btns">${prim("open", "Apri nel Finder", true)}</div>`; break;
     case "off":
       h = "Fluix non è raggiungibile";
-      if (o.reconnect === "manual") {
-        extra = `<ul class="mk"><li><span class="fessura"></span>Salva il progetto in CapCut.</li><li><span class="fessura"></span>Controlla che il Mac sia connesso a internet.</li><li><span class="fessura"></span>Premi Riconnetti.</li></ul>`;
+      if ((o.reconnect || (C.riconn === "pulsante" ? "manual" : "auto")) === "manual") {
+        extra = listOf(["Salva il progetto in CapCut.", "Controlla che il Mac sia connesso a internet.", "Premi Riconnetti."]);
         btns = `<div class="btns">${prim("refresh", "Riconnetti")}</div>`;
       } else {
         p = "Riprovo da solo tra <span class=\"meta-line\" data-countdown>24 s</span>. Intanto salva il progetto in CapCut.";
@@ -605,7 +711,7 @@ function panel(o) {
       btns = `<div class="btns">${prim("refresh", "Accedi di nuovo")}</div>`; break;
     case "low":
       h = "Fluix è collegato"; p = "I progetti sono nel Finder, sotto Fluix.";
-      extra = `<div class="notice warn"><span class="ic"><span class="led err"></span></span><span><b>Il Mac ha quasi finito lo spazio</b>Restano 12 GB liberi. Sotto i 10 GB Fluix libera da solo tutti i file scaricati, per non riempire il disco.<br><button class="btn btn-soft">Libera spazio ora</button></span></div>`;
+      extra = `<div class="notice warn"><span class="ic">${ind("err")}</span><span><b>Il Mac ha quasi finito lo spazio</b>Restano 12 GB liberi. Sotto i 10 GB Fluix libera da solo tutti i file scaricati, per non riempire il disco.<br><button class="btn btn-soft">Libera spazio ora</button></span></div>`;
       btns = `<div class="btns">${prim("open", "Apri nel Finder")}</div>`; break;
     default:
       h = "Fluix è collegato"; p = "I progetti sono nel Finder, sotto Fluix.";
@@ -635,7 +741,7 @@ function panel(o) {
   return `<div class="pop" role="dialog" aria-label="Pannello di Fluix">${banner}${face({ state: faceState, used: o.used, pct: o.pct })}<section class="status"><div><h3>${esc(h)}</h3>${p ? `<p>${p}</p>` : ""}</div>${extra}${btns}</section>${space}${list}${stopConfirm}${foot}</div>`;
 }
 
-function settingsPage() {
+function settingsPage(sent) {
   return `<div class="pop" role="dialog" aria-label="Impostazioni nel pannello">
     <div class="pagehead"><button class="icon-btn" aria-label="Indietro">${icon("back", 18)}</button><b>Impostazioni</b></div>
     <div class="plist">
@@ -644,7 +750,7 @@ function settingsPage() {
       <div class="r"><span>Spazio massimo</span><span class="meta-line">100 GB</span></div>
       <div class="r"><span>Avvio al login</span><button class="toggle" role="switch" aria-checked="true" aria-label="Avvio al login"></button></div>
       <div class="r"><span>Versione</span><span class="meta-line">0.1.0</span></div>
-      <div class="r"><span>Diagnostica</span><button class="btn btn-soft btn-small">Invia</button></div>
+      <div class="r"><span>Diagnostica</span>${sent ? `<span class="${txtCls()}">Inviata · FX-7Q2K</span>` : '<button class="btn btn-soft btn-small">Invia</button>'}</div>
       <div class="r"><span>Esci da Studio Esempio</span><button class="btn btn-soft btn-small">Esci</button></div>
     </div>
   </div>`;
@@ -678,7 +784,7 @@ function settingsWindow(sent) {
       </div></section>
       <section><p class="grp-t">Assistenza</p><div class="well">
         <div class="row"><span class="lbl"><b>Invia diagnostica</b><span>Manda a chi gestisce Fluix lo stato del disco, gli ultimi log di Fluix e della macchina virtuale e la versione di macOS. Nessun file dei progetti, nessuna password.</span></span>${sent ? "" : `<button class="btn btn-soft" data-send>Invia</button>`}</div>
-        ${sent ? `<div class="row"><div class="sent" style="flex:1"><span class="led ok"></span><span>Inviata alle 10:42. Comunica il codice a chi ti aiuta:</span><span class="code">FX-7Q2K</span></div></div>` : ""}
+        ${sent ? `<div class="row"><div class="sent" style="flex:1">${ind("ok")}<span>Inviata alle 10:42. Comunica il codice a chi ti aiuta:</span><span class="code">FX-7Q2K</span></div></div>` : ""}
       </div></section>
     </div>
   </div>`;
@@ -703,7 +809,7 @@ function group(id, n, title, line, inner) {
   return `<section class="group" id="${id}"><header class="group-h"><span class="num">${n}</span><h2>${title}</h2><p>${line}</p></header>${inner}</section>`;
 }
 function decision(n, title, line, a, b, rec, why) {
-  const opt = (k, o) => `<div class="opt"><div class="opt-h"><span class="k">${k}</span><b>${o.t}</b>${rec === k ? '<span class="rec"><span class="led ok"></span><span class="lettura">Consigliata</span></span>' : ""}</div>${o.body}</div>`;
+  const opt = (k, o) => `<div class="opt"><div class="opt-h"><span class="k">${k}</span><b>${o.t}</b>${rec === k ? recMark() : ""}</div>${o.body}</div>`;
   return `<article class="decision" id="d${n}"><header><span class="num">Decisione ${n}</span><h3>${title}</h3><p>${line}</p></header><div class="opts">${opt("A", a)}${opt("B", b)}</div><p class="why">${why}</p></article>`;
 }
 
@@ -711,7 +817,7 @@ function decision(n, title, line, a, b, rec, why) {
 function detailsRows() {
   const rec = '<span class="rec"><span class="led ok"></span><span class="lettura">Consigliata</span></span>';
   const S = (inner) => ["th-light", "th-dark"].map((t) => `<div class="smp ${t}">${inner}</div>`).join("") + ["th-light", "th-dark"].map((t) => `<div class="smp big ${t}"><span class="z">${inner}</span></div>`).join("");
-  const opt = (k, name, inner, note, isRec) => `<div class="dt-opt"><div class="opt-h"><span class="k">${k}</span><b>${name}</b>${isRec ? rec : ""}</div><div class="sw4">${S(inner)}</div><p>${note}</p></div>`;
+  const opt = (k, name, inner, note, isRec) => `<div class="dt-opt"><div class="opt-h"><span class="k">${k}</span><b>${name}</b>${isRec ? recMark() : ""}</div><div class="sw4">${S(inner)}</div><p>${note}</p></div>`;
   const row = (title, line, a, b) => `<div class="dt"><div class="dt-h"><b>${title}</b><span>${line}</span></div>${a}${b}</div>`;
   return [
     row("1. Indicatore di stato", "Spento, collegato, in attività, errore.",
@@ -738,12 +844,14 @@ const FULL = [
   { id: "archivio", name: "Archivio 2025", size: 412, avail: 0 }
 ];
 
-const html = [
-  group("drive", "00", "Decisione: il drive", "Tre famiglie: in ognuna icona, barra dei menu, pannello e finestra sono lo stesso oggetto. Lo storyboard sotto è ancora su Stucco.", `<article class="decision">
+function build() {
+  return [
+  group("drive", "00", "Decisione: il drive", "Scelta di Simone: Grafite, con le icone di Essenziale. Tutto lo storyboard è passato a Grafite; le tre famiglie restano sotto come storia della decisione.", `<article class="decision">
     ${famRow("a", "Stucco", "Il frontale di oggi senza scanalatura: corpo chiaro, fessura scura, LED a destra. L'icona dell'app è lo stesso drive chiaro su fondo grafite. In tema chiaro il frontale si confonde col pannello: è un riquadro chiaro dentro un riquadro chiaro.", false)}
     ${famRow("b", "Grafite", "Un oggetto scuro in entrambi i temi, come l'icona di oggi: nel pannello è un apparecchio vero appoggiato sulla carta. Nella barra dei menu la sagoma piena, con fessura e LED ritagliati, si legge meglio di un contorno a 16 px.", true)}
     ${famRow("c", "Essenziale", "Niente corpo: il segno è solo fessura più LED, e nel pannello stanno direttamente sulla superficie, senza un riquadro dentro il riquadro. Onestamente a 16 px non si legge più come un drive: sembra un segno meno con un punto, o un interruttore. Diventa riconoscibile solo dopo averlo imparato.", false)}
-    <p class="why">Consiglio B, Grafite. È l'unica in cui icona dell'app, icona della barra dei menu e frontale sono letteralmente lo stesso oggetto in ogni tema, e la sagoma piena regge a 16 px meglio del contorno di A. In tema chiaro dà al pannello un punto fermo scuro in alto; il costo è un blocco scuro anche dentro finestre chiare. A resta valida se quel blocco pesa troppo; C è la più pulita ma perde il drive proprio dove serve, nella barra dei menu.</p>
+    <div class="chosen" id="scelta-drive"><p class="lettura"><span class="led ok"></span> Scelta: Grafite con le icone di Essenziale</p><div class="chosen-row"><div>${appIcon(128, "essenziale")}</div><div>${appIcon(32, "essenziale")}</div><div>${appIcon(16, "essenziale")}</div><div class="mbcol">${[["ok", "Collegato"], ["dl", "Download"], ["off", "Non raggiungibile"], ["stop", "Spento"]].map(([x, t]) => `<span class="l">${mbIcon(x, "essenziale")}</span><span class="d">${mbIcon(x, "essenziale")}</span><small>${t}</small>`).join("")}</div><div class="pop">${face({ state: "ok", used: 48.2, fam: "grafite" })}<section class="status"><div><h3>Fluix è collegato</h3><p>I progetti sono nel Finder, sotto Fluix.</p></div></section></div></div><p class="why">Il corpo scuro di Grafite resta nel frontale, nel pannello e nelle finestre; le icone perdono il contorno e tengono solo fessura e LED sullo stesso asse, come nel frontale. Le righe A, B e C restano qui sotto come storia della decisione.</p></div>
+    <p class="why">Consiglio del giro 2: B, Grafite. È l'unica in cui icona dell'app, icona della barra dei menu e frontale sono letteralmente lo stesso oggetto in ogni tema, e la sagoma piena regge a 16 px meglio del contorno di A. In tema chiaro dà al pannello un punto fermo scuro in alto; il costo è un blocco scuro anche dentro finestre chiare. A resta valida se quel blocco pesa troppo; C è la più pulita ma perde il drive proprio dove serve, nella barra dei menu.</p>
   </article>`),
   group("dettagli", "00", "Decisione: i dettagli", "Al posto dei dettagli da kit (pallini che si illuminano, pillole, testo colorato) i dettagli dell'oggetto drive. A è consigliata ed è già applicata in tutto lo storyboard. Ogni campione in chiaro e in scuro, a grandezza vera e ingrandito tre volte.", `<article class="decision">${detailsRows()}</article>`),
   group("stati", "01", "Stati del pannello", "Il frontale dice lo stato con il LED e la fessura; sotto, una frase e un'azione sola.", `<div class="frames">
@@ -760,16 +868,18 @@ const html = [
     ${frame("r1", "Menu aperto", "Rendi disponibile con il tempo stimato, Libera spazio con i GB.", desk(panel({ state: "ok", menu: "arnaldi", hideSpace: true })))}
     ${frame("r2", "Conferma Libera spazio", "Dice cosa succede ai file, non solo se sei sicuro.", desk(panel({ state: "ok", confirm: "arnaldi", hideSpace: true })))}
     ${frame("r3", "Progetto troppo grande", "Archivio 2025, 412 GB: spiegazione al posto dell'azione.", desk(panel({ state: "ok", menu: "archivio", hideSpace: true })))}
+    ${frame("r4", "Cache piena", "97,4 GB già sul Mac, Rendi disponibile su Showreel 2026.", desk(panel({ state: "ok", projects: FULL, menu: "showreel", hideSpace: true })))}
   </div>`),
-  group("impostazioni", "03", "Impostazioni", "Una finestra vera, aperta dall'ingranaggio del pannello o con Cmd+virgola.", `<div class="frames" style="grid-template-columns:minmax(0,1fr)">
-    ${frame("s1", "Finestra Impostazioni", "Account, questo Mac, spazio, generale, assistenza.", desk(settingsWindow(false), { align: "center" }))}
-    ${frame("s2", "Diagnostica inviata", "Il codice da dare a chi aiuta.", desk(settingsWindow(true), { align: "center" }))}
+  group("impostazioni", "03", "Impostazioni", C.imp === "pagina" ? "Una seconda pagina del pannello, aperta dall'ingranaggio." : "Una finestra vera, aperta dall'ingranaggio del pannello o con Cmd+virgola.", `<div class="frames" style="grid-template-columns:minmax(0,1fr)">
+    ${frame("s1", C.imp === "pagina" ? "Impostazioni nel pannello" : "Finestra Impostazioni", "Account, questo Mac, spazio, generale, assistenza.", desk(C.imp === "pagina" ? settingsPage(false) : settingsWindow(false), { align: "center" }))}
+    ${frame("s2", "Diagnostica inviata", "Il codice da dare a chi aiuta.", desk(C.imp === "pagina" ? settingsPage(true) : settingsWindow(true), { align: "center" }))}
   </div>`),
   group("notifiche", "04", "Notifiche", "Notifiche di macOS, solo per quello che succede mentre il pannello è chiuso.", `<div class="frames">
     ${frame("n1", "Tre notifiche", "Download finito, disco ricollegato, spazio liberato da solo.", desk(notifs()))}
   </div>`),
-  group("icona", "05", "Icona nella barra dei menu", "Immagine template: macOS la colora, lo stato passa dalla forma. Il lampeggio sono due immagini alternate.", `<div class="mbgrid">
-    ${[["ok", "Collegato", "fessura piena, LED pieno"], ["dl", "Download", "LED che lampeggia"], ["starting", "Avvio", "fessura vuota, LED vuoto che lampeggia"], ["off", "Non raggiungibile", "LED vuoto"], ["stop", "Spento", "icona attenuata, senza LED"]].map(([s, t, d]) => `<div class="mbs"><div class="bars"><div class="bl">${mbIcon(s)}</div><div class="bd">${mbIcon(s)}</div></div><div class="cap2"><b>${t}</b><span>${d}</span></div></div>`).join("")}
+  group("icona", "05", "Icone", "L'icona dell'app e l'icona della barra dei menu sono la stessa cosa: fessura e LED sullo stesso asse. Nella barra dei menu è un'immagine template: macOS la colora, lo stato passa dalla forma, il lampeggio sono due immagini alternate.", `<div class="appsizes" id="appsizes">${[128, 32, 16].map((n) => `<figure><div class="ai-wrap">${appIcon(n)}</div><figcaption>${n} px</figcaption></figure>`).join("")}<figure><div class="ai-wrap mb4">${["ok", "dl", "off", "stop", "starting"].map((x) => `<span class="l">${mbIcon(x)}</span>`).join("")}</div><div class="ai-wrap mb4 dk">${["ok", "dl", "off", "stop", "starting"].map((x) => `<span>${mbIcon(x)}</span>`).join("")}</div><figcaption>barra dei menu ingrandita 4 volte: collegato, download, non raggiungibile, spento, avvio</figcaption></figure></div>
+  <div class="mbgrid">
+    ${[["ok", "Collegato", "fessura e punto pieni"], ["dl", "Download", "il punto lampeggia"], ["starting", "Avvio", "fessura e anello vuoti, l'anello lampeggia"], ["off", "Non raggiungibile", "anello vuoto"], ["stop", "Spento", "solo la fessura, attenuata"]].map(([s, t, d]) => `<div class="mbs"><div class="bars"><div class="bl">${mbIcon(s)}</div><div class="bd">${mbIcon(s)}</div></div><div class="cap2"><b>${t}</b><span>${d}</span></div></div>`).join("")}
   </div>`),
   group("decisioni", "06", "Decisioni aperte", "Quattro scelte che cambiano il prodotto. Per ognuna la mia raccomandazione e perché.", `
     ${decision(1, "Spegni o Espelli", "La parola dell'azione nel piede del pannello e nella sua conferma.",
@@ -790,15 +900,19 @@ const html = [
       "A", "Finestra separata: è la convenzione del Mac (Cmd+virgola), c'è spazio per spiegare spazio e diagnostica, e il pannello resta a una cosa sola. La pagina nel pannello costringe a frasi da una riga proprio dove servono spiegazioni.")}
   `)
 ].join("");
-document.getElementById("stage").innerHTML = html;
+}
 
-// Scaled previews keep their real layout and take only the scaled height
-document.querySelectorAll("[data-scale]").forEach((o) => { o.style.height = Math.ceil(o.firstElementChild.offsetHeight * Number(o.dataset.scale)) + "px"; });
+function render() {
+  document.getElementById("stage").innerHTML = build();
+  // Scaled previews keep their real layout and take only the scaled height
+  document.querySelectorAll("[data-scale]").forEach((o) => { o.style.height = Math.ceil(o.firstElementChild.offsetHeight * Number(o.dataset.scale)) + "px"; });
+  // Interactions that the frames promise
+  document.querySelectorAll(".toggle").forEach((t) => t.addEventListener("click", () => t.setAttribute("aria-checked", String(t.getAttribute("aria-checked") !== "true"))));
+  document.querySelectorAll("[data-cap-range]").forEach((r) => r.addEventListener("input", () => { r.closest(".well").querySelector("[data-cap]").textContent = r.value + " GB"; }));
+  document.querySelectorAll("[data-send]").forEach((b) => b.addEventListener("click", () => { b.closest(".win").outerHTML = settingsWindow(true); }));
+  document.querySelectorAll("#choices [data-k]").forEach((b) => b.setAttribute("aria-pressed", String(C[b.dataset.k] === b.dataset.v)));
+}
 
-// Interactions that the frames promise
-document.querySelectorAll("[data-toggle], .toggle").forEach((t) => t.addEventListener("click", () => t.setAttribute("aria-checked", String(t.getAttribute("aria-checked") !== "true"))));
-document.querySelectorAll("[data-cap-range]").forEach((r) => r.addEventListener("input", () => { r.closest(".well").querySelector("[data-cap]").textContent = r.value + " GB"; }));
-document.querySelectorAll("[data-send]").forEach((b) => b.addEventListener("click", () => { const w = b.closest(".win"); w.outerHTML = settingsWindow(true); }));
 let left = 24;
 setInterval(() => { left = left <= 1 ? 30 : left - 1; document.querySelectorAll("[data-countdown]").forEach((e) => (e.textContent = left + " s")); }, 1000);
 
@@ -817,6 +931,39 @@ addEventListener("keydown", (e) => {
   else if (k === "p") body.dataset.chrome = body.dataset.chrome === "off" ? "on" : "off";
 });
 root.dataset.theme = load().theme || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+
+const valid = (k, v) => CONTROLS.some(([key, , opts]) => key === k && opts.some(([val]) => val === v));
+const writeChoices = () => {
+  history.replaceState(null, "", location.pathname + location.search + "#" + new URLSearchParams(C).toString());
+  save({ ...load(), choices: C });
+};
+const readChoices = () => {
+  const out = { ...DEF };
+  const stored = load().choices || {};
+  Object.keys(DEF).forEach((k) => { if (valid(k, stored[k])) out[k] = stored[k]; });
+  const h = new URLSearchParams(location.hash.slice(1));
+  Object.keys(DEF).forEach((k) => { if (valid(k, h.get(k))) out[k] = h.get(k); });
+  return out;
+};
+document.getElementById("choices").innerHTML = CONTROLS.map(([k, label, opts]) => `<span class="ch" role="group" aria-label="${label}"><span class="chl">${label}</span>${opts.map(([v, t]) => `<button data-k="${k}" data-v="${v}" aria-pressed="false">${t}</button>`).join("")}</span>`).join("") + '<button class="reset" data-reset>Ripristina consigliate</button>';
+document.getElementById("choices").addEventListener("click", (e) => {
+  const b = e.target.closest("button");
+  if (!b) return;
+  if (b.dataset.reset != null) C = { ...DEF };
+  else C = { ...C, [b.dataset.k]: b.dataset.v };
+  writeChoices();
+  render();
+});
+document.querySelector(".switch nav").addEventListener("click", (e) => {
+  const a = e.target.closest("a[href^='#']");
+  if (!a) return;
+  e.preventDefault();
+  const t = document.getElementById(a.getAttribute("href").slice(1));
+  if (t) scrollTo({ top: t.getBoundingClientRect().top + scrollY - document.querySelector(".switch").offsetHeight - 12 });
+});
+C = readChoices();
+writeChoices();
+render();
 </script>
 </body>
 </html>
