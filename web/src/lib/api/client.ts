@@ -54,6 +54,7 @@ export const isApiError = (error: unknown, code?: ErrorCode): error is ApiError 
 export interface Api {
   auth: {
     start(email: string): Promise<SignInStartResponse>
+    /** The request's state only: polling never yields a session. */
     status(requestId: string): Promise<SignInStatusResponse>
     verifyCode(requestId: string, code: string): Promise<Session>
     openLink(token: string): Promise<Session>
@@ -74,7 +75,10 @@ export interface Api {
     revoke(id: string): Promise<RevokeMacResponse>
   }
   disks: {
+    /** Live disks, `creating` ones included. */
     list(): Promise<Disk[]>
+    /** One disk, also after its creation failed (then soft deleted and out of the list). */
+    get(id: string): Promise<Disk>
     create(body: CreateDiskRequest): Promise<Disk>
     update(id: string, body: UpdateDiskRequest): Promise<Disk>
   }

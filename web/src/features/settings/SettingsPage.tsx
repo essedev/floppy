@@ -7,7 +7,7 @@
 import { Mail } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 import { Button } from '@/components/Button'
-import { Readout, State } from '@/components/detail'
+import { Readout, SlotNote, State } from '@/components/detail'
 import { Field, Input } from '@/components/Field'
 import { useErrorText } from '@/components/error-text'
 import { PageHeader, QueryView, SkeletonLines } from '@/components/states'
@@ -77,7 +77,8 @@ function SettingsForm({ settings }: { settings: Settings }) {
       {
         organizationName: form.organizationName.trim(),
         mail: { host: form.host.trim(), port, username: form.username.trim(), sender: form.sender.trim(), password: form.password || undefined },
-        storage: { endpoint: form.endpoint.trim(), region: form.region.trim(), bucket: form.bucket.trim() },
+        // Storage is sent only while no disk holds it in its format (storage_in_use otherwise).
+        storage: settings.storageLocked ? undefined : { endpoint: form.endpoint.trim(), region: form.region.trim(), bucket: form.bucket.trim() },
       },
       {
         onSuccess: (next) => {
@@ -89,7 +90,7 @@ function SettingsForm({ settings }: { settings: Settings }) {
     )
   }
 
-  const text = (key: keyof Form, label: string, opts: { mono?: boolean; type?: string; hint?: string; autoComplete?: string } = {}) => (
+  const text = (key: keyof Form, label: string, opts: { mono?: boolean; type?: string; hint?: string; autoComplete?: string; disabled?: boolean } = {}) => (
     <Field label={label} hint={opts.hint} error={missing(key) ? t.settings.required : null}>
       {(id, describedBy) => (
         <Input
@@ -97,6 +98,7 @@ function SettingsForm({ settings }: { settings: Settings }) {
           mono={opts.mono}
           type={opts.type}
           autoComplete={opts.autoComplete ?? 'off'}
+          disabled={opts.disabled}
           value={String(form[key])}
           invalid={missing(key)}
           aria-describedby={describedBy}
@@ -143,11 +145,12 @@ function SettingsForm({ settings }: { settings: Settings }) {
       </Section>
 
       <Section title={t.settings.storageTitle} lead={t.settings.storageLead}>
+        {settings.storageLocked && <SlotNote className="text-[13.5px] text-ink-2">{t.settings.storageLocked}</SlotNote>}
         <div className="grid gap-3.5 sm:grid-cols-2">
-          {text('endpoint', t.settings.endpoint, { mono: true })}
-          {text('region', t.settings.region, { mono: true })}
+          {text('endpoint', t.settings.endpoint, { mono: true, disabled: settings.storageLocked })}
+          {text('region', t.settings.region, { mono: true, disabled: settings.storageLocked })}
         </div>
-        {text('bucket', t.settings.bucket, { mono: true })}
+        {text('bucket', t.settings.bucket, { mono: true, disabled: settings.storageLocked })}
         <div>
           <Button busy={probe.isPending} onClick={() => probe.mutate({ endpoint: form.endpoint, region: form.region, bucket: form.bucket })}>
             {t.settings.probe}

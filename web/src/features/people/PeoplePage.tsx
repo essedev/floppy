@@ -17,7 +17,7 @@ import { EmptyState, PageHeader, QueryView, SkeletonRows } from '@/components/st
 import { fmt, rich, useI18n } from '@/i18n'
 import type { Person, Role } from '@/lib/api'
 import { useFormat } from '@/lib/format'
-import { useFlash } from '@/lib/hooks'
+import { useFlash, useNow } from '@/lib/hooks'
 import { useCurrentSession } from '@/features/auth/hooks'
 import { KeyNotice } from '@/features/key/KeyNotice'
 import { useMacs } from '@/features/macs/hooks'
@@ -133,11 +133,22 @@ function PersonRow({ person, onRemove, onFlash }: { person: Person; onRemove(): 
   const removed = person.status === 'removed'
   const name = displayName(person)
 
+  const now = useNow(60_000)
+  // Past its 7 days an invitation no longer lets the person in: the admin resends it.
+  const expired = person.status === 'invited' && person.inviteExpiresAt !== null && Date.parse(person.inviteExpiresAt) <= now
   const status =
-    person.status === 'active' ? <State led="ok">{t.people.active}</State> : person.status === 'invited' ? <State led="off">{t.people.invited}</State> : <State led="err">{t.people.removed}</State>
+    person.status === 'active' ? (
+      <State led="ok">{t.people.active}</State>
+    ) : person.status === 'invited' ? (
+      <State led="off">{expired ? t.people.inviteExpired : t.people.invited}</State>
+    ) : (
+      <State led="err">{t.people.removed}</State>
+    )
   const last =
     person.status === 'removed' && person.removedAt
       ? fmt(t.people.removedOn, { date: f.relative(person.removedAt) })
+      : expired && person.inviteExpiresAt
+        ? fmt(t.people.expiredOn, { date: f.relative(person.inviteExpiresAt) })
       : person.status === 'invited' && person.invitedAt
         ? fmt(t.people.invitedOn, { date: f.relative(person.invitedAt) })
         : person.lastSignInAt

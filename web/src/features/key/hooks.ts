@@ -9,7 +9,11 @@ export function useKeyStatus() {
   return useQuery({
     queryKey: queryKeys.key,
     queryFn: () => api.key.get(),
-    refetchInterval: (query) => (query.state.data?.rotation?.state === 'applying' ? 700 : false),
+    // Fast while applying; slower while awaiting, for the informative Macs count.
+    refetchInterval: (query) => {
+      const state = query.state.data?.rotation?.state
+      return state === 'applying' ? 700 : state === 'awaiting_old_key_deletion' ? 3000 : false
+    },
   })
 }
 

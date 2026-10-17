@@ -16,6 +16,7 @@ import { useNow } from '@/lib/hooks'
 import { useCurrentSession } from '@/features/auth/hooks'
 import { useRecentActivity } from '@/features/audit/hooks'
 import { useDescribe } from '@/features/audit/describe'
+import { DiskState } from '@/features/disks/DiskState'
 import { useDisks } from '@/features/disks/hooks'
 import { KeyNotice } from '@/features/key/KeyNotice'
 import { useMacs } from '@/features/macs/hooks'
@@ -37,13 +38,13 @@ function DiskCard({ disk }: { disk: Disk }) {
   return (
     <Well className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-[18px] max-sm:grid-cols-1">
       <div className="grid justify-items-center gap-1.5 max-sm:justify-items-start">
-        <Faceplate state={online ? 'ok' : 'err'} fill={usedFill(disk.usedBytes)} label={fmt(t.overview.faceLabel, { name: disk.name, used: f.bytes(disk.usedBytes) })} />
+        <Faceplate state={disk.state === 'creating' ? 'dl' : online ? 'ok' : 'err'} fill={usedFill(disk.usedBytes)} label={fmt(t.overview.faceLabel, { name: disk.name, used: f.bytes(disk.usedBytes) })} />
         <Readout className="whitespace-nowrap">{fmt(t.overview.usedReadout, { used: f.bytes(disk.usedBytes) })}</Readout>
       </div>
       <div className="min-w-0">
         <h3 className="flex items-center gap-2.5 text-lg font-bold tracking-[-0.015em]">{disk.name}</h3>
         <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[13.5px] text-ink-2">
-          <State led={online ? 'ok' : 'err'}>{online ? t.overview.online : t.overview.unreachable}</State>
+          <DiskState disk={disk} />
           <span>{disk.lastWriteAt ? fmt(t.overview.lastWrite, { time: f.relative(disk.lastWriteAt) }) : t.overview.noWrites}</span>
         </div>
         <dl className="mt-2.5 flex flex-wrap gap-x-[22px] gap-y-2">

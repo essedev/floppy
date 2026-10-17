@@ -78,6 +78,7 @@ export const httpApi: Api = {
   },
   disks: {
     list: () => request('GET', '/disks'),
+    get: (diskId) => request('GET', `/disks/${id(diskId)}`),
     create: (body) => request('POST', '/disks', body),
     update: (diskId, body) => request('PATCH', `/disks/${id(diskId)}`, body),
   },
@@ -100,3 +101,13 @@ export const httpApi: Api = {
     probeStorage: (body) => request('POST', '/settings/storage/probe', body),
   },
 }
+
+/** The app's endpoints, for reference: the web never calls them (types at the end of types.ts). */
+export const APP_PATHS = {
+  signIn: 'POST /auth/app/sign-in',
+  token: 'POST /auth/app/token',
+  register: 'POST /device/register',
+  config: 'GET /device/config',
+  heartbeat: 'POST /device/heartbeat',
+  signOut: 'POST /device/sign-out',
+} as const

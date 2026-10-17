@@ -14,7 +14,7 @@ import { Field, Input } from '@/components/Field'
 import { AppIcon, Wordmark } from '@/components/marks'
 import { useErrorText } from '@/components/error-text'
 import { fmt, plural, rich, useI18n } from '@/i18n'
-import { isApiError, type SignInStartResponse } from '@/lib/api'
+import { api, isApiError, type SignInStartResponse } from '@/lib/api'
 import { queryKeys } from '@/lib/api/keys'
 import { useFormat } from '@/lib/format'
 import { useNow } from '@/lib/hooks'
@@ -24,7 +24,8 @@ import { useSignInStatus, useStartSignIn, useVerifyCode } from './hooks'
 
 const PENDING_KEY = 'floppy.signin'
 
-type Step = { kind: 'form'; email: string } | { kind: 'waiting'; request: SignInStartResponse } | { kind: 'expired' | 'locked'; email: string }
+type DeadEnd = 'expired' | 'locked' | 'elsewhere'
+type Step = { kind: 'form'; email: string } | { kind: 'waiting'; request: SignInStartResponse } | { kind: DeadEnd; email: string }
 
 function savedStep(): Step {
   try {
@@ -68,10 +69,13 @@ export function SignInPage() {
   const from = (location.state as { from?: string } | null)?.from ?? '/'
   const client = useQueryClient()
 
-  const done = () => {
+  // Polling never yields a session: if the link was opened in another browser, this one is
+  // still signed out and says so instead of looping back to the form.
+  const done = async (email: string) => {
     remember(null)
-    void client.invalidateQueries({ queryKey: queryKeys.session })
-    navigate(from, { replace: true })
+    const session = await client.fetchQuery({ queryKey: queryKeys.session, queryFn: () => api.auth.session(), staleTime: 0 }).catch(() => null)
+    if (session) navigate(from, { replace: true })
+    else setStep({ kind: 'elsewhere', email })
   }
 
   return (
@@ -90,7 +94,7 @@ export function SignInPage() {
         <WaitingStep
           key={step.request.requestId}
           request={step.request}
-          onSignedIn={done}
+          onSignedIn={() => void done(step.request.email)}
           onRestart={(kind) => {
             remember(null)
             setStep(kind === 'form' ? { kind: 'form', email: step.request.email } : { kind, email: step.request.email })
@@ -101,7 +105,7 @@ export function SignInPage() {
           }}
         />
       )}
-      {(step.kind === 'expired' || step.kind === 'locked') && <DeadEndStep kind={step.kind} email={step.email} onSent={(request) => {
+      {(step.kind === 'expired' || step.kind === 'locked' || step.kind === 'elsewhere') && <DeadEndStep kind={step.kind} email={step.email} onSent={(request) => {
         remember(request)
         setStep({ kind: 'waiting', request })
       }} />}
@@ -262,17 +266,21 @@ function WaitingStep({ request, onSignedIn, onRestart, onResent }: {
   )
 }
 
-function DeadEndStep({ kind, email, onSent }: { kind: 'expired' | 'locked'; email: string; onSent(request: SignInStartResponse): void }) {
+function DeadEndStep({ kind, email, onSent }: { kind: DeadEnd; email: string; onSent(request: SignInStartResponse): void }) {
   const { t } = useI18n()
   const errorText = useErrorText()
   const start = useStartSignIn()
-  const expired = kind === 'expired'
+  const text = {
+    expired: [t.auth.expiredState, t.auth.expiredTitle, t.auth.expiredBody],
+    locked: [t.auth.lockedState, t.auth.lockedTitle, t.auth.lockedBody],
+    elsewhere: [t.auth.elsewhereState, t.auth.elsewhereTitle, t.auth.elsewhereBody],
+  }[kind]
   return (
     <div className="grid gap-5">
       <div className="grid gap-3">
-        <State led="err">{expired ? t.auth.expiredState : t.auth.lockedState}</State>
-        <h1 className="text-[26px] leading-[1.15] font-bold tracking-[-0.025em]">{expired ? t.auth.expiredTitle : t.auth.lockedTitle}</h1>
-        <p className="text-[14.5px] text-ink-2">{expired ? t.auth.expiredBody : t.auth.lockedBody}</p>
+        <State led={kind === 'elsewhere' ? 'off' : 'err'}>{text[0]}</State>
+        <h1 className="text-[26px] leading-[1.15] font-bold tracking-[-0.025em]">{text[1]}</h1>
+        <p className="text-[14.5px] text-ink-2">{text[2]}</p>
       </div>
       <Button variant="ink" busy={start.isPending} onClick={() => start.mutate(email, { onSuccess: onSent })}>
         <Mail size={17} aria-hidden />

@@ -1,7 +1,9 @@
 /*
   Disks (concept-e-admin, "Dischi"): each disk is a JuiceFS volume with its own Valkey
-  database, a prefix in the organization's bucket, 1 MB blocks (DECISIONS #15), a trash and
-  the cache expiry its Macs get (each Mac sizes its own cache). Names never change: CapCut keeps full paths.
+  database, its objects under <bucket>/<volumeName>/, 1 MB blocks (DECISIONS #15), a trash and
+  the cache expiry its Macs get (each Mac sizes its own cache). On a Mac it is a folder,
+  /Volumes/Floppy/<name>; names never change, CapCut keeps full paths. Creating one is a state:
+  the format runs after the answer, and can fail.
 */
 
 import { Plus } from 'lucide-react'
@@ -14,19 +16,28 @@ import { Field, Input } from '@/components/Field'
 import { Faceplate } from '@/components/marks'
 import { useErrorText } from '@/components/error-text'
 import { EmptyState, PageHeader, QueryView, SkeletonRows } from '@/components/states'
-import { fmt, plural, useI18n } from '@/i18n'
+import { fmt, plural, rich, useI18n } from '@/i18n'
 import type { CachePolicy, Disk } from '@/lib/api'
+import { VOLUME_NAME } from '@/lib/api/types'
 import { useFormat } from '@/lib/format'
 import { useFlash } from '@/lib/hooks'
-import { useCreateDisk, useDisks, useUpdateDisk } from './hooks'
+import { DiskState } from './DiskState'
+import { useCreateDisk, useDiskCreation, useDisks, useUpdateDisk } from './hooks'
 
 const slugify = (s: string) =>
   s
     .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
+    .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
+    .slice(0, 63)
+    .replace(/-+$/, '')
+
+/** A name that can be a folder in the Finder: no slash or colon, not hidden, up to 60. */
+const folderOk = (s: string) => s.length >= 1 && s.length <= 60 && !/[/:]/.test(s) && !s.startsWith('.')
+/** Where a disk appears on a Mac. */
+const mountPathOf = (name: string) => `/Volumes/Floppy/${name || '...'}`
 
 /** Parses a whole number in a range, or null. */
 const intIn = (value: string, min: number, max: number) => {
@@ -39,18 +50,21 @@ function NewDiskDialog({ onClose, onCreated }: { onClose(): void; onCreated(disk
   const errorText = useErrorText()
   const create = useCreateDisk()
   const [name, setName] = useState('')
-  const [prefix, setPrefix] = useState('')
-  const [prefixTouched, setPrefixTouched] = useState(false)
+  const [volumeName, setVolumeName] = useState('')
+  const [touched, setTouched] = useState(false)
   const [trash, setTrash] = useState('7')
   const [tried, setTried] = useState(false)
-  const effectivePrefix = prefixTouched ? prefix : slugify(name)
+  const clean = name.trim()
+  const effectiveVolume = touched ? volumeName : slugify(name)
   const trashDays = intIn(trash, 0, 365)
-  const prefixOk = /^[a-z0-9][a-z0-9-]*$/.test(effectivePrefix)
+  const volumeOk = VOLUME_NAME.test(effectiveVolume)
+  const nameOk = folderOk(clean)
+  const bucket = useDisks().data?.[0]?.bucket ?? 'bucket'
 
   const submit = () => {
     setTried(true)
-    if (!name.trim() || !prefixOk || trashDays === null) return
-    create.mutate({ name: name.trim(), prefix: effectivePrefix, trashDays }, { onSuccess: onCreated })
+    if (!nameOk || !volumeOk || trashDays === null) return
+    create.mutate({ name: clean, volumeName: effectiveVolume, trashDays }, { onSuccess: onCreated })
   }
 
   return (
@@ -70,20 +84,26 @@ function NewDiskDialog({ onClose, onCreated }: { onClose(): void; onCreated(disk
         </>
       }
     >
-      <Field label={t.disks.name} hint={t.disks.nameHint} error={tried && !name.trim() ? t.disks.required : create.isError ? errorText(create.error) : null}>
-        {(id, describedBy) => <Input id={id} autoFocus value={name} invalid={tried && !name.trim()} aria-describedby={describedBy} onChange={(e) => setName(e.target.value)} />}
+      <Field
+        label={t.disks.name}
+        hint={rich(t.disks.nameHint, { path: <span className="num text-ink">{mountPathOf(clean)}</span> })}
+        error={tried && !nameOk ? (clean ? t.disks.nameRule : t.disks.required) : null}
+      >
+        {(id, describedBy) => <Input id={id} autoFocus maxLength={60} value={name} invalid={tried && !nameOk} aria-describedby={describedBy} onChange={(e) => setName(e.target.value)} />}
       </Field>
-      <Field label={t.disks.prefix} hint={t.disks.prefixHint} error={tried && !prefixOk ? t.disks.prefixHint : null}>
+      <Field label={t.disks.volumeName} hint={fmt(t.disks.volumeNameHint, { bucket, name: effectiveVolume || '...' })} error={tried && !volumeOk ? fmt(t.disks.volumeNameHint, { bucket, name: effectiveVolume || '...' }) : null}>
         {(id, describedBy) => (
           <Input
             id={id}
             mono
-            value={effectivePrefix}
-            invalid={tried && !prefixOk}
+            maxLength={63}
+            spellCheck={false}
+            value={effectiveVolume}
+            invalid={tried && !volumeOk}
             aria-describedby={describedBy}
             onChange={(e) => {
-              setPrefixTouched(true)
-              setPrefix(e.target.value)
+              setTouched(true)
+              setVolumeName(e.target.value)
             }}
           />
         )}
@@ -96,6 +116,11 @@ function NewDiskDialog({ onClose, onCreated }: { onClose(): void; onCreated(disk
       <Field label={t.disks.trashDays} error={tried && trashDays === null ? fmt(t.disks.numberRange, { min: 0, max: 365 }) : null}>
         {(id, describedBy) => <Input id={id} mono inputMode="numeric" className="!w-[110px]" value={trash} invalid={tried && trashDays === null} aria-describedby={describedBy} onChange={(e) => setTrash(e.target.value)} />}
       </Field>
+      {create.isError && (
+        <p className="text-[13px] text-bad-text" role="alert">
+          {errorText(create.error)}
+        </p>
+      )}
     </Dialog>
   )
 }
@@ -146,6 +171,21 @@ function EditDialog({ disk, onClose, onSaved }: { disk: Disk; onClose(): void; o
   )
 }
 
+/** A path or host with break opportunities after its separators, never inside a word. */
+function Breakable({ text }: { text: string }) {
+  const parts = text.split(/(?<=[/.-])/)
+  return (
+    <span className="num">
+      {parts.map((part, i) => (
+        <span key={i}>
+          {part}
+          {i < parts.length - 1 && <wbr />}
+        </span>
+      ))}
+    </span>
+  )
+}
+
 function Row({ term, children }: { term: string; children: ReactNode }) {
   return (
     <>
@@ -158,22 +198,23 @@ function Row({ term, children }: { term: string; children: ReactNode }) {
 function DiskDetail({ disk, onEdit }: { disk: Disk; onEdit(): void }) {
   const { t, locale } = useI18n()
   const f = useFormat()
-  const online = disk.status === 'online'
+  const ready = disk.state === 'ready'
   return (
     <Well>
       <div className="mb-4 flex items-center gap-3.5">
-        <Faceplate state={online ? 'ok' : 'err'} />
+        <Faceplate state={!ready ? 'dl' : disk.status === 'online' ? 'ok' : 'err'} />
         <div>
           <h2 className="text-lg font-bold tracking-[-0.015em]">{disk.name}</h2>
           <div className="mt-1">
-            <State led={online ? 'ok' : 'err'}>{online ? t.overview.online : t.overview.unreachable}</State>
+            <DiskState disk={disk} />
           </div>
         </div>
       </div>
       <dl className="m-0 grid grid-cols-[auto_minmax(0,1fr)] gap-x-[18px] gap-y-1.5 text-sm">
-        <Row term={t.disks.bucket}><span className="num">{disk.bucket}/{disk.prefix}</span></Row>
+        <Row term={t.disks.onMac}><Breakable text={disk.mountPath} /></Row>
+        <Row term={t.disks.bucket}><Breakable text={`${disk.bucket}/${disk.volumeName}/`} /></Row>
         <Row term={t.disks.region}><span className="num">{disk.region}</span></Row>
-        <Row term={t.disks.endpoint}><span className="num">{disk.endpoint}</span></Row>
+        <Row term={t.disks.endpoint}><Breakable text={disk.endpoint} /></Row>
         <Row term={t.disks.database}><span className="num">{fmt(t.disks.databaseValue, { n: disk.metaDb })}</span></Row>
         <Row term={t.disks.blocks}><span className="num">{disk.blockSizeKb >= 1024 ? `${disk.blockSizeKb / 1024} MB` : `${disk.blockSizeKb} KB`}</span></Row>
         <Row term={t.disks.trash}>{fmt(t.disks.trashValue, { days: disk.trashDays, size: f.bytes(disk.trashBytes) })}</Row>
@@ -182,7 +223,7 @@ function DiskDetail({ disk, onEdit }: { disk: Disk; onEdit(): void }) {
       </dl>
       <div className="mt-5 flex items-center justify-between gap-3 border-t border-line pt-4">
         <h3 className="eyebrow m-0">{t.disks.cacheTitle}</h3>
-        <Button size="sm" onClick={onEdit}>
+        <Button size="sm" onClick={onEdit} disabled={!ready} title={ready ? undefined : t.disks.creatingNote}>
           {t.common.edit}
         </Button>
       </div>
@@ -195,6 +236,47 @@ function DiskDetail({ disk, onEdit }: { disk: Disk; onEdit(): void }) {
   )
 }
 
+/** Follows a disk's creation to its end: creating, created, or failed with the reason. */
+function CreationNotice({ id, onClose }: { id: string; onClose(): void }) {
+  const { t } = useI18n()
+  const creation = useDiskCreation(id)
+  const disk = creation.data
+  if (!disk) return null
+  if (disk.state === 'creating') {
+    return <Notice className="mb-3.5" state={<State led="dl" blink>{t.disks.creatingState}</State>} text={fmt(t.disks.creatingBody, { name: disk.name })} />
+  }
+  if (disk.state === 'failed') {
+    return (
+      <Notice
+        className="mb-3.5"
+        state={<State led="err">{t.disks.failedState}</State>}
+        text={fmt(t.disks.failedBody, { name: disk.name, message: disk.error?.message ?? '' })}
+        action={
+          <Button size="sm" variant="raised" onClick={onClose}>
+            {t.common.close}
+          </Button>
+        }
+      />
+    )
+  }
+  return (
+    <Notice
+      className="mb-3.5"
+      state={<State led="ok">{t.common.done}</State>}
+      text={
+        <>
+          {fmt(t.disks.createdDone, { name: disk.name })} · <span className="num">{disk.mountPath}</span>
+        </>
+      }
+      action={
+        <Button size="sm" variant="raised" onClick={onClose}>
+          {t.common.close}
+        </Button>
+      }
+    />
+  )
+}
+
 /** The disks page: the list on the left, the selected disk on the right. */
 export function DisksPage() {
   const { t } = useI18n()
@@ -203,6 +285,7 @@ export function DisksPage() {
   const [params, setParams] = useSearchParams()
   const [editing, setEditing] = useState<Disk | null>(null)
   const [flash, setFlash] = useFlash<string>()
+  const [tracking, setTracking] = useState<string | null>(null)
   const creating = params.get('nuovo') === '1'
   const setCreating = (open: boolean) =>
     setParams((p) => {
@@ -225,6 +308,7 @@ export function DisksPage() {
   return (
     <>
       <PageHeader title={t.disks.title} lead={t.disks.lead} actions={newButton} />
+      {tracking && <CreationNotice id={tracking} onClose={() => setTracking(null)} />}
       {flash && <Notice className="mb-3.5" state={<State led="ok">{t.common.done}</State>} text={flash} />}
       <QueryView
         query={disks}
@@ -262,7 +346,7 @@ export function DisksPage() {
                           </button>
                         </td>
                         <td>
-                          <State led={d.status === 'online' ? 'ok' : 'err'}>{d.status === 'online' ? t.overview.online : t.overview.unreachable}</State>
+                          <DiskState disk={d} />
                         </td>
                         <td className="num text-right">{f.bytes(d.usedBytes)}</td>
                         <td className="num text-right">{f.number(d.fileCount)}</td>
@@ -282,7 +366,7 @@ export function DisksPage() {
           onClose={() => setCreating(false)}
           onCreated={(disk) => {
             setParams({ disco: disk.id })
-            setFlash(fmt(t.disks.createdDone, { name: disk.name }))
+            setTracking(disk.id)
           }}
         />
       )}

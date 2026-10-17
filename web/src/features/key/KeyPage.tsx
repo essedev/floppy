@@ -8,11 +8,11 @@
 import { Check } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 import { Button } from '@/components/Button'
-import { Led, Notice, Readout, SlotList, State } from '@/components/detail'
+import { Led, Notice, Readout, SlotList, SlotNote, State } from '@/components/detail'
 import { Checkbox, Field, Input } from '@/components/Field'
 import { useErrorText } from '@/components/error-text'
 import { PageHeader, QueryView, SkeletonLines } from '@/components/states'
-import { fmt, rich, useI18n } from '@/i18n'
+import { fmt, plural, rich, useI18n } from '@/i18n'
 import type { KeyStatus, StepState } from '@/lib/api'
 import { useFormat } from '@/lib/format'
 import { useFlash, useNow } from '@/lib/hooks'
@@ -83,7 +83,7 @@ function RiskBox({ status }: { status: KeyStatus }) {
 }
 
 function Steps({ status }: { status: KeyStatus }) {
-  const { t } = useI18n()
+  const { t, locale } = useI18n()
   const errorText = useErrorText()
   const start = useStartRotation()
   const close = useCloseWindow()
@@ -96,6 +96,8 @@ function Steps({ status }: { status: KeyStatus }) {
   const r = status.rotation
   const stage = !r || r.state === 'failed' ? 2 : r.state === 'applying' ? 3 : 4
   // Step 1 happens at the provider, out of sight: it shows as done only once a key was applied.
+  // Exposures after the rotation started stay open when it closes (DATABASE_SCHEMA.md, "Key window").
+  const later = r ? (status.window?.reasons.filter((x) => x.at >= r.startedAt).length ?? 0) : 0
   const look = (n: number): Look => (n === 1 && stage === 2 ? 'ready' : n < stage ? 'done' : n === stage ? 'cur' : 'todo')
 
   const submit = () => {
@@ -135,8 +137,8 @@ function Steps({ status }: { status: KeyStatus }) {
               </div>
               {r?.state === 'failed' && r.error && (
                 <div className="notice grid gap-1.5 px-4 py-3.5 text-sm" role="alert">
-                  <State led="err">{t.key.probeFailed}</State>
-                  <span className="text-ink-2">{rich(t.key.probeFailedBody, { bucket: <b className="num font-normal text-ink">{bucket}</b> })}</span>
+                  <State led="err">{r.error.step === 'probe' ? t.key.probeFailed : t.common.failed}</State>
+                  {r.error.step === 'probe' && <span className="text-ink-2">{rich(t.key.probeFailedBody, { bucket: <b className="num font-normal text-ink">{bucket}</b> })}</span>}
                   <code className="num text-[12.5px] text-ink-2">
                     {r.error.code} · {r.error.request}
                   </code>
@@ -153,6 +155,7 @@ function Steps({ status }: { status: KeyStatus }) {
         </Step>
         <Step n={3} look={look(3)} title={t.key.step3Title} body={t.key.step3Body}>
           {r && r.state !== 'failed' && (
+            <>
             <Progress
               items={[
                 { label: t.key.progressProbe, state: r.probe },
@@ -164,15 +167,26 @@ function Steps({ status }: { status: KeyStatus }) {
                 },
               ]}
             />
+            {r.state === 'awaiting_old_key_deletion' && r.macs.updated < r.macs.total && <SlotNote className="text-[13px] text-ink-2">{t.key.macsInformative}</SlotNote>}
+            </>
           )}
         </Step>
         <Step n={4} look={look(4)} title={t.key.step4Title} body={t.key.step4Body}>
           {r?.state === 'awaiting_old_key_deletion' && (
             <>
-              <Checkbox label={rich(t.key.confirmDeleted, { tail: <span className="num">{r.oldKeyTail}</span> })} checked={deleted} onChange={(e) => setDeleted(e.target.checked)} />
+              <Checkbox
+                label={
+                  r.oldKeyTails.length === 1
+                    ? rich(t.key.confirmDeleted, { tail: <span className="num">{r.oldKeyTails[0]}</span> })
+                    : rich(t.key.confirmDeletedMany, { tails: <span className="num">{r.oldKeyTails.join(', ')}</span> })
+                }
+                checked={deleted}
+                onChange={(e) => setDeleted(e.target.checked)}
+              />
+              {later > 0 && <SlotNote className="text-[13px] text-ink-2">{plural(t.key.laterExposures, later, locale)}</SlotNote>}
               {close.isError && <p className="text-[13px] text-bad-text" role="alert">{errorText(close.error)}</p>}
               <div>
-                <Button variant="ink" disabled={!deleted} busy={close.isPending} onClick={() => close.mutate(r.id, { onSuccess: () => setFlash(t.key.closedDone) })}>
+                <Button variant="ink" disabled={!deleted} busy={close.isPending} onClick={() => close.mutate(r.id, { onSuccess: (next) => setFlash(next.window ? t.key.stillOpen : t.key.closedDone) })}>
                   {t.key.closeWindow}
                 </Button>
               </div>

@@ -1,24 +1,29 @@
 /*
   FAKE API. An in-memory stand-in for the control plane, used while the backend does not
   exist (VITE_API=fake, the default of `pnpm dev`). It implements the same `Api` interface as
-  http.ts with realistic latency, seeded data (seed.ts) and the rules the backend must keep:
-  members see only their own Macs, only admins invite, removing a person revokes their Macs
-  and opens the key window (revoking a Mac does too), the last admin cannot be demoted, a sign-in answers the same for unknown addresses.
+  http.ts with realistic latency, seeded data (seed.ts) and the rules of docs/DATABASE_SCHEMA.md
+  ("State machines"): members see only their own Macs; only admins invite, and an invitation
+  lasts 7 days; removing a person revokes their Macs and opens the key window, as revoking a Mac
+  does, but only if a Mac ever had the key; the last admin cannot be demoted; a sign-in answers
+  the same for unknown addresses and polling never signs in; a rotation awaits the old key's
+  deletion once every disk is configured, and closing it closes only the exposures that happened
+  before it started; storage settings are locked while a disk exists; at most 15 disks.
 
   State persists in localStorage so reloads keep it; `fakeControl` resets it, switches the
   scenario, makes every call fail like a network outage, and exposes the last email "sent".
   Deterministic triggers for error states:
     - an access key containing DENIED makes the rotation's probe write fail (AccessDenied);
     - a storage probe on a bucket other than the organization's fails (NoSuchBucket);
+    - a new disk whose name in the bucket contains "fail" fails its format;
     - ?fake=empty seeds a new organization, ?fake=fail starts with the network down,
       ?fake=default goes back to the full one.
 */
 
 import { ApiError, type Api } from '../client'
-import type { AuditEvent, AuditQuery, Disk, KeyStatus, Mac, Person, Rotation, Session, StepState } from '../types'
-import { DEFAULT_CACHE, LATEST_APP, seed, type FakeDb, type MacRow, type PersonRow, type Scenario } from './seed'
+import { VOLUME_NAME, type AuditEvent, type AuditQuery, type Disk, type KeyStatus, type Mac, type Person, type Rotation, type Session, type StepState } from '../types'
+import { DEFAULT_CACHE, INVITE_TTL, LATEST_APP, mountPathOf, seed, type DiskRow, type FakeDb, type MacRow, type PersonRow, type Scenario } from './seed'
 
-const DB_KEY = 'floppy.fake.db.v2'
+const DB_KEY = 'floppy.fake.db.v3'
 const SESSION_KEY = 'floppy.fake.session'
 const FAILING_KEY = 'floppy.fake.failing'
 const OUTBOX_KEY = 'floppy.fake.outbox'
@@ -27,6 +32,9 @@ const LINK_TTL = 15 * 60_000
 const RESEND_AFTER = 60_000
 const MAX_ATTEMPTS = 5
 const CONNECTED_WITHIN = 2 * 60_000
+const FORMAT_MS = 3_000
+/** Valkey's 16 databases, the first left empty (DATABASE_SCHEMA.md, open question 10). */
+const DISK_LIMIT = 15
 
 // Storage can be missing or throw (private windows): the fake then lives in memory only.
 function read<T>(key: string): T | null {
@@ -75,6 +83,7 @@ const notify = () => listeners.forEach((fn) => fn())
 const now = () => Date.now()
 const iso = (t = now()) => new Date(t).toISOString()
 const uid = (prefix: string) => `${prefix}-${Math.random().toString(36).slice(2, 10)}`
+const SYSTEM = { kind: 'system' as const, id: null, label: null }
 
 /** Waits like a network round trip, then fails if the fake network is down. */
 async function latency(min = 220, max = 600): Promise<void> {
@@ -99,7 +108,8 @@ function requireAdmin(): PersonRow {
   if (user.role !== 'admin') throw new ApiError(403, 'forbidden', 'Admins only')
   return user
 }
-const actorOf = (p: PersonRow) => ({ id: p.id, name: p.name ?? p.email })
+const actorOf = (p: PersonRow) => ({ kind: 'person' as const, id: p.id, label: p.name ?? p.email })
+const inviteLive = (p: PersonRow) => p.inviteExpiresAt !== null && Date.parse(p.inviteExpiresAt) > now()
 
 function sessionOf(user: PersonRow): Session {
   return {
@@ -115,18 +125,20 @@ function sessionOf(user: PersonRow): Session {
   }
 }
 
-function startSession(userId: string): Session {
+function startSession(userId: string, via: 'link' | 'code'): Session {
   write(SESSION_KEY, userId)
   const person = db.people.find((p) => p.id === userId)
   if (!person) throw new ApiError(401, 'unauthorized', 'Unknown user')
   if (person.status === 'invited') {
-    // First sign-in: the membership becomes active and the name comes from the address.
+    // First sign-in accepts the invitation; the name comes from the address.
     person.status = 'active'
+    person.inviteExpiresAt = null
     const local = person.email.split('@')[0] ?? person.email
     person.name = local.charAt(0).toUpperCase() + local.slice(1)
+    log({ actor: actorOf(person), action: 'invite_accepted', category: 'people', target: { kind: 'person', id: person.id, label: person.name }, detail: {} })
   }
   person.lastSignInAt = iso()
-  log({ actor: actorOf(person), action: 'signed_in', category: 'access', target: { kind: 'person', id: person.id, label: person.name ?? person.email }, detail: {} })
+  log({ actor: actorOf(person), action: 'signed_in', category: 'access', target: { kind: 'person', id: person.id, label: person.name ?? person.email }, detail: { via, kind: 'web' } })
   save()
   return sessionOf(person)
 }
@@ -165,69 +177,105 @@ function toPerson(p: PersonRow, me: PersonRow): Person {
   }
 }
 
+function toDisk(d: DiskRow): Disk {
+  const { formatDoneAt: _done, formatFails: _fails, ...disk } = d
+  return structuredClone(disk)
+}
+
 function log(event: Omit<AuditEvent, 'id' | 'at'>): void {
   db.audit.unshift({ ...event, id: uid('e'), at: iso() })
+}
+
+// Disks being created finish their fake format after a few seconds.
+function advanceDisks(): void {
+  let changed = false
+  for (const d of [...db.disks]) {
+    if (d.state !== 'creating' || !d.formatDoneAt || Date.parse(d.formatDoneAt) > now()) continue
+    changed = true
+    d.formatDoneAt = null
+    if (d.formatFails) {
+      d.state = 'failed'
+      d.error = { code: 'format_failed', message: `juicefs format: the bucket refused ${d.volumeName}/` }
+      db.disks = db.disks.filter((x) => x.id !== d.id)
+      db.failedDisks.push(d)
+    } else {
+      d.state = 'ready'
+    }
+  }
+  if (changed) save()
 }
 
 // The key and its rotation
 
 const PROBE_MS = 1200
 const DISK_MS = 900
-const MAC_MS = 600
+const MAC_MS = 700
 
 function rotationOf(): Rotation | null {
   const r = db.key.rotation
   if (!r) return null
   const elapsed = now() - Date.parse(r.startedAt)
+  const disksAtStart = db.disks.filter((d) => d.state === 'ready')
   const probe: StepState = elapsed < PROBE_MS ? 'running' : r.failCode ? 'failed' : 'done'
   if (probe === 'failed') {
+    if (!r.failLogged) {
+      r.failLogged = true
+      log({ actor: SYSTEM, action: 'key_rotation_failed', category: 'key', target: { kind: 'key', id: r.id, label: r.newKeyTail }, detail: { step: 'probe', code: r.failCode ?? 'AccessDenied' } })
+      save()
+    }
     return {
-      id: r.id, state: 'failed', newKeyTail: r.newKeyTail, oldKeyTail: r.oldKeyTail, probe,
-      disks: db.disks.map((d) => ({ id: d.id, name: d.name, state: 'pending' })),
+      id: r.id, state: 'failed', newKeyTail: r.newKeyTail, oldKeyTails: r.oldKeyTails, probe,
+      disks: disksAtStart.map((d) => ({ id: d.id, name: d.name, state: 'pending' })),
       macs: { updated: 0, total: r.macsTotal },
-      error: { code: r.failCode ?? 'AccessDenied', request: `PUT /${db.storage.bucket}/floppy-probe-${r.id.slice(-4)}` },
+      error: { step: 'probe', code: r.failCode ?? 'AccessDenied', request: `PUT /${db.storage.bucket}/floppy-probe-${r.id.slice(-4)}` },
       startedAt: r.startedAt,
     }
   }
-  const disks = db.disks.map((d, i) => {
+  const disks = disksAtStart.map((d, i) => {
     const start = PROBE_MS + i * DISK_MS
     const state: StepState = elapsed < start ? 'pending' : elapsed < start + DISK_MS ? 'running' : 'done'
     return { id: d.id, name: d.name, state }
   })
-  const macsStart = PROBE_MS + db.disks.length * DISK_MS
+  const macsStart = PROBE_MS + disks.length * DISK_MS
   const updated = Math.max(0, Math.min(r.macsTotal, Math.floor((elapsed - macsStart) / MAC_MS)))
-  const finished = disks.every((d) => d.state === 'done') && updated >= r.macsTotal
-  if (finished && !r.applied) {
+  // Every disk configured is enough: the Macs are counted, not waited for.
+  const configured = disks.every((d) => d.state === 'done') && elapsed >= macsStart
+  if (configured && !r.applied) {
     r.applied = true
     db.key.accessKeyTail = r.newKeyTail
     db.key.rotatedAt = iso()
-    const user = currentUser()
-    log({ actor: user ? actorOf(user) : null, action: 'key_rotated', category: 'key', target: { kind: 'key', id: 'key', label: r.newKeyTail }, detail: { disks: db.disks.length } })
+    log({ actor: SYSTEM, action: 'key_rotated', category: 'key', target: { kind: 'key', id: r.id, label: r.newKeyTail }, detail: { disks: disks.length } })
     save()
   }
   return {
-    id: r.id, state: finished ? 'awaiting_old_key_deletion' : 'applying', newKeyTail: r.newKeyTail, oldKeyTail: r.oldKeyTail,
+    id: r.id, state: configured ? 'awaiting_old_key_deletion' : 'applying', newKeyTail: r.newKeyTail, oldKeyTails: r.oldKeyTails,
     probe, disks, macs: { updated, total: r.macsTotal }, error: null, startedAt: r.startedAt,
   }
 }
 
 function keyStatus(): KeyStatus {
   const rotation = rotationOf()
-  return { bucket: db.storage.bucket, accessKeyTail: db.key.accessKeyTail, rotatedAt: db.key.rotatedAt, window: db.key.window, rotation }
+  const exposures = db.key.exposures
+  const openedAt = exposures.map((x) => x.at).sort()[0]
+  return {
+    bucket: db.storage.bucket,
+    accessKeyTail: db.key.accessKeyTail,
+    rotatedAt: db.key.rotatedAt,
+    window: openedAt ? { openedAt, reasons: structuredClone(exposures) } : null,
+    rotation,
+  }
 }
 
-function openWindow(reason: { kind: 'person_removed' | 'mac_revoked'; label: string }): void {
-  const at = iso()
-  if (db.key.window) db.key.window.reasons.push({ ...reason, at })
-  else db.key.window = { openedAt: at, reasons: [{ ...reason, at }] }
+function openExposure(kind: 'person_removed' | 'mac_revoked', label: string): void {
+  db.key.exposures.push({ id: uid('x'), kind, label, at: iso() })
 }
 
-function revokeMacRow(m: MacRow, by: PersonRow): void {
+function revokeMacRow(m: MacRow, by: PersonRow, reason: 'admin' | 'owner' | 'member_removed'): void {
   m.revokedAt = iso()
   m.revokedBy = by.name ?? by.email
   m.live = false
   m.replica = null
-  log({ actor: actorOf(by), action: 'mac_revoked', category: 'macs', target: { kind: 'mac', id: m.id, label: m.name }, detail: {} })
+  log({ actor: actorOf(by), action: 'mac_revoked', category: 'macs', target: { kind: 'mac', id: m.id, label: m.name }, detail: { reason } })
 }
 
 function activeAdmins(): PersonRow[] {
@@ -240,11 +288,19 @@ function filterAudit(q: AuditQuery): AuditEvent[] {
   return db.audit.filter((e) =>
     Date.parse(e.at) >= since &&
     (!q.category || e.category === q.category) &&
-    (!needle || e.target.label.toLowerCase().includes(needle) || (e.actor?.name.toLowerCase().includes(needle) ?? false)),
+    (!needle || e.target.label.toLowerCase().includes(needle) || (e.actor.label?.toLowerCase().includes(needle) ?? false)),
   )
 }
 
-const slugOk = (s: string) => /^[a-z0-9][a-z0-9-]*$/.test(s)
+const validEmail = (s: string) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(s)
+/** A name that can be a folder in the Finder: no slash or colon, not hidden. */
+const validDiskName = (s: string) => s.length >= 1 && s.length <= 60 && !/[/:]/.test(s) && !s.startsWith('.')
+const settingsOf = () => ({
+  organizationName: db.organizationName,
+  mail: { ...db.mail },
+  storage: { ...db.storage },
+  storageLocked: db.disks.length > 0,
+})
 
 /** The fake implementation of the API. */
 export const fakeApi: Api = {
@@ -252,12 +308,15 @@ export const fakeApi: Api = {
     async start(email) {
       await latency()
       const address = email.trim().toLowerCase()
-      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(address)) throw new ApiError(422, 'validation', 'Invalid email')
+      if (!validEmail(address)) throw new ApiError(422, 'validation', 'Invalid email')
       const person = db.people.find((p) => p.email === address && p.status !== 'removed')
+      // An invited person whose invitation expired cannot sign in until a resend.
+      const eligible = person && (person.status === 'active' || inviteLive(person)) ? person : null
+      for (const r of db.signIns) if (r.email === address && !r.completed) r.superseded = true
       const row = {
-        id: uid('sr'), email: address, userId: person?.id ?? null,
+        id: uid('sr'), email: address, userId: eligible?.id ?? null,
         code: String(Math.floor(100_000 + Math.random() * 900_000)), token: uid('tok'),
-        expiresAt: iso(now() + LINK_TTL), resendAt: iso(now() + RESEND_AFTER), attempts: 0, completed: false,
+        expiresAt: iso(now() + LINK_TTL), resendAt: iso(now() + RESEND_AFTER), attempts: 0, completed: false, superseded: false,
       }
       db.signIns.push(row)
       save()
@@ -268,37 +327,41 @@ export const fakeApi: Api = {
     },
     async status(requestId) {
       await latency(120, 260)
+      // Reads the state only: polling never signs anyone in.
       const row = db.signIns.find((r) => r.id === requestId)
       if (!row) throw new ApiError(404, 'not_found', 'No such request')
       if (row.completed) return { status: 'completed' }
       if (row.attempts >= MAX_ATTEMPTS) return { status: 'locked' }
-      if (Date.parse(row.expiresAt) < now()) return { status: 'expired' }
+      if (row.superseded || Date.parse(row.expiresAt) < now()) return { status: 'expired' }
       return { status: 'pending' }
     },
     async verifyCode(requestId, code) {
       await latency()
       const row = db.signIns.find((r) => r.id === requestId)
-      if (!row || Date.parse(row.expiresAt) < now()) throw new ApiError(410, 'request_expired', 'Expired')
+      if (!row || row.superseded || row.completed || Date.parse(row.expiresAt) < now()) throw new ApiError(410, 'request_expired', 'Expired')
       if (row.attempts >= MAX_ATTEMPTS) throw new ApiError(429, 'request_locked', 'Too many attempts')
-      if (row.completed) throw new ApiError(410, 'request_expired', 'Already used')
       if (code.replace(/\D/g, '') !== row.code || !row.userId) {
         row.attempts += 1
-        save()
         const left = MAX_ATTEMPTS - row.attempts
+        const person = db.people.find((p) => p.id === row.userId)
+        if (left <= 0 && person) {
+          log({ actor: SYSTEM, action: 'sign_in_locked', category: 'access', target: { kind: 'person', id: person.id, label: person.name ?? person.email }, detail: {} })
+        }
+        save()
         if (left <= 0) throw new ApiError(429, 'request_locked', 'Too many attempts')
         throw new ApiError(422, 'invalid_code', 'Wrong code', { attemptsLeft: left })
       }
       row.completed = true
-      return startSession(row.userId)
+      return startSession(row.userId, 'code')
     },
     async openLink(token) {
       await latency()
       const row = db.signIns.find((r) => r.token === token)
-      if (!row || !row.userId || row.completed || row.attempts >= MAX_ATTEMPTS || Date.parse(row.expiresAt) < now()) {
+      if (!row || !row.userId || row.completed || row.superseded || row.attempts >= MAX_ATTEMPTS || Date.parse(row.expiresAt) < now()) {
         throw new ApiError(410, 'link_invalid', 'Link expired or used')
       }
       row.completed = true
-      return startSession(row.userId)
+      return startSession(row.userId, 'link')
     },
     async session() {
       await latency(150, 350)
@@ -322,14 +385,15 @@ export const fakeApi: Api = {
       await latency()
       const me = requireAdmin()
       const address = email.trim().toLowerCase()
-      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(address)) throw new ApiError(422, 'validation', 'Invalid email')
-      let person = db.people.find((p) => p.email === address)
-      if (person && person.status !== 'removed') throw new ApiError(409, 'already_member', 'Already in the organization')
-      if (person) Object.assign(person, { status: 'invited', role, invitedAt: iso(), invitedBy: me.name, removedAt: null })
-      else {
-        person = { id: uid('u'), name: null, email: address, role, status: 'invited', lastSignInAt: null, invitedAt: iso(), invitedBy: me.name, removedAt: null }
-        db.people.push(person)
+      if (!validEmail(address)) throw new ApiError(422, 'validation', 'Invalid email')
+      let person = db.people.find((p) => p.email === address && p.status !== 'removed')
+      if (person) throw new ApiError(409, 'already_member', 'Already in the organization')
+      // A removed person invited again gets a new membership; the old row keeps its history.
+      person = {
+        id: uid('u'), name: null, email: address, role, status: 'invited', lastSignInAt: null,
+        invitedAt: iso(), invitedBy: me.name, inviteExpiresAt: iso(now() + INVITE_TTL), removedAt: null,
       }
+      db.people.push(person)
       log({ actor: actorOf(me), action: 'person_invited', category: 'people', target: { kind: 'person', id: person.id, label: address }, detail: { role } })
       db.lastMailAt = iso()
       save()
@@ -343,8 +407,9 @@ export const fakeApi: Api = {
       if (person.role === 'admin' && role === 'member' && person.status === 'active' && activeAdmins().length === 1) {
         throw new ApiError(409, 'last_admin', 'The organization needs an admin')
       }
+      const from = person.role
       person.role = role
-      log({ actor: actorOf(me), action: 'role_changed', category: 'people', target: { kind: 'person', id, label: person.name ?? person.email }, detail: { role } })
+      log({ actor: actorOf(me), action: 'role_changed', category: 'people', target: { kind: 'person', id, label: person.name ?? person.email }, detail: { from, to: role } })
       save()
       return toPerson(person, me)
     },
@@ -358,11 +423,13 @@ export const fakeApi: Api = {
         throw new ApiError(409, 'last_admin', 'The organization needs an admin')
       }
       const macs = db.macs.filter((m) => m.ownerId === id && !m.revokedAt)
-      macs.forEach((m) => revokeMacRow(m, me))
+      macs.forEach((m) => revokeMacRow(m, me, 'member_removed'))
       person.status = 'removed'
       person.removedAt = iso()
-      // Only a Mac ever held the key (it lives in the metadata): no Mac, no window.
-      if (macs.length > 0) openWindow({ kind: 'person_removed', label: person.name ?? person.email })
+      person.inviteExpiresAt = null
+      // Only a Mac ever held the key (it lives in the metadata): no Mac, no window. One
+      // exposure for the person, not one per Mac.
+      if (macs.length > 0) openExposure('person_removed', person.name ?? person.email)
       log({ actor: actorOf(me), action: 'person_removed', category: 'people', target: { kind: 'person', id, label: person.name ?? person.email }, detail: { macs: macs.length } })
       save()
       return { person: toPerson(person, me), revokedMacs: macs.length, key: keyStatus() }
@@ -373,7 +440,8 @@ export const fakeApi: Api = {
       const person = db.people.find((p) => p.id === id && p.status === 'invited')
       if (!person) throw new ApiError(404, 'not_found', 'No such invite')
       person.invitedAt = iso()
-      log({ actor: actorOf(me), action: 'invite_resent', category: 'people', target: { kind: 'person', id, label: person.email }, detail: {} })
+      person.inviteExpiresAt = iso(now() + INVITE_TTL)
+      log({ actor: actorOf(me), action: 'invite_resent', category: 'people', target: { kind: 'person', id, label: person.email }, detail: { role: person.role } })
       db.lastMailAt = iso()
       save()
       return toPerson(person, me)
@@ -393,8 +461,8 @@ export const fakeApi: Api = {
       const me = requireUser()
       const m = db.macs.find((x) => x.id === id && !x.revokedAt)
       if (!m || (me.role !== 'admin' && m.ownerId !== me.id)) throw new ApiError(404, 'not_found', 'No such Mac')
-      revokeMacRow(m, me)
-      openWindow({ kind: 'mac_revoked', label: m.name })
+      revokeMacRow(m, me, m.ownerId === me.id && me.role !== 'admin' ? 'owner' : 'admin')
+      openExposure('mac_revoked', m.name)
       save()
       return { mac: toMac(m), key: keyStatus() }
     },
@@ -404,36 +472,61 @@ export const fakeApi: Api = {
     async list() {
       await latency()
       requireAdmin()
-      return structuredClone(db.disks)
+      advanceDisks()
+      return db.disks.map(toDisk)
     },
-    async create({ name, prefix, trashDays }) {
-      await latency(500, 900)
+    async get(id) {
+      await latency(150, 300)
+      requireAdmin()
+      advanceDisks()
+      const disk = db.disks.find((d) => d.id === id) ?? db.failedDisks.find((d) => d.id === id)
+      if (!disk) throw new ApiError(404, 'not_found', 'No such disk')
+      return toDisk(disk)
+    },
+    async create({ name, volumeName, trashDays }) {
+      await latency(400, 700)
       const me = requireAdmin()
+      advanceDisks()
       const clean = name.trim()
-      if (!clean || !slugOk(prefix) || trashDays < 0) throw new ApiError(422, 'validation', 'Invalid disk')
-      if (db.disks.some((d) => d.name.toLowerCase() === clean.toLowerCase() || d.prefix === prefix)) {
-        throw new ApiError(409, 'disk_name_taken', 'Name or prefix taken')
+      if (!validDiskName(clean) || !VOLUME_NAME.test(volumeName) || !Number.isInteger(trashDays) || trashDays < 0 || trashDays > 365) {
+        throw new ApiError(422, 'validation', 'Invalid disk')
       }
-      const disk: Disk = {
-        id: uid('d'), name: clean, status: 'online', bucket: db.storage.bucket, prefix, region: db.storage.region, endpoint: db.storage.endpoint,
-        metaDb: Math.max(0, ...db.disks.map((d) => d.metaDb)) + 1, blockSizeKb: 1024, trashDays, trashBytes: 0, usedBytes: 0, fileCount: 0,
+      if (db.disks.length >= DISK_LIMIT) throw new ApiError(409, 'disk_limit_reached', 'At most 15 disks')
+      // Names are unique among live disks; the name in the bucket and the database number are
+      // burned forever, failed and deleted disks included.
+      const all = [...db.disks, ...db.failedDisks]
+      if (db.disks.some((d) => d.name.toLowerCase() === clean.toLowerCase()) || all.some((d) => d.volumeName === volumeName)) {
+        throw new ApiError(409, 'disk_name_taken', 'Name taken')
+      }
+      const disk: DiskRow = {
+        id: uid('d'), name: clean, volumeName, mountPath: mountPathOf(clean), state: 'creating', error: null, status: 'online',
+        bucket: db.storage.bucket, region: db.storage.region, endpoint: db.storage.endpoint,
+        metaDb: Math.max(0, ...all.map((d) => d.metaDb)) + 1, blockSizeKb: 1024, trashDays, trashBytes: 0, usedBytes: 0, fileCount: 0,
         lastWriteAt: null, mountedBy: 0, cache: { ...DEFAULT_CACHE }, createdAt: iso(), createdBy: me.name ?? me.email,
+        formatDoneAt: iso(now() + FORMAT_MS), formatFails: volumeName.includes('fail'),
       }
       db.disks.push(disk)
       log({ actor: actorOf(me), action: 'disk_created', category: 'disks', target: { kind: 'disk', id: disk.id, label: disk.name }, detail: { blockSize: '1 MB' } })
       save()
-      return structuredClone(disk)
+      return toDisk(disk)
     },
     async update(id, body) {
       await latency()
       const me = requireAdmin()
-      const disk = db.disks.find((d) => d.id === id)
+      const disk = db.disks.find((d) => d.id === id && d.state === 'ready')
       if (!disk) throw new ApiError(404, 'not_found', 'No such disk')
-      if (body.trashDays !== undefined) disk.trashDays = body.trashDays
-      if (body.cache) disk.cache = { expireDays: body.cache.expireDays }
-      log({ actor: actorOf(me), action: 'disk_updated', category: 'disks', target: { kind: 'disk', id, label: disk.name }, detail: {} })
+      const fields: string[] = []
+      if (body.trashDays !== undefined && body.trashDays !== disk.trashDays) {
+        disk.trashDays = body.trashDays
+        fields.push('trashDays')
+      }
+      if (body.cache && body.cache.expireDays !== disk.cache.expireDays) {
+        disk.cache = { expireDays: body.cache.expireDays }
+        fields.push('cacheExpireDays')
+      }
+      log({ actor: actorOf(me), action: 'disk_updated', category: 'disks', target: { kind: 'disk', id, label: disk.name }, detail: { fields } })
       save()
-      return structuredClone(disk)
+      return toDisk(disk)
     },
   },
 
@@ -445,16 +538,23 @@ export const fakeApi: Api = {
     },
     async startRotation({ accessKeyId, secretKey }) {
       await latency()
-      requireAdmin()
+      const me = requireAdmin()
       if (accessKeyId.trim().length < 8 || secretKey.trim().length < 8) throw new ApiError(422, 'validation', 'Key too short')
       const current = rotationOf()
-      if (current && current.state === 'applying') throw new ApiError(409, 'rotation_in_progress', 'A rotation is running')
+      if (current?.state === 'applying') throw new ApiError(409, 'rotation_in_progress', 'A rotation is running')
       heartbeat()
+      // A rotation awaiting the old key's deletion is superseded: its keys stay to delete.
+      const oldKeyTails =
+        current?.state === 'awaiting_old_key_deletion' ? [...current.oldKeyTails, current.newKeyTail]
+        : current?.state === 'failed' ? current.oldKeyTails
+        : [db.key.accessKeyTail]
+      const newKeyTail = accessKeyId.trim().slice(-5).toUpperCase()
       db.key.rotation = {
-        id: uid('rot'), newKeyTail: accessKeyId.trim().slice(-5).toUpperCase(), oldKeyTail: db.key.accessKeyTail, startedAt: iso(),
+        id: uid('rot'), newKeyTail, oldKeyTails, startedAt: iso(),
         macsTotal: db.macs.map(toMac).filter((m) => m.connected).length,
-        failCode: accessKeyId.toUpperCase().includes('DENIED') ? 'AccessDenied' : null, applied: false,
+        failCode: accessKeyId.toUpperCase().includes('DENIED') ? 'AccessDenied' : null, applied: false, failLogged: false,
       }
+      log({ actor: actorOf(me), action: 'key_rotation_started', category: 'key', target: { kind: 'key', id: db.key.rotation.id, label: newKeyTail }, detail: { newKeyTail, oldKeyTail: oldKeyTails.join(', ') } })
       save()
       const rotation = rotationOf()
       if (!rotation) throw new ApiError(500, 'server', 'Rotation lost')
@@ -472,9 +572,12 @@ export const fakeApi: Api = {
       const me = requireAdmin()
       const rotation = rotationOf()
       if (!rotation || rotation.id !== id || rotation.state !== 'awaiting_old_key_deletion') throw new ApiError(409, 'validation', 'Nothing to close')
+      // Only what happened before the rotation started: a Mac revoked during it may have read
+      // the new key from its replica.
+      const closed = db.key.exposures.filter((x) => x.at < rotation.startedAt)
+      db.key.exposures = db.key.exposures.filter((x) => x.at >= rotation.startedAt)
       db.key.rotation = null
-      db.key.window = null
-      log({ actor: actorOf(me), action: 'key_window_closed', category: 'key', target: { kind: 'key', id: 'key', label: rotation.oldKeyTail }, detail: {} })
+      log({ actor: actorOf(me), action: 'key_window_closed', category: 'key', target: { kind: 'key', id, label: rotation.newKeyTail }, detail: { oldKeyTail: rotation.oldKeyTails.join(', '), reasons: closed.length } })
       save()
       return keyStatus()
     },
@@ -508,23 +611,35 @@ export const fakeApi: Api = {
     async get() {
       await latency()
       requireAdmin()
-      return { organizationName: db.organizationName, mail: { ...db.mail }, storage: { ...db.storage } }
+      return settingsOf()
     },
     async update(body) {
       await latency(400, 800)
       const me = requireAdmin()
-      if (body.organizationName !== undefined) {
+      const fields: string[] = []
+      if (body.storage) {
+        const changed = (['endpoint', 'region', 'bucket'] as const).some((k) => body.storage?.[k].trim() !== db.storage[k])
+        // A disk's format holds the bucket: storage cannot move under a live disk.
+        if (changed && db.disks.length > 0) throw new ApiError(409, 'storage_in_use', 'A disk exists')
+        if (changed) {
+          db.storage = { endpoint: body.storage.endpoint.trim(), region: body.storage.region.trim(), bucket: body.storage.bucket.trim() }
+          fields.push('storage')
+        }
+      }
+      if (body.organizationName !== undefined && body.organizationName.trim() !== db.organizationName) {
         if (!body.organizationName.trim()) throw new ApiError(422, 'validation', 'Name required')
         db.organizationName = body.organizationName.trim()
+        fields.push('name')
       }
       if (body.mail) {
         const { password, ...mail } = body.mail
+        const changed = (Object.keys(mail) as (keyof typeof mail)[]).some((k) => mail[k] !== db.mail[k]) || !!password
         db.mail = { ...mail, passwordSet: db.mail.passwordSet || !!password }
+        if (changed) fields.push('smtp')
       }
-      if (body.storage) db.storage = { ...body.storage }
-      log({ actor: actorOf(me), action: 'settings_updated', category: 'settings', target: { kind: 'organization', id: db.organizationId, label: db.organizationName }, detail: {} })
+      log({ actor: actorOf(me), action: 'settings_updated', category: 'settings', target: { kind: 'organization', id: db.organizationId, label: db.organizationName }, detail: { fields } })
       save()
-      return { organizationName: db.organizationName, mail: { ...db.mail }, storage: { ...db.storage } }
+      return settingsOf()
     },
     async testMail() {
       await latency(600, 1100)
