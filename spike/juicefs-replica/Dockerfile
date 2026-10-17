@@ -1,8 +1,14 @@
 # syntax=docker/dockerfile:1
 # The patched juicefs binary: JuiceFS v1.4.1 plus the patches here, applied in
 # order: 0001 reads metadata from a local Redis/Valkey replica, 0002 reads whole
-# blocks for sequential readers. Built by build.sh for linux/arm64 and
+# blocks for sequential readers, 0003 takes the storage keys of format and
+# config from the environment. Built by build.sh for linux/arm64 and
 # linux/amd64; the "out" stage holds only the binary.
+#
+# `juicefs version` names the patch set: 1.4.1+<date>.<commit>-floppy.<patchset>,
+# where <patchset> is the first 8 hex digits of the SHA-256 of the patches
+# concatenated in order. The suffix sits in the build metadata, which JuiceFS
+# ignores when it compares versions.
 #
 # Cross-compiled on the build platform with Debian's cross gcc, because the
 # SQLite driver needs cgo. The binary links glibc dynamically: built on
@@ -32,8 +38,9 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
     elif [ "$TARGETARCH" = amd64 ]; then cc=x86_64-linux-gnu-gcc; \
     else cc=aarch64-linux-gnu-gcc; fi; \
     pkg=github.com/juicedata/juicefs/pkg/version; \
+    patchset=$(cat /tmp/patches/*.patch | sha256sum | cut -c1-8); \
     CGO_ENABLED=1 CC="$cc" GOOS=linux GOARCH="$TARGETARCH" go build \
-      -ldflags "-s -w -X $pkg.revision=$(git rev-parse --short HEAD)-replica -X $pkg.revisionDate=$(git log -1 --format=%cs)" \
+      -ldflags "-s -w -X $pkg.revision=$(git rev-parse --short HEAD)-floppy.$patchset -X $pkg.revisionDate=$(git log -1 --format=%cs)" \
       -o /out/juicefs .
 
 FROM scratch AS out

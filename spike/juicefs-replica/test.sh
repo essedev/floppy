@@ -8,7 +8,7 @@
 # deleted, and a stored team key rotated by `juicefs config` from the environment
 # (0003).
 #
-#   spike/juicefs-replica/test.sh            # v1.4.1 + the patches, cloned once
+#   spike/juicefs-replica/test.sh            # the Dockerfile's upstream tag + the patches, cloned once
 #   JFS_SRC=/path/to/juicefs spike/juicefs-replica/test.sh   # an existing tree
 #   RUN='TestRedisReplicaMasterDown' spike/juicefs-replica/test.sh   # RUN=none: mount only
 #   VALKEY_IMAGE=valkey/valkey:8.1.1 spike/juicefs-replica/test.sh  # Debian 13 ships 8.1.1
@@ -21,7 +21,7 @@ here=$(cd "$(dirname "$0")" && pwd)
 
 VALKEY_IMAGE="${VALKEY_IMAGE:-valkey/valkey:8.1.4}"
 GO_IMAGE=golang:1.25.14-bookworm
-JUICEFS_VERSION=v1.4.1
+JUICEFS_VERSION=$(sed -n 's/^ARG JUICEFS_VERSION=//p' "$here/Dockerfile") # the tag build.sh builds
 NET=floppy-jfs-replica
 SUBNET="${SUBNET:-10.250.46.0/24}"
 RUN="${RUN:-TestRedisReplica}"
