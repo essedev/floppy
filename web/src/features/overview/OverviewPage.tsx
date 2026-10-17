@@ -6,7 +6,7 @@
 
 import type { ReactNode } from 'react'
 import { Link } from 'react-router'
-import { Led, Readout, SlotNote, State, Well } from '@/components/detail'
+import { Led, Readout, State, Well } from '@/components/detail'
 import { Faceplate } from '@/components/marks'
 import { EmptyState, PageHeader, QueryView, SkeletonLines, StaleNotice } from '@/components/states'
 import { fmt, useI18n } from '@/i18n'
@@ -89,11 +89,14 @@ function Disks() {
       }
     >
       {(list) => (
-        <div className="mb-3.5 grid gap-3.5 md:grid-cols-2">
-          {list.map((d) => (
-            <DiskCard key={d.id} disk={d} />
-          ))}
-        </div>
+        <section className="mb-3.5" aria-labelledby="overview-disks">
+          <h2 id="overview-disks" className="eyebrow px-1">{t.overview.disksTitle}</h2>
+          <div className="grid gap-3.5 md:grid-cols-2">
+            {list.map((d) => (
+              <DiskCard key={d.id} disk={d} />
+            ))}
+          </div>
+        </section>
       )}
     </QueryView>
   )
@@ -141,7 +144,6 @@ function Services() {
       <QueryView query={health} loading={<SkeletonLines />} staleNotice={false}>
         {body}
       </QueryView>
-      <SlotNote className="mt-4 rounded-xl bg-sunken px-3.5 py-3 text-[13.5px] text-ink-2">{t.overview.offPath}</SlotNote>
     </Well>
   )
 }
