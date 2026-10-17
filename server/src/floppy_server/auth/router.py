@@ -7,13 +7,13 @@ from datetime import datetime
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Cookie, Form, Query, Request, Response
+from fastapi import APIRouter, Cookie, Depends, Form, Query, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from floppy_server.api import SESSION_COOKIE, ActorDep, CamelModel, CtxDep, Email
+from floppy_server.api import SESSION_COOKIE, ActorDep, CamelModel, CtxDep, Email, rate_limit
 from floppy_server.auth import app_page, service
 from floppy_server.context import Context
 from floppy_server.errors import ApiError, not_found, validation
@@ -173,7 +173,11 @@ def _start_response(request: SignInRequest) -> SignInStartResponse:
     )
 
 
-@router.post("/auth/sign-in", response_model=SignInStartResponse)
+@router.post(
+    "/auth/sign-in",
+    response_model=SignInStartResponse,
+    dependencies=[Depends(rate_limit("sign-in"))],
+)
 async def start_sign_in(body: SignInStartRequest, ctx: CtxDep) -> SignInStartResponse:
     """Sends a magic link and a code."""
     return _start_response(await service.start_sign_in(ctx, kind="web", email=body.email))
@@ -188,7 +192,11 @@ async def sign_in_status(request_id: UUID, ctx: CtxDep) -> SignInStatusResponse:
     return SignInStatusResponse(status=status)
 
 
-@router.post("/auth/sign-in/{request_id}/code", response_model=SessionOut)
+@router.post(
+    "/auth/sign-in/{request_id}/code",
+    response_model=SessionOut,
+    dependencies=[Depends(rate_limit("code"))],
+)
 async def verify_code(
     request_id: UUID, body: CodeRequest, request: Request, response: Response, ctx: CtxDep
 ) -> SessionOut:
@@ -199,7 +207,9 @@ async def verify_code(
     return await _opened(ctx, response, opened)
 
 
-@router.post("/auth/magic-link", response_model=SessionOut)
+@router.post(
+    "/auth/magic-link", response_model=SessionOut, dependencies=[Depends(rate_limit("link"))]
+)
 async def magic_link(
     body: TokenRequest, request: Request, response: Response, ctx: CtxDep
 ) -> SessionOut:
@@ -208,7 +218,9 @@ async def magic_link(
     return await _opened(ctx, response, opened)
 
 
-@router.post("/auth/invitation", response_model=SessionOut)
+@router.post(
+    "/auth/invitation", response_model=SessionOut, dependencies=[Depends(rate_limit("link"))]
+)
 async def accept_invitation(
     body: TokenRequest, request: Request, response: Response, ctx: CtxDep
 ) -> SessionOut:
@@ -246,7 +258,11 @@ async def delete_session(
     return response
 
 
-@router.post("/auth/app/sign-in", response_model=SignInStartResponse)
+@router.post(
+    "/auth/app/sign-in",
+    response_model=SignInStartResponse,
+    dependencies=[Depends(rate_limit("sign-in"))],
+)
 async def start_app_sign_in(body: AppSignInRequest, ctx: CtxDep) -> SignInStartResponse:
     """The app's sign-in: a magic link that ends on the app's loopback, and a code."""
     request = await service.start_sign_in(
@@ -269,7 +285,12 @@ async def app_link_page(token: Annotated[str, Query(max_length=200)] = "") -> HT
     )
 
 
-@router.post("/auth/app/link/continue", include_in_schema=False, response_model=None)
+@router.post(
+    "/auth/app/link/continue",
+    include_in_schema=False,
+    response_model=None,
+    dependencies=[Depends(rate_limit("link"))],
+)
 async def app_link_continue(
     token: Annotated[str, Form(max_length=200)], ctx: CtxDep
 ) -> RedirectResponse | HTMLResponse:
@@ -284,13 +305,17 @@ async def app_link_continue(
     return RedirectResponse(target, status_code=303)
 
 
-@router.post("/auth/app/link", response_model=AppLinkResponse)
+@router.post(
+    "/auth/app/link", response_model=AppLinkResponse, dependencies=[Depends(rate_limit("link"))]
+)
 async def open_app_link(body: TokenRequest, ctx: CtxDep) -> AppLinkResponse:
     """Completes an app request from its link; the web page then sends the browser to the loopback."""
     return AppLinkResponse(redirect_to=await service.open_app_link(ctx, body.token))
 
 
-@router.post("/auth/app/token", response_model=AppTokenResponse)
+@router.post(
+    "/auth/app/token", response_model=AppTokenResponse, dependencies=[Depends(rate_limit("code"))]
+)
 async def app_token(body: AppTokenRequest, ctx: CtxDep) -> AppTokenResponse:
     """Trades the verifier and a code for a device token (the Mac is created, pending)."""
     if (body.authorization_code is None) == (body.code is None):

@@ -7,6 +7,7 @@ or a removal applies at once. Device requests are authenticated in `device/`.
 """
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Annotated
@@ -21,6 +22,7 @@ from floppy_server.context import Context, utcnow
 from floppy_server.crypto import token_hash
 from floppy_server.errors import forbidden, unauthorized
 from floppy_server.models import Membership, Organization, User, WebSession
+from floppy_server.ratelimit import rate_limited
 
 SESSION_COOKIE = "floppy_session"
 LAST_SEEN_EVERY = timedelta(minutes=5)
@@ -133,3 +135,18 @@ async def admin_actor(actor: Annotated[Actor, Depends(current_actor)]) -> Actor:
 
 ActorDep = Annotated[Actor, Depends(current_actor)]
 AdminDep = Annotated[Actor, Depends(admin_actor)]
+
+
+def rate_limit(rule: str) -> Callable[[Request, Context], None]:
+    """A dependency counting the request against `rule` for the client's address (ratelimit.py)."""
+
+    def check(request: Request, ctx: CtxDep) -> None:
+        limits = ctx.settings.rate_limits.get(rule)
+        if not limits:
+            return
+        address = request.client.host if request.client else "unknown"
+        wait = ctx.rate_limiter.hit(rule, address, limits)
+        if wait is not None:
+            raise rate_limited(wait)
+
+    return check

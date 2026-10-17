@@ -19,6 +19,7 @@ from floppy_server.infra.mail import Mailer, SmtpConfig
 from floppy_server.infra.metadata import MetadataAdmin, ValkeyTarget
 from floppy_server.infra.storage import StorageProber
 from floppy_server.models import Organization, S3Key, Volume
+from floppy_server.ratelimit import RateLimiter
 
 
 def utcnow() -> datetime:
@@ -40,6 +41,7 @@ class Context:
     prober: StorageProber
     rotation_wakeup: asyncio.Event = field(default_factory=asyncio.Event)
     disk_wakeup: asyncio.Event = field(default_factory=asyncio.Event)
+    rate_limiter: RateLimiter = field(default_factory=RateLimiter)
 
     def valkey_target(self, org: Organization) -> ValkeyTarget:
         """The organization's Valkey as the control plane reaches it, with admin credentials."""

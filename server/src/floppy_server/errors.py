@@ -22,13 +22,20 @@ class ApiError(Exception):
     """An error answer with a contract code, an HTTP status and safe details."""
 
     def __init__(
-        self, status: int, code: str, message: str, details: dict[str, Any] | None = None
+        self,
+        status: int,
+        code: str,
+        message: str,
+        details: dict[str, Any] | None = None,
+        *,
+        headers: dict[str, str] | None = None,
     ) -> None:
         super().__init__(message)
         self.status = status
         self.code = code
         self.message = message
         self.details = details or {}
+        self.headers = headers or {}
 
 
 def unauthorized(message: str = "Not signed in") -> ApiError:
@@ -69,7 +76,9 @@ def install_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(ApiError)
     async def _api_error(_: Request, error: ApiError) -> JSONResponse:
         return JSONResponse(
-            _body(error.code, error.message, error.details), status_code=error.status
+            _body(error.code, error.message, error.details),
+            status_code=error.status,
+            headers=error.headers,
         )
 
     @app.exception_handler(RequestValidationError)

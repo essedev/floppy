@@ -114,8 +114,15 @@ def serve(settings: Settings, host: str, port: int) -> None:
     """Runs the API with uvicorn."""
 
     app = create_app(build_context(settings))
+    # X-Forwarded-For is believed only from the trusted proxies: the client address is what
+    # the rate limits count, and anyone can send that header.
     uvicorn.run(
-        app, host=host, port=port, proxy_headers=True, forwarded_allow_ips="*", log_config=None
+        app,
+        host=host,
+        port=port,
+        proxy_headers=True,
+        forwarded_allow_ips=settings.trusted_proxies,
+        log_config=None,
     )
 
 
