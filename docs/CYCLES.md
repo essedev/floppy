@@ -2,6 +2,14 @@
 
 Log of the work done, most recent first. Plans are in [ROADMAP.md](ROADMAP.md), the reasons behind the choices in [ARCHITECTURE.md](ARCHITECTURE.md).
 
+## 8. The data path (17/10/2026)
+
+- **Bench and link** (`spike/data-bench.sh`, the `shaped` profile): cold reads inside the Linux box and from the Mac, seeks, scrubbing. JuiceFS's own download limit, used so far to simulate the link, lets a megabyte through and then stalls: a seek took 34 ms alone and 390 ms right after another. The link is now a token bucket on Toxiproxy.
+- **Causes found**: a cold read downloads the whole block (4 MB); after a jump the readahead of the abandoned position competes with the new one; through its cache the macOS SMB client sends 128 KB pieces out of order and up to 40 MB ahead, and JuiceFS turned them into range requests and downloaded blocks twice.
+- **Choices** (DECISIONS #15): 1 MB blocks, 4 MB readahead, a second JuiceFS patch that reads whole blocks inside a sequential stream, with its Go test. In `floppy-mount` for new volumes; the patched JuiceFS reaches the product with the build (ROADMAP).
+- **Results at 100 Mbps**: cold reads over SMB 86-93% of the line (target 80%), a cold seek 0.38 s (target 0.4), the first read after a jump 0.40 s, no read over 1.5 s. The acceptance suite passes 17 of 17, `t03` included. At 1 Gbps: 82% of the line, seeks 0.09 s.
+- **Not needed**: SMB multichannel. **Still to confirm**: the same numbers on OVH Milan.
+
 ## 7. The name: Floppy (17/10/2026)
 
 - **Name chosen** (DECISIONS #14): no active "Floppy" in storage, sync or video, and the only relevant US mark (FLOPPY, Hyperfoo, Inc.) is cancelled. EUIPO and UIBM are still to check; domains are set aside.

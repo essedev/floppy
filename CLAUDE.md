@@ -32,6 +32,8 @@ export LIMA_HOME=~/.floppy/vms
 # Local spike
 spike/setup.sh                 # Garage, PostgreSQL, Toxiproxy, drive container; secrets in spike/.env
 spike/bench.sh                 # upload, cold/warm reads, seeks, warmup
+LINE_MBPS=100 docker compose -f spike/docker-compose.yml --profile shaped up -d shaper   # one real link queue
+DOWNLOAD_LIMIT_MBPS=0 spike/data-bench.sh  # cold reads inside the box and from the Mac, seeks, scrubbing
 spike/meta-bench.sh            # metadata from the Mac over SMB: SQLite vs PostgreSQL at 0/15/30 ms
 spike/juicefs-replica/build.sh # patched juicefs (read replica, optimistic writes) into dist/
 spike/juicefs-replica/test.sh  # the patch's Go tests against Valkey master + replica
@@ -72,7 +74,9 @@ cd site && pnpm dev            # pnpm build, pnpm check
 
 **macOS gives up on an SMB read after 30 s** and the Finder gets an I/O error. The command raises `max_resp_timeout` only for the VM's address, in a `# floppy begin/end` block of `~/Library/Preferences/nsmb.conf`: never rewrite that file whole, it holds the user's configuration.
 
-**Simulate bandwidth with JuiceFS's limits, not Toxiproxy.** Toxiproxy's `bandwidth` is per connection and JuiceFS opens many: 2.7 GB "went through" at 150 MB/s with a 37 MB/s limit. Toxiproxy is only for latency; bandwidth is `--download-limit`/`--upload-limit` (`DOWNLOAD_LIMIT_MBPS`, `UPLOAD_LIMIT_MBPS`).
+**Simulate bandwidth with the shaped link, not Toxiproxy nor JuiceFS's limits.** Toxiproxy's `bandwidth` is per connection and JuiceFS opens many: 2.7 GB "went through" at 150 MB/s with a 37 MB/s limit. JuiceFS's `--download-limit` lets the first megabyte through at once and then stalls, which hid how readahead competes with a new read. Toxiproxy is for latency; bandwidth is the `shaped` profile (`LINE_MBPS`, with `DOWNLOAD_LIMIT_MBPS=0`), one queue for everything Toxiproxy sends.
+
+**Measure reads from the Mac through its cache too.** With `F_NOCACHE` the macOS SMB client sends one read at a time; through its cache it sends 128 KB pieces out of order, up to 40 MB ahead, and a test that stops reading halfway counts those as waste. Compare whole-file reads, and count GETs in Garage's log, not only JuiceFS's metrics: cancelled downloads are missing there.
 
 **Docker ran out of default subnets** on the development Mac (many compose projects): the spike pins an explicit subnet in `spike/docker-compose.yml`. Never `docker network prune`, the networks belong to other projects.
 

@@ -2,9 +2,9 @@
 
 The principle is the one in [ARCHITECTURE.md](ARCHITECTURE.md#guiding-principle): build only what the previous step proved necessary. Work already done is in [CYCLES.md](CYCLES.md), the decisions in [DECISIONS.md](DECISIONS.md).
 
-## 1. Data-path spike (next)
+## 1. Data path on OVH (next)
 
-The metadata spike is closed (16 of 17 checks, CYCLES 6). What is left is the data path: over SMB the Mac reads a never-opened clip at about half the line (5.7 MB/s on a simulated 100 Mbps), and one read took 15 s. To try, one at a time, against targets set before measuring (cold read at least 80% of the line, cold seek under 0.4 s at 100 Mbps, no single read over 3 s): SMB multichannel (Samba advertising the VM's interface as RSS-capable so the Mac opens several connections), 1 MB blocks, more JuiceFS readahead. The I/O error seen in some cold reads (`t03`) belongs here. Also to check during a large copy: whether the file's mtime changes at every stat, which JuiceMount found stalls the macOS client for about 73 s on the file's lock.
+The data-path spike is closed (CYCLES 8, DECISIONS #15): on a simulated 100 Mbps link cold reads over SMB reach 86-93% of the line, a cold seek 0.38 s, the first read after a jump 0.40 s. Left: the same measures on OVH Milan with a zip that formats 1 MB blocks (the same run as the tester's new zip, ROADMAP 2), and, during a large copy, whether the file's mtime changes at every stat, which JuiceMount found stalls the macOS client for about 73 s on the file's lock.
 
 ## 2. Name
 
@@ -13,7 +13,7 @@ Floppy is chosen and the repository is renamed (DECISIONS #14). Left: check it d
 ## 3. Build
 
 - **Design on paper**: the team architecture from [architecture.html](architecture.html) into ARCHITECTURE.md, and `docs/DATABASE_SCHEMA.md` for the control plane.
-- **Engine**: the patched JuiceFS and a Valkey replica in the VM's offline package set, `floppy status --json`, the metadata URL from the app instead of a config file, the SMB password in the Keychain.
+- **Engine**: the patched JuiceFS (both patches: metadata replica, whole-block reads) and a Valkey replica in the VM's offline package set, `floppy status --json`, the metadata URL from the app instead of a config file, the SMB password in the Keychain.
 - **Fast failure when a file cannot be read**: with the network down, a read of blocks not in cache waits for JuiceFS's retries and for the Mac's SMB timeout, which Floppy raised to 600 s. It should fail at once, the way JuiceMount refuses reads of files not kept offline in 4-67 ms from a local index. It needs to know, per path, what is in the cache; `floppy warmup` loads it but does not record it.
 - **The Mac stays awake while data moves**: `caffeinate -i` during a copy, an upload or a warmup, released a couple of minutes after the traffic stops (as JuiceMount does), so sleep does not cut a transfer halfway. No administrator rights needed.
 - **Keeping the JuiceFS patch alive**: JuiceFS stays pinned (v1.4.1) and moves only when a release brings something we need (a security or bug fix, performance), not with every Floppy release. The patch moves from the single file in `spike/juicefs-replica/` to a branch of a fork (`essedev/juicefs`), one commit per change, so an update is a rebase. A scheduled GitHub Actions job applies it to each new JuiceFS release and runs the Go tests, so a break shows up before we need the update. An update ships only after the Go tests, JuiceFS's own Redis metadata tests and the acceptance suite pass, and after a run with mixed versions (some Macs on the old JuiceFS, some on the new, one Valkey); if mixed versions do not hold, the control plane enforces a minimum version. Checked on 17/10/2026: no JuiceFS release after v1.4.1 yet; against `main` (212 commits later) 25 of the patch's 27 hunks in `redis.go` apply, and `doCleanStaleSession` and `doRemoveXattr` conflict.
