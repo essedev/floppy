@@ -10,7 +10,7 @@ import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import * as autostart from "@tauri-apps/plugin-autostart";
 import * as notification from "@tauri-apps/plugin-notification";
 import { mockBackend } from "@/lib/mock";
-import type { AppInfo, DiskStatus, Folder, Notice, SetupProgress } from "@/lib/types";
+import type { AppInfo, AuthView, DiskStatus, Folder, Notice, SetupProgress } from "@/lib/types";
 
 type Unlisten = () => void;
 
@@ -42,6 +42,17 @@ export interface Backend {
   onSetup(cb: (s: SetupProgress) => void): Unlisten;
   onNotice(cb: (n: Notice) => void): Unlisten;
   onPanelOpened(cb: () => void): Unlisten;
+  /** The account; every step answers with the new view, also sent as "auth". */
+  authView(): Promise<AuthView>;
+  authStart(email: string, deviceName: string): Promise<AuthView>;
+  authResend(): Promise<AuthView>;
+  authBack(): Promise<AuthView>;
+  authSubmitCode(code: string): Promise<AuthView>;
+  authRetryRegister(): Promise<AuthView>;
+  authSignOut(localOnly: boolean): Promise<AuthView>;
+  /** null goes back to the build's default server. */
+  authSetServer(url: string | null): Promise<AuthView>;
+  onAuth(cb: (v: AuthView) => void): Unlisten;
 }
 
 function subscribe<T>(event: string, cb: (payload: T) => void): Unlisten {
@@ -87,6 +98,15 @@ const tauriBackend: Backend = {
   onSetup: (cb) => subscribe("setup", cb),
   onNotice: (cb) => subscribe("notify", cb),
   onPanelOpened: (cb) => subscribe("panel-opened", () => cb()),
+  authView: () => invoke("auth_view"),
+  authStart: (email, deviceName) => invoke("auth_start", { email, deviceName }),
+  authResend: () => invoke("auth_resend"),
+  authBack: () => invoke("auth_back"),
+  authSubmitCode: (code) => invoke("auth_submit_code", { code }),
+  authRetryRegister: () => invoke("auth_retry_register"),
+  authSignOut: (localOnly) => invoke("auth_sign_out", { localOnly }),
+  authSetServer: (url) => invoke("auth_set_server", { url }),
+  onAuth: (cb) => subscribe("auth", cb),
 };
 
 /** The backend for this environment. */

@@ -95,6 +95,13 @@
   :root[data-theme="dark"] .well {
     box-shadow: 0 0 0 0.5px rgba(255, 255, 255, 0.06);
   }
+  /* The body turns selection off; WebKit then refuses typing in fields too. */
+  input {
+    font: inherit;
+    user-select: text;
+    -webkit-user-select: text;
+    cursor: text;
+  }
   button {
     font: inherit;
     color: inherit;

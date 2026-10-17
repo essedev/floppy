@@ -75,29 +75,61 @@ export interface Folder {
   path: string;
 }
 
-/** The placeholder account until the control plane exists (`fake: true`). */
-export interface Account {
-  fake: boolean;
-  name: string;
-  initials: string;
-  email: string;
-  team: string;
-  role: string;
-}
-
 /** Facts about this app and this Mac. */
 export interface AppInfo {
   version: string;
   engine_path: string;
+  /** The Mac's name in Sharing settings: the default device name. */
   computer_name: string | null;
-  account: Account;
 }
+
+/** Why a waiting sign-in can no longer complete. */
+export type EndReason = "expired" | "locked" | "elsewhere";
+
+/** Where the sign-in is (src-tauri/src/account/mod.rs, `Phase`). */
+export type AuthPhase =
+  | { phase: "signed_out"; notice: "revoked" | "signed_out" | null }
+  | { phase: "code_sent"; email: string; device_name: string; expires_at: string; resend_at: string }
+  | { phase: "ended"; reason: EndReason; email: string; device_name: string }
+  | { phase: "registering"; email: string; device_name: string }
+  | { phase: "signed_in"; email: string; device_name: string; organization: string | null };
+
+/** The step running now. */
+export type AuthBusy = "sending" | "checking" | "linking" | "registering" | "signing_out";
+
+/** What went wrong in the last step (`AuthError`). */
+export type AuthError =
+  | { code: "invalid_email" | "invalid_device_name" | "not_resent" | "mail_failed" | "metadata_unavailable" }
+  | { code: "invalid_server"; reason: "not_an_address" | "insecure" | "extra" }
+  | { code: "unreachable" | "sign_out_failed" | "keychain" | "settings" | "server"; detail: string }
+  | { code: "rate_limited"; until_ms: number }
+  | { code: "invalid_code"; attempts_left: number | null };
+
+/** Everything the windows show about the account. */
+export type AuthView = AuthPhase & {
+  server: string;
+  server_display: string;
+  default_server: string;
+  busy: AuthBusy | null;
+  error: AuthError | null;
+  /** The last heartbeat got an answer. */
+  reachable: boolean;
+};
 
 /** A notification raised by the native side. */
 export type Notice = { kind: "reconnected" } | { kind: "warmup_done"; name: string };
 
 /** An error from a command, rendered by `code` from the dictionary. */
 export interface CommandError {
-  code: "busy" | "not_mounted" | "not_on_disk" | "nothing_to_cancel" | "list_timeout" | "engine" | "io";
+  code:
+    | "busy"
+    | "not_mounted"
+    | "not_on_disk"
+    | "nothing_to_cancel"
+    | "list_timeout"
+    | "engine"
+    | "io"
+    | "auth_busy"
+    | "auth_state";
   message: string;
 }

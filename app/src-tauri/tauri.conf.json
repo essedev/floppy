@@ -38,7 +38,7 @@
         "label": "welcome",
         "title": "Floppy",
         "width": 440,
-        "height": 560,
+        "height": 640,
         "visible": false,
         "resizable": false,
         "center": true,

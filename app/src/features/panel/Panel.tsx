@@ -9,6 +9,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Ellipsis, ExternalLink, Folder as FolderIcon, Power, RefreshCw, Settings } from "lucide-react";
 import { Faceplate } from "@/components/Faceplate";
 import { Button, Confirm, Led, Notice, Readout, SlotMark } from "@/components/ui";
+import { useAuth } from "@/features/account/hooks";
 import { faceFor, isBusy } from "@/features/disk/face";
 import { keys, useAppInfo, useCountdown, useDiskAction, useFolders, useStatus } from "@/features/disk/hooks";
 import { it } from "@/i18n/it";
@@ -60,6 +61,7 @@ export function Panel() {
             <Faceplate {...faceFor(status)} />
           </div>
           <StatusSection status={status} />
+          <RevokedSection />
           {WITH_SPACE.has(status.state) && status.space?.cache_used_mb != null && <SpaceSection status={status} />}
           {status.state === "connected" && <FolderList status={status} />}
           <Footer status={status} version={info.data?.version} />
@@ -72,6 +74,24 @@ export function Panel() {
           <p className="px-5 py-5 text-ink-2">{it.panel.checking}</p>
         </>
       )}
+    </div>
+  );
+}
+
+/** An admin took this Mac off the team: say so here too, with the way back. */
+function RevokedSection() {
+  const { data: auth } = useAuth();
+  if (auth?.phase !== "signed_out" || auth.notice !== "revoked") return null;
+  return (
+    <div className="px-4 pb-3">
+      <Notice led="err" title={it.account.revoked.title}>
+        {it.account.revoked.body}
+        <span className="mt-2.5 block">
+          <Button size="sm" variant="primary" onClick={() => void backend.openSettings()}>
+            {it.account.revoked.signIn}
+          </Button>
+        </span>
+      </Notice>
     </div>
   );
 }

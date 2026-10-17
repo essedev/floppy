@@ -1,28 +1,36 @@
 /**
- * The first-run window (concept-d-onboarding, DECISIONS #12). Sign-in is a
- * placeholder until the control plane exists; after it the window follows the
- * engine: no package, `floppy setup` in three steps, or the disk ready.
+ * The first-run window (concept-d-onboarding, DECISIONS #12): sign-in to the
+ * team (the flow in features/account), then the engine: no package,
+ * `floppy setup` in three steps, or the disk ready.
  */
 
 import { type ComponentProps, type ReactNode, useState } from "react";
 import { Faceplate } from "@/components/Faceplate";
-import { Button, Led, Notice, Readout } from "@/components/ui";
+import { Button, Led, Notice } from "@/components/ui";
+import { useAuth } from "@/features/account/hooks";
+import { SignIn } from "@/features/account/SignIn";
+import { authFace } from "@/features/account/view";
 import { faceFor } from "@/features/disk/face";
 import { useAppInfo, useDiskAction, useSetup, useStatus } from "@/features/disk/hooks";
 import { it } from "@/i18n/it";
 import { backend } from "@/lib/backend";
 import { gb } from "@/lib/format";
-import type { DiskStatus, SetupProgress } from "@/lib/types";
+import type { AuthView, DiskStatus, SetupProgress } from "@/lib/types";
 
 type Stage = "welcome" | "signin" | "engine";
 
+function initialStage(): Stage {
+  const asked = new URLSearchParams(location.search).get("stage");
+  return asked === "engine" || asked === "signin" ? asked : "welcome";
+}
+
 export function WelcomeWindow() {
-  const [stage, setStage] = useState<Stage>(() =>
-    new URLSearchParams(location.search).get("stage") === "engine" ? "engine" : "welcome",
-  );
+  const [stage, setStage] = useState<Stage>(initialStage);
   const { data: status } = useStatus();
   const { data: setup } = useSetup();
+  const { data: auth } = useAuth();
   const info = useAppInfo();
+  const signedIn = auth?.phase === "signed_in";
 
   return (
     // Room at the top for the window's traffic lights (title bar overlay).
@@ -32,35 +40,45 @@ export function WelcomeWindow() {
           <Face led="off" readout={it.face.notInstalled} />
           <Body>
             <Heading title={it.welcome.title} body={it.welcome.body} />
-            <Button variant="primary" size="lg" className="w-full" onClick={() => setStage("signin")}>
-              {it.welcome.signIn}
+            <Button variant="primary" size="lg" className="w-full" disabled={!auth} onClick={() => setStage(signedIn ? "engine" : "signin")}>
+              {signedIn ? it.welcome.continue : it.welcome.signIn}
             </Button>
             <p className="m-0 text-[13px] text-ink-2">{it.welcome.signInNote}</p>
             <Foot version={info.data?.version} right={it.welcome.invite} />
           </Body>
         </>
       )}
-      {stage === "signin" && (
-        <>
-          <Face led="ok" readout="PROVA" />
-          <Body>
-            <span className="flex items-center gap-2">
-              <Led state="ok" />
-              <Readout>{it.welcome.placeholder.readout}</Readout>
-            </span>
-            <Heading title={it.welcome.placeholder.title} body={it.welcome.placeholder.body} />
-            {info.data && (
-              <Notice>{it.welcome.placeholder.as(info.data.account.name, info.data.account.team)}</Notice>
-            )}
-            <Button variant="primary" size="lg" className="w-full" onClick={() => setStage("engine")}>
-              {it.welcome.placeholder.next}
-            </Button>
-            <Foot version={info.data?.version} />
-          </Body>
-        </>
+      {stage === "signin" && auth && (
+        <SignInStage view={auth} computerName={info.data?.computer_name ?? null} version={info.data?.version} onNext={() => setStage("engine")} />
       )}
       {stage === "engine" && status && setup && <EngineStage status={status} setup={setup} version={info.data?.version} />}
     </main>
+  );
+}
+
+function SignInStage({ view, computerName, version, onNext }: { view: AuthView; computerName: string | null; version?: string; onNext: () => void }) {
+  const t = it.account;
+  return (
+    <>
+      <Face {...authFace(view)} />
+      <Body>
+        {view.phase === "signed_in" ? (
+          <>
+            <Heading
+              title={t.signedIn.title}
+              body={view.organization ? `${t.signedIn.body(view.email)} ${t.signedIn.team(view.organization)}` : t.signedIn.body(view.email)}
+            />
+            <Notice>{it.settings.thisMacAs(view.device_name)}</Notice>
+            <Button variant="primary" size="lg" className="w-full" onClick={onNext}>
+              {t.signedIn.next}
+            </Button>
+          </>
+        ) : (
+          <SignIn view={view} computerName={computerName} showServer size="lg" onLater={view.phase === "signed_out" ? onNext : undefined} />
+        )}
+        <Foot version={version} right={view.phase === "signed_out" ? t.form.invite : undefined} />
+      </Body>
+    </>
   );
 }
 

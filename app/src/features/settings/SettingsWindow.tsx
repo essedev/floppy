@@ -1,43 +1,41 @@
 /**
- * The Settings window (concept-c-app, DECISIONS #12: its own window). Account
- * and diagnostics wait for the control plane: the account is the marked fake
- * from src-tauri/src/fake.rs, diagnostics are shown but not sendable.
+ * The Settings window (concept-c-app, DECISIONS #12: its own window): the
+ * account (sign-in, or who is signed in with sign-out), the server for a
+ * self-hosted team, this Mac, space, general and support. Diagnostics are
+ * shown but not sendable yet.
  */
 
-import type { ReactNode } from "react";
-import { Button, Led, Notice, Readout, SlotMark, Toggle } from "@/components/ui";
+import { type ReactNode, useState } from "react";
+import { Button, Confirm, Led, Notice, Readout, SlotMark, TextInput, Toggle } from "@/components/ui";
+import { useAuth, useAuthStep } from "@/features/account/hooks";
+import { AuthErrorNotice, RefusedNotice, SignIn } from "@/features/account/SignIn";
+import { initialsOf, serverEditable } from "@/features/account/view";
 import { useAppInfo, useLogin, useStatus } from "@/features/disk/hooks";
 import { it } from "@/i18n/it";
+import { backend } from "@/lib/backend";
 import { fillOf, gb, gbUnit } from "@/lib/format";
+import type { AuthView } from "@/lib/types";
 
 export function SettingsWindow() {
   const info = useAppInfo();
+  const auth = useAuth();
   const { data: status } = useStatus();
   const { query: login, set: setLogin } = useLogin();
-  const account = info.data?.account;
   const space = status?.space;
   const used = space?.cache_used_mb ?? null;
   const limit = space?.cache_limit_mb ?? null;
+  const view = auth.data;
+  const deviceName = view && (view.phase === "signed_in" || view.phase === "registering") ? view.device_name : null;
 
   return (
     <main className="flex min-h-screen flex-col gap-[18px] bg-surface px-[22px] pt-[18px] pb-6">
       <Group title={it.settings.account}>
-        {account ? (
-          <>
-            <Row>
-              <span className="grid size-9 shrink-0 place-items-center rounded-full bg-ink text-[13px] font-bold text-surface">
-                {account.initials}
-              </span>
-              <Label title={account.name} line={it.settings.accountLine(account.email, account.team)} />
-              {account.fake && <Readout>{it.settings.accountFake}</Readout>}
-              <Button disabled>{it.settings.signOut}</Button>
-            </Row>
-            {account.fake && (
-              <div className="px-3 pb-3">
-                <Notice>{it.settings.accountFakeNote}</Notice>
-              </div>
-            )}
-          </>
+        {view ? (
+          <AccountRows view={view} computerName={info.data?.computer_name ?? null} />
+        ) : auth.isError ? (
+          <div className="p-3">
+            <Notice led="err">{it.errors.io}</Notice>
+          </div>
         ) : (
           <Row>
             <Label title="…" />
@@ -45,9 +43,16 @@ export function SettingsWindow() {
         )}
       </Group>
 
+      {view && view.phase !== "signed_in" && view.phase !== "registering" && <ServerGroup view={view} />}
+
       <Group title={it.settings.thisMac}>
         <Row>
-          <Label title={info.data?.computer_name ?? it.settings.thisMacUnknown} line={it.settings.thisMacLine} />
+          <Label
+            title={info.data?.computer_name ?? it.settings.thisMacUnknown}
+            line={
+              deviceName && deviceName !== info.data?.computer_name ? it.settings.thisMacAs(deviceName) : it.settings.thisMacLine
+            }
+          />
         </Row>
       </Group>
 
@@ -121,6 +126,131 @@ export function SettingsWindow() {
         </Row>
       </Group>
     </main>
+  );
+}
+
+/** Who is signed in, with sign-out; the sign-in flow otherwise. */
+function AccountRows({ view, computerName }: { view: AuthView; computerName: string | null }) {
+  const signOut = useAuthStep<boolean>(backend.authSignOut);
+  const [confirming, setConfirming] = useState(false);
+  const t = it.account;
+
+  if (view.phase !== "signed_in") {
+    return (
+      <div className="px-4 py-4">
+        <SignIn view={view} computerName={computerName} showServer={false} size="md" />
+      </div>
+    );
+  }
+  const busy = view.busy === "signing_out";
+  const failed = view.error?.code === "sign_out_failed";
+  const notes = confirming || view.error != null || signOut.error != null || !view.reachable;
+  return (
+    <>
+      <Row>
+        <span className="grid size-9 shrink-0 place-items-center rounded-full bg-ink text-[13px] font-bold text-surface" aria-hidden="true">
+          {initialsOf(view.email)}
+        </span>
+        <Label title={view.email} line={it.settings.accountLine(view.organization, view.device_name)} />
+        <Button disabled={busy || confirming} onClick={() => setConfirming(true)}>
+          {busy ? t.signOut.signingOut : t.signOut.action}
+        </Button>
+      </Row>
+      {notes && (
+        <div className="flex flex-col gap-2.5 px-3 py-3">
+          {!view.reachable && <Notice led="dl">{t.offline}</Notice>}
+          {confirming && !failed && (
+            <Confirm
+              title={t.signOut.title}
+              body={t.signOut.body}
+              confirm={t.signOut.confirm}
+              cancel={it.panel.cancel}
+              onConfirm={() => {
+                setConfirming(false);
+                signOut.mutate(false);
+              }}
+              onCancel={() => setConfirming(false)}
+            />
+          )}
+          <AuthErrorNotice error={view.error}>
+            {failed && (
+              <span className="mt-2.5 flex flex-col items-start gap-2">
+                <span className="text-[13px] text-ink-2">{t.signOut.localOnlyNote}</span>
+                <span className="flex flex-wrap gap-2">
+                  <Button size="sm" variant="primary" disabled={busy} onClick={() => signOut.mutate(false)}>
+                    {t.registering.retry}
+                  </Button>
+                  <Button size="sm" variant="ghost" disabled={busy} onClick={() => signOut.mutate(true)}>
+                    {t.signOut.localOnly}
+                  </Button>
+                </span>
+              </span>
+            )}
+          </AuthErrorNotice>
+          <RefusedNotice error={signOut.error} />
+        </div>
+      )}
+      <Row>
+        <Label title={it.settings.server} line={it.settings.serverLine} />
+        <span className="max-w-[45%] truncate font-ro text-[11.5px] text-ink-2" title={view.server}>
+          {view.server_display}
+        </span>
+      </Row>
+    </>
+  );
+}
+
+/** The server for the next sign-in: the build's default or a self-hosted one. */
+function ServerGroup({ view }: { view: AuthView }) {
+  const setServer = useAuthStep<string | null>(backend.authSetServer);
+  const [text, setText] = useState(view.server);
+  const isDefault = view.server === view.default_server;
+  const editable = serverEditable(view);
+  const changed = text.trim() !== "" && text.trim() !== view.server;
+  const serverError = view.error?.code === "invalid_server" || view.error?.code === "settings" ? view.error : null;
+  return (
+    <Group title={it.settings.server}>
+      <Row column>
+        <span className="text-[13px] text-ink-2">{it.settings.serverLine}</span>
+        <form
+          className="flex gap-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (changed) setServer.mutate(text.trim(), { onSuccess: (v) => !v.error && setText(v.server) });
+          }}
+        >
+          <TextInput
+            aria-label={it.settings.server}
+            value={text}
+            spellCheck={false}
+            autoComplete="url"
+            placeholder={it.settings.serverPlaceholder}
+            invalid={serverError != null}
+            disabled={!editable || setServer.isPending}
+            onChange={(e) => setText(e.target.value)}
+            className="font-ro text-[12.5px]"
+          />
+          <Button type="submit" size="lg" disabled={!editable || !changed || setServer.isPending}>
+            {it.settings.serverSave}
+          </Button>
+        </form>
+        <div className="flex min-h-8 items-center justify-between gap-3">
+          <Readout>{isDefault ? it.settings.serverDefault : view.server_display}</Readout>
+          {!isDefault && (
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={!editable || setServer.isPending}
+              onClick={() => setServer.mutate(null, { onSuccess: (v) => setText(v.server) })}
+            >
+              {it.settings.serverReset}
+            </Button>
+          )}
+        </div>
+        <AuthErrorNotice error={serverError} />
+        <RefusedNotice error={setServer.error} />
+      </Row>
+    </Group>
   );
 }
 
