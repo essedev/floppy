@@ -1,0 +1,156 @@
+/*
+  Tailwind on Floppy's tokens. The values live in design/tokens.css (imported first, in
+  main.tsx); here they are only mapped into @theme so utilities like bg-sunken and text-ink-2
+  exist, and Tailwind's own palette is removed so no generic colour slips in. The detail set
+  (.led, .readout, .slot-mark, .notice) comes from tokens.css as it is.
+*/
+
+@import 'tailwindcss';
+
+@font-face {
+  font-family: 'Departure Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fonts/departure-mono/DepartureMono-Regular.woff2') format('woff2');
+}
+
+@theme {
+  --color-*: initial;
+  --font-*: initial;
+  --shadow-*: initial;
+}
+
+@theme inline {
+  --color-page: var(--page);
+  --color-surface: var(--surface);
+  --color-raised: var(--raised);
+  --color-sunken: var(--sunken);
+  --color-line: var(--line);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-brand: var(--brand);
+  --color-track: var(--track);
+  --color-bezel: var(--bezel);
+  --color-bad-text: var(--bad-text);
+
+  --font-ui: var(--f-ui);
+  --font-ro: var(--f-ro);
+
+  --shadow-pop: var(--pop-shadow);
+  --shadow-win: var(--win-shadow);
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    margin: 0;
+    background: var(--page);
+    color: var(--ink);
+    font: 15px/1.5 var(--f-ui);
+    -webkit-font-smoothing: antialiased;
+  }
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
+    color: inherit;
+  }
+  button:not(:disabled),
+  [role='button']:not([aria-disabled='true']),
+  label[for],
+  summary {
+    cursor: pointer;
+  }
+  :focus-visible {
+    outline: 2px solid var(--ink);
+    outline-offset: 2px;
+  }
+  h1,
+  h2,
+  h3,
+  h4 {
+    margin: 0;
+    font-family: var(--f-ui);
+  }
+  p {
+    margin: 0;
+  }
+}
+
+@layer components {
+  /* Tables: a line between rows, the header in small ink-2. */
+  .tbl {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+  }
+  .tbl th {
+    text-align: left;
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--ink-2);
+    padding: 0 14px 10px;
+    white-space: nowrap;
+  }
+  .tbl td {
+    padding: 11px 14px;
+    border-top: 1px solid var(--line);
+    vertical-align: middle;
+    white-space: nowrap;
+  }
+  .tbl tr[data-dim] td {
+    color: var(--ink-3);
+  }
+  .tbl tbody tr:hover td {
+    background: color-mix(in srgb, var(--sunken) 55%, transparent);
+  }
+  .tbl tr[aria-selected='true'] td {
+    background: var(--raised);
+  }
+
+  /* Tabular readout numbers, not uppercase state text. */
+  .num {
+    font-family: var(--f-ro);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.01em;
+  }
+
+  /* Eyebrow heading inside a well. */
+  .eyebrow {
+    margin: 0 0 12px;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+  }
+
+  /* Loading placeholder rows, not a spinner. */
+  .sk {
+    display: block;
+    height: 12px;
+    border-radius: 6px;
+    background: var(--sunken);
+    animation: sk 1.4s ease-in-out infinite;
+  }
+  @keyframes sk {
+    50% {
+      opacity: 0.5;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .sk {
+      animation: none;
+    }
+  }
+
+  /* The modal dialog's backdrop. */
+  dialog.dlg::backdrop {
+    background: color-mix(in srgb, var(--plate-lo) 45%, transparent);
+  }
+}
