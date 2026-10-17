@@ -12,7 +12,7 @@
   color-scheme: light;
   --page: #e6e3dc;
   --surface: #f4f2ed;
-  --surface-2: #ebe8e1;
+  --sunken: #ebe8e1;
   --raised: #fbfaf7;
   --line: #dcd8cf;
   --line-strong: #c9c4b9;
@@ -26,27 +26,27 @@
   --meta: #2a78d6;
   --data: #eb6834;
   --ctl: #1baf7a;
-  --ink: #8e897f;
+  --neutral: #8e897f;
   --meta-soft: #2a78d61a;
   --data-soft: #eb68341a;
   --ctl-soft: #1baf7a1a;
-  --good: #0ca30c;
-  --warning: #fab219;
-  --serious: #ec835a;
-  --critical: #d03b3b;
   --bar: #2a78d6;
   --bar-ext: #86b6ef;
   --ref: #1d1c1a;
   --shadow: 0 0 0 0.5px rgba(40, 30, 20, 0.14), 0 18px 40px -26px rgba(50, 35, 20, 0.35);
   --mono: "Departure Mono", ui-monospace, "SF Mono", Menlo, monospace;
   --sans: "Schibsted Grotesk", -apple-system, BlinkMacSystemFont, sans-serif;
+  /* The identity's detail set, values from design/tokens.css (DECISIONS #11) */
+  --led-ok: #2fbf57; --led-dl: #ff5b1f; --led-err: #ff3b24;
+  --lens-off: rgba(138, 134, 125, .35);
+  --bezel: #dcd8ce; --bezel-lift: rgba(255, 255, 255, .55);
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     color-scheme: dark;
     --page: #121211;
     --surface: #1d1c1a;
-    --surface-2: #161514;
+    --sunken: #161514;
     --raised: #262522;
     --line: #2f2d29;
     --line-strong: #44413c;
@@ -60,7 +60,7 @@
     --meta: #3987e5;
     --data: #d95926;
     --ctl: #199e70;
-    --ink: #8b857c;
+    --neutral: #8b857c;
     --meta-soft: #3987e522;
     --data-soft: #d9592622;
     --ctl-soft: #199e7022;
@@ -68,13 +68,15 @@
     --bar-ext: #1c5cab;
     --ref: #efece5;
     --shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.8), 0 18px 40px -26px rgba(0, 0, 0, 0.7);
+    --led-ok: #3fdc6c; --led-dl: #ff6a2e; --led-err: #ff4b33;
+    --bezel: #0f0f0e; --bezel-lift: rgba(255, 255, 255, .06);
   }
 }
 :root[data-theme="dark"] {
   color-scheme: dark;
   --page: #121211;
   --surface: #1d1c1a;
-  --surface-2: #161514;
+  --sunken: #161514;
   --raised: #262522;
   --line: #2f2d29;
   --line-strong: #44413c;
@@ -88,7 +90,7 @@
   --meta: #3987e5;
   --data: #d95926;
   --ctl: #199e70;
-  --ink: #8b857c;
+  --neutral: #8b857c;
   --meta-soft: #3987e522;
   --data-soft: #d9592622;
   --ctl-soft: #199e7022;
@@ -96,6 +98,8 @@
   --bar-ext: #1c5cab;
   --ref: #efece5;
   --shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.8), 0 18px 40px -26px rgba(0, 0, 0, 0.7);
+  --led-ok: #3fdc6c; --led-dl: #ff6a2e; --led-err: #ff4b33;
+  --bezel: #0f0f0e; --bezel-lift: rgba(255, 255, 255, .06);
 }
 
 @font-face { font-family: "Departure Mono"; src: url("https://cdn.jsdelivr.net/gh/rektdeckard/departure-mono@v1.500/public/assets/DepartureMono-Regular.woff2") format("woff2"); font-display: swap; }
@@ -109,14 +113,14 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 code, .mono { font-family: var(--mono); font-size: 0.88em; }
-code { background: var(--surface-2); border-radius: 5px; padding: 1px 5px; font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+code { background: var(--sunken); border-radius: 5px; padding: 1px 5px; font-family: ui-monospace, "SF Mono", Menlo, monospace; }
 a { color: var(--text); text-decoration-color: var(--brand); text-underline-offset: 3px; }
 
 /* Layout */
 .shell { display: grid; grid-template-columns: 260px minmax(0, 1fr); min-height: 100vh; }
 nav.side {
   position: sticky; top: 0; height: 100vh; overflow-y: auto;
-  background: var(--surface-2);
+  background: var(--sunken);
   padding: 22px 14px 18px; display: flex; flex-direction: column; gap: 18px;
 }
 .brand { display: flex; align-items: center; gap: 10px; padding: 0 8px; }
@@ -129,7 +133,7 @@ nav.side {
   color: var(--text-2); text-decoration: none; font-size: 13.5px;
 }
 .toc a .n { font-family: var(--mono); font-size: 12px; color: var(--text-3); width: 16px; }
-.toc a:hover { background: var(--surface-2); color: var(--text); }
+.toc a:hover { background: var(--sunken); color: var(--text); }
 .toc a.on { background: var(--raised); color: var(--text); font-weight: 600; box-shadow: var(--shadow); }
 .toc a.on .n { color: var(--brand); }
 .side-foot { margin-top: auto; padding: 0 8px; display: flex; flex-direction: column; gap: 10px; font-size: 12px; color: var(--text-3); }
@@ -141,7 +145,7 @@ nav.side {
 main { padding: 40px 48px 120px; max-width: 1100px; width: 100%; }
 section { padding: 8px 0 56px; margin-bottom: 8px; }
 section:last-child { border-bottom: 0; }
-.eyebrow { font-family: var(--mono); font-size: 12px; letter-spacing: 0.04em; color: var(--text-3); margin: 0 0 8px; }
+.eyebrow { font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-2); margin: 0 0 8px; }
 h1 { font-size: 46px; line-height: 1.04; margin: 0 0 16px; letter-spacing: -0.035em; font-weight: 800; max-width: 17ch; }
 h2 { font-size: 28px; line-height: 1.12; margin: 0 0 12px; letter-spacing: -0.025em; font-weight: 750; }
 h3 { font-size: 17px; margin: 30px 0 10px; letter-spacing: -0.01em; }
@@ -177,7 +181,7 @@ p { margin: 0 0 12px; max-width: 72ch; }
 .table-wrap { overflow-x: auto; border-radius: 16px; background: var(--raised); box-shadow: var(--shadow); }
 table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
 th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
-th { font-size: 12px; font-weight: 600; color: var(--text-2); background: var(--surface-2); white-space: nowrap; }
+th { font-size: 12px; font-weight: 600; color: var(--text-2); background: var(--sunken); white-space: nowrap; }
 tr:last-child td { border-bottom: 0; }
 td.k { font-weight: 600; white-space: nowrap; }
 .then { color: var(--text-2); }
@@ -194,11 +198,12 @@ figcaption { font-size: 12.5px; color: var(--text-2); margin-top: 8px; max-width
 .legend { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 12.5px; color: var(--text-2); margin: 0 0 12px; }
 .legend i { display: inline-block; width: 22px; height: 0; border-top: 3px solid; vertical-align: middle; margin-right: 6px; border-radius: 2px; }
 .legend i.dash { border-top-style: dashed; }
-.legend i.sw { width: 12px; height: 12px; border: 0; border-radius: 3px; }
+/* Series swatches are the slot mark, tinted with the series' colour */
+.legend i.sw { width: 12px; height: 4px; border: 0; border-radius: 2px; box-shadow: inset 0 1px 1px rgba(0, 0, 0, .3); }
 .legend i.dot { border-top: 3px dotted; }
 
 /* SVG diagram classes */
-.zone { fill: var(--surface-2); stroke: var(--line-strong); stroke-width: 1; }
+.zone { fill: var(--sunken); stroke: var(--line-strong); stroke-width: 1; }
 .zone-vm { fill: var(--raised); stroke: var(--line-strong); stroke-dasharray: 4 4; }
 .zlabel { fill: var(--text-2); font: 600 12px var(--sans); letter-spacing: 0.05em; text-transform: uppercase; }
 .node { fill: var(--raised); stroke: var(--line-strong); stroke-width: 1; }
@@ -209,22 +214,25 @@ figcaption { font-size: 12.5px; color: var(--text-2); margin-top: 8px; max-width
 .e.meta { stroke: var(--meta); }
 .e.data { stroke: var(--data); stroke-width: 4; }
 .e.ctl { stroke: var(--ctl); stroke-dasharray: 6 5; }
-.e.ink { stroke: var(--ink); }
+.e.ink { stroke: var(--neutral); }
 .e.repl { stroke: var(--meta); stroke-width: 3; stroke-dasharray: 0.5 6; stroke-linecap: round; }
 .el { fill: var(--text-2); font: 12px var(--sans); paint-order: stroke; stroke: var(--raised); stroke-width: 5px; stroke-linejoin: round; }
-.zone ~ .el, .el.onzone { stroke: var(--surface-2); }
-.mk-meta { fill: var(--meta); } .mk-data { fill: var(--data); } .mk-ctl { fill: var(--ctl); } .mk-ink { fill: var(--ink); }
-.badge-bg { fill: var(--surface-2); }
-.badge-t { fill: var(--text); font: 600 11.5px var(--sans); }
+.zone ~ .el, .el.onzone { stroke: var(--sunken); }
+.mk-meta { fill: var(--meta); } .mk-data { fill: var(--data); } .mk-ctl { fill: var(--ctl); } .mk-ink { fill: var(--neutral); }
+.slot-svg { fill: var(--text-3); }
+.ro-svg { fill: var(--text-2); font: 11.5px var(--mono); letter-spacing: 0.04em; text-transform: uppercase; }
+.bezel-svg { fill: var(--bezel); }
+.lens-svg { fill: var(--lens-off); }
+.lens-svg.ok { fill: var(--led-ok); } .lens-svg.dl { fill: var(--led-dl); } .lens-svg.err { fill: var(--led-err); }
 
 /* Sequence diagrams */
 .seq .life { stroke: var(--line-strong); stroke-dasharray: 3 4; }
-.seq .ph { fill: var(--surface-2); stroke: var(--line-strong); }
+.seq .ph { fill: var(--sunken); stroke: var(--line-strong); }
 .seq .pt { fill: var(--text); font: 600 13px var(--sans); }
 .seq .ps { fill: var(--text-3); font: 11px var(--sans); }
 .seq .ml { fill: var(--text); font: 12.5px var(--sans); }
 .seq .mn { fill: var(--text-3); font: 11px var(--mono); }
-.seq .note { fill: var(--surface-2); stroke: none; }
+.seq .note { fill: var(--sunken); stroke: none; }
 .seq .notet { fill: var(--text); font: 12px var(--sans); }
 .seq .grp { fill: none; stroke: var(--line-strong); stroke-dasharray: 2 3; }
 .seq .grpt { fill: var(--text-2); font: 600 11px var(--sans); letter-spacing: 0.04em; text-transform: uppercase; }
@@ -241,30 +249,57 @@ figcaption { font-size: 12.5px; color: var(--text-2); margin-top: 8px; max-width
 /* ER cards */
 .er { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-top: 16px; }
 .ent { background: var(--raised); border-radius: 14px; overflow: hidden; box-shadow: var(--shadow); }
-.ent h4 { margin: 0; padding: 10px 12px; font: 13px var(--mono); background: var(--surface-2); display: flex; justify-content: space-between; align-items: center; gap: 8px; }
-.ent h4 span { font: 600 11px var(--sans); color: var(--text-3); }
+.ent h4 { margin: 0; padding: 10px 12px; font: 13px var(--mono); background: var(--sunken); display: flex; align-items: center; gap: 10px; }
+/* The slot mark carries where the table lives, tinted like the legend */
+.ent h4::before { content: ""; flex: none; width: 12px; height: 4px; border-radius: 2px; background: var(--text-3); box-shadow: inset 0 1px 1px rgba(0, 0, 0, .3); }
+.ent.where-cp h4::before { background: var(--ctl); }
+.ent.where-db h4::before { background: var(--meta); }
+.ent h4 span { margin-left: auto; font: 10.5px var(--mono); letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-2); white-space: nowrap; }
 .ent ul { list-style: none; margin: 0; padding: 6px 0; }
 .ent li { display: flex; justify-content: space-between; gap: 8px; padding: 3px 12px; font: 12px ui-monospace, "SF Mono", Menlo, monospace; color: var(--text); }
 .ent li em { font: 11px var(--sans); color: var(--text-3); font-style: normal; white-space: nowrap; }
 .ent li .pk { color: var(--text); font-weight: 700; }
 .ent li .fk { color: var(--meta); }
-.ent.where-db h4 span { color: var(--meta); background: var(--meta-soft); padding: 1px 8px; border-radius: 99px; }
-.ent.where-cp h4 span { color: color-mix(in srgb, var(--ctl) 60%, var(--text)); background: var(--ctl-soft); padding: 1px 8px; border-radius: 99px; }
+/* Detail set A (design/tokens.css): no pills or badges, no glowing dots, no coloured
+   side stripes, no coloured backgrounds on notices. */
 
-/* Status pills */
-.pill { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; padding: 2px 8px 2px 6px; border-radius: 999px; white-space: nowrap; }
-.pill::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
-.pill.good { color: var(--good); background: color-mix(in srgb, var(--good) 12%, transparent); }
-.pill.warn { color: #9a6a00; background: color-mix(in srgb, var(--warning) 18%, transparent); }
-.pill.bad { color: var(--critical); background: color-mix(in srgb, var(--critical) 12%, transparent); }
-:root[data-theme="dark"] .pill.warn { color: var(--warning); }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .pill.warn { color: var(--warning); } }
+/* LED in its bezel: the state. Colour lives only in the lens. */
+.led {
+  display: inline-grid; place-items: center; flex: none; vertical-align: middle;
+  width: 14px; height: 14px; border-radius: 50%; background: var(--bezel);
+  box-shadow: inset 0 1px 1.5px rgba(0, 0, 0, .35), 0 1px 0 var(--bezel-lift);
+}
+.led::after { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--lens-off); }
+.led[data-state="ok"]::after, .led[data-state="dl"]::after, .led[data-state="err"]::after {
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, .55), inset 0 -1px 1px rgba(0, 0, 0, .25);
+}
+.led[data-state="ok"]::after { background: var(--led-ok); }
+.led[data-state="dl"]::after { background: var(--led-dl); }
+.led[data-state="err"]::after { background: var(--led-err); }
 
-/* Callouts */
-.callout { border-radius: 14px; padding: 14px 18px; font-size: 14px; margin-top: 18px; }
-.callout b { display: block; margin-bottom: 2px; }
-.callout.risk { background: color-mix(in srgb, var(--serious) 14%, var(--surface)); }
-.callout.info { background: var(--surface-2); }
+/* Readout: state text, never coloured */
+.readout { font-family: var(--mono); font-size: 11.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--text-2); }
+/* A state: the LED and its readout */
+.st { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; vertical-align: middle; }
+/* In a table the state sits on its own line, under any text of the cell */
+td > .st { display: flex; width: max-content; margin-top: 2px; }
+
+/* Slot: the mark before list items and notes, centred on the first line */
+.slot-mark {
+  display: inline-block; flex: none; width: 12px; height: 4px; border-radius: 2px;
+  background: var(--text-3); box-shadow: inset 0 1px 1px rgba(0, 0, 0, .3);
+}
+
+/* Notices: a sunken surface; a note opens with the slot, a state notice with a LED */
+.notice {
+  background: var(--sunken); border-radius: 10px; padding: 14px 18px; font-size: 14px; margin-top: 18px;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, .06);
+}
+.notice-h { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
+.notice-h b { font-weight: 700; }
+.notice-h .st + b { margin-left: 4px; }
+.notice p { margin: 0; max-width: none; }
+.notice p + p { margin-top: 8px; }
 
 /* Charts */
 .chart .grid-l { stroke: var(--line); }
@@ -276,7 +311,7 @@ figcaption { font-size: 12.5px; color: var(--text-2); margin-top: 8px; max-width
 .chart .hit { fill: transparent; cursor: default; }
 .chart .bar { fill: var(--bar); }
 .chart .bar-ext { fill: var(--bar-ext); }
-.chart .bar-ink { fill: var(--ink); }
+.chart .bar-ink { fill: var(--neutral); }
 .chart .grp-t { fill: var(--text); font: 600 13px var(--sans); }
 .chart .s1 { fill: var(--meta); } .chart .s2 { fill: var(--data); }
 details.data { margin-top: 8px; font-size: 12.5px; color: var(--text-2); max-width: 100%; overflow-x: auto; }
@@ -291,18 +326,26 @@ details.data table { margin-top: 8px; font-size: 12.5px; }
 /* Decisions */
 .dec { counter-reset: d; display: grid; gap: 10px; margin-top: 14px; }
 .dec .card { padding: 14px 18px; display: grid; grid-template-columns: 30px 1fr; gap: 4px 12px; }
-.dec .card::before { counter-increment: d; content: counter(d); font: 13px var(--mono); color: var(--text); background: var(--surface-2); border-radius: 8px; height: 26px; display: grid; place-items: center; }
+.dec .card::before { counter-increment: d; content: counter(d); font: 13px var(--mono); color: var(--text); background: var(--sunken); border-radius: 8px; height: 26px; display: grid; place-items: center; }
 .dec b { font-size: 14px; }
 .dec p { grid-column: 2; margin: 0; font-size: 13.5px; color: var(--text-2); }
-.dec .rec { grid-column: 2; font-size: 13px; }
-.dec .rec::before { content: "Proposal: "; font-weight: 700; color: var(--text); }
-.dec .rec.closed::before { content: "Closed: "; }
+.dec .rec { grid-column: 2; max-width: 80ch; font-size: 13px; display: flex; align-items: baseline; gap: 10px; margin-top: 4px; }
+.dec .rec .st { flex: none; align-self: flex-start; }
 
-.lic { display: inline-block; white-space: nowrap; font: 11px var(--mono); padding: 2px 8px; border-radius: 99px; background: var(--surface-2); color: var(--text-2); margin-left: 6px; vertical-align: 2px; }
+/* A license is a readout next to the name, not a chip */
+.lic { white-space: nowrap; font: 10.5px var(--mono); letter-spacing: .04em; text-transform: uppercase; color: var(--text-2); margin-left: auto; font-weight: 400; }
 .comp h3 { margin: 0 0 4px; display: flex; align-items: center; gap: 6px; font-size: 15px; }
 .comp .where { font-size: 12px; color: var(--text-3); margin-bottom: 8px; }
-.comp ul { margin: 0; padding-left: 18px; font-size: 13px; color: var(--text-2); }
-.comp ul li { margin: 2px 0; }
+/* Lists open with the slot mark, centred on the first line */
+.comp ul, ul.slots { list-style: none; margin: 0; padding: 0; font-size: 13px; color: var(--text-2); }
+.comp ul li, ul.slots li { margin: 3px 0; position: relative; padding-left: 22px; }
+.comp ul li::before, ul.slots li::before {
+  content: ""; position: absolute; left: 0; top: 0.5lh; width: 12px; height: 4px; border-radius: 2px;
+  background: var(--text-3); box-shadow: inset 0 1px 1px rgba(0, 0, 0, .3); transform: translateY(-50%);
+}
+ul.slots { font-size: 14px; color: var(--text); max-width: 80ch; }
+ul.slots li { margin: 6px 0; }
+ul.slots li b { font-weight: 650; }
 
 @media (max-width: 960px) {
   .g4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -331,7 +374,8 @@ details.data table { margin-top: 8px; font-size: 12.5px; }
 <div class="shell">
 <nav class="side" aria-label="Sections">
   <div class="brand">
-    <svg class="brand-mark" width="36" height="24" viewBox="0 0 24 16" aria-hidden="true"><rect x="2" y="6.5" width="13" height="3" rx="1.5" fill="var(--text)"/><circle cx="19.75" cy="8" r="3.1" fill="var(--text)"/><circle cx="19.75" cy="8" r="2" fill="var(--brand)"/><ellipse cx="19.75" cy="7.1" rx=".95" ry=".5" fill="#fff" opacity=".5"/></svg>
+    <!-- The final mark, design/mark/app-icon.svg, copied as is -->
+    <svg class="brand-mark" width="36" height="36" viewBox="0 0 124 124" aria-hidden="true"><defs><linearGradient id="fx-sq" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3a3835"/><stop offset="1" stop-color="#1c1b19"/></linearGradient></defs><rect x="4" y="4" width="116" height="116" rx="27" fill="url(#fx-sq)"/><rect x="4.5" y="4.5" width="115" height="115" rx="26.5" fill="none" stroke="#fff" stroke-opacity=".08"/><rect x="16" y="51" width="68" height="22" rx="11" fill="#0b0b0a"/><rect x="20" y="55" width="42" height="14" rx="7" fill="#d9d4c8"/><circle cx="100" cy="62" r="12.5" fill="#0b0b0a"/><circle cx="100" cy="62" r="8.5" fill="#ff6a2e"/><ellipse cx="100" cy="58.2" rx="4" ry="2" fill="#fff" opacity=".5"/></svg>
     <div><b>floppy</b><span>Architecture proposal</span></div>
   </div>
   <ul class="toc">
@@ -347,7 +391,7 @@ details.data table { margin-top: 8px; font-size: 12.5px; }
     <li><a href="#performance"><span class="n">10</span>Performance</a></li>
     <li><a href="#costs"><span class="n">11</span>Costs</a></li>
     <li><a href="#plan"><span class="n">12</span>Plan</a></li>
-    <li><a href="#decisions"><span class="n">13</span>Open decisions</a></li>
+    <li><a href="#decisions"><span class="n">13</span>Decisions</a></li>
   </ul>
   <div class="side-foot">
     <button class="theme-btn" id="themeBtn" type="button">Toggle theme</button>
@@ -364,9 +408,9 @@ details.data table { margin-top: 8px; font-size: 12.5px; }
 
   <div class="grid g4" style="margin-top:22px">
     <div class="card stat"><div class="v">3<small>ms</small></div><div class="k">Seek in cache, like a local disk</div><div class="src">Measured on OVH Milan</div></div>
-    <div class="card stat"><div class="v">0.9<small>s</small></div><div class="k">Seek on a clip never opened (max 1.9 s)</div><div class="src">Measured, 4 MB blocks</div></div>
+    <div class="card stat"><div class="v">0.38<small>s</small></div><div class="k">Seek on a clip never opened, 1 MB blocks (0.9 s on OVH with 4 MB)</div><div class="src">Measured in the spike, 100 Mbps link</div></div>
     <div class="card stat"><div class="v">0.3<small>s</small></div><div class="k">Listing 300 files another Mac created, against 75 s without the replica</div><div class="src">Measured in the spike, 15 ms link</div></div>
-    <div class="card stat"><div class="v">12.1<small>MB/s</small></div><div class="k">Cold playback, against 7.5 a 60 Mbps clip needs</div><div class="src">Measured, 170 Mbps home line</div></div>
+    <div class="card stat"><div class="v">93<small>%</small></div><div class="k">Of the line on a cold read from the Mac over SMB (86% for a whole clip)</div><div class="src">Measured in the spike, 100 Mbps link</div></div>
   </div>
 
   <h3>What changes</h3>
@@ -388,7 +432,7 @@ details.data table { margin-top: 8px; font-size: 12.5px; }
 
   <div class="grid g3 principles">
     <div class="principle"><div class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 12h16M14 6l6 6-6 6"/></svg></div><div><b>Control plane off the data path</b><span>It hands out access and configuration. Files flow between the Mac, Valkey and S3 only, so if it goes down mounted disks keep working.</span></div></div>
-    <div class="principle"><div class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v12c0 1.7 3.1 3 7 3s7-1.3 7-3V6"/></svg></div><div><b>Standard parts, one small patch</b><span>Any S3 and a plain Valkey with its native replication, no provider API in the core. The one piece of our own is a JuiceFS patch that reads from the local replica.</span></div></div>
+    <div class="principle"><div class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v12c0 1.7 3.1 3 7 3s7-1.3 7-3V6"/></svg></div><div><b>Standard parts, two small patches</b><span>Any S3 and a plain Valkey with its native replication, no provider API in the core. The pieces of our own are two JuiceFS patches: metadata from the local replica, and whole-block reads for the Mac's out-of-order reads.</span></div></div>
     <div class="principle"><div class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg></div><div><b>One codebase, open source</b><span>Self-hosted by anyone or run as a hosted service: the same code. App and engine MIT, control plane AGPL-3.0.</span></div></div>
   </div>
 </section>
@@ -400,11 +444,11 @@ details.data table { margin-top: 8px; font-size: 12.5px; }
   <figure>
     <div class="fig wide">
       <div class="legend">
-        <span><i style="border-color:var(--data);border-top-width:4px"></i>File data (4 MB blocks)</span>
+        <span><i style="border-color:var(--data);border-top-width:4px"></i>File data (1 MB blocks)</span>
         <span><i style="border-color:var(--meta)"></i>Metadata (file tree)</span>
         <span><i class="dot" style="border-color:var(--meta)"></i>Replication, pushed by the master</span>
         <span><i class="dash" style="border-color:var(--ctl)"></i>Control (HTTPS)</span>
-        <span><i style="border-color:var(--ink)"></i>Local, on the Mac</span>
+        <span><i style="border-color:var(--neutral)"></i>Local, on the Mac</span>
       </div>
       <svg viewBox="0 0 1000 610" role="img" aria-label="Architecture diagram: Mac with app, command and a VM holding JuiceFS, the cache and a Valkey replica; control plane; central Valkey and S3 storage">
         <defs>
@@ -468,10 +512,10 @@ details.data table { margin-top: 8px; font-size: 12.5px; }
         <text class="ns" x="74" y="344">share on vzNAT only</text>
         <rect class="node hl" x="252" y="302" width="170" height="58" rx="9"/>
         <text class="nt" x="266" y="326">JuiceFS, patched</text>
-        <text class="ns" x="266" y="344">reads from the replica</text>
+        <text class="ns" x="266" y="344">replica reads, whole blocks</text>
         <rect class="node" x="60" y="410" width="162" height="58" rx="9"/>
         <text class="nt" x="74" y="434">Cache</text>
-        <text class="ns" x="74" y="452">4 MB blocks on the SSD</text>
+        <text class="ns" x="74" y="452">1 MB blocks on the SSD</text>
         <rect class="node" x="252" y="410" width="170" height="58" rx="9"/>
         <text class="nt" x="266" y="434">Valkey replica</text>
         <text class="ns" x="266" y="452">the file tree, in sync</text>
@@ -494,13 +538,13 @@ details.data table { margin-top: 8px; font-size: 12.5px; }
         <rect class="node" x="590" y="152" width="140" height="50" rx="9"/>
         <text class="nt" x="604" y="174">Admin</text>
         <text class="ns" x="604" y="191">in the browser</text>
-        <rect class="badge-bg" x="790" y="165" width="160" height="24" rx="12"/>
-        <text class="badge-t" x="804" y="181">Not on the data path</text>
+        <rect class="slot-svg" x="790" y="175" width="12" height="4" rx="2"/>
+        <text class="ro-svg" x="812" y="181">Not on the data path</text>
 
         <!-- Datacenter nodes -->
         <rect class="node" x="590" y="326" width="290" height="72" rx="9"/>
         <text class="nt" x="604" y="352">S3 bucket</text>
-        <text class="ns" x="604" y="372">file contents as 4 MB blocks,</text>
+        <text class="ns" x="604" y="372">file contents as 1 MB blocks,</text>
         <text class="ns" x="604" y="388">one bucket per organization</text>
         <rect class="node" x="590" y="440" width="366" height="96" rx="9"/>
         <text class="nt" x="604" y="466">Valkey, central</text>
@@ -550,12 +594,13 @@ details.data table { margin-top: 8px; font-size: 12.5px; }
     </div>
     <div class="card comp">
       <h3>JuiceFS<span class="lic">Apache-2.0</span></h3>
-      <div class="where">patched: spike/juicefs-replica, on v1.4.1</div>
+      <div class="where">v1.4.1 with two patches, spike/juicefs-replica · a fork branch later</div>
       <ul>
-        <li>Lookups, attributes, listings, xattrs and slice lists from the local replica</li>
-        <li>Writes on the master in one round trip: logic on replica reads, then one script that checks them and applies</li>
-        <li>Read-your-writes from a session counter in the same transaction</li>
-        <li>Mode and lag in <code>.stats</code>: replica, master, offline</li>
+        <li>0001: lookups, attributes, listings, xattrs and slice lists from the local replica</li>
+        <li>0001: writes on the master in one round trip, read-your-writes from a session counter in the same transaction</li>
+        <li>0001: mode and lag in <code>.stats</code>: replica, master, offline</li>
+        <li>0002: whole blocks inside a sequential stream, when the Mac reads out of order</li>
+        <li>1 MB blocks, 4 MB readahead</li>
       </ul>
     </div>
     <div class="card comp">
@@ -615,7 +660,7 @@ details.data table { margin-top: 8px; font-size: 12.5px; }
   </div>
   <div class="panel" id="f-read" hidden>
     <figure><div class="fig wide"><svg class="seq" id="seq-read"></svg></div>
-    <figcaption>Every metadata read is local, in the same VM: no network round trip. A read waits only when the replica has not yet received this Mac's own last write. Measured: a folder of 300 files another Mac created lists in 0.20-0.30 s from the Finder, against 74.6 s with every read on the master.</figcaption></figure>
+    <figcaption>Every metadata read is local, in the same VM: no network round trip. A read waits only when the replica has not yet received this Mac's own last write. Measured: a folder of 300 files another Mac created lists in 0.20-0.30 s from the Finder, against 74.6 s with every read on the master. Through its cache the macOS SMB client asks for 128 KB pieces, out of order and up to 40 MB ahead; stock JuiceFS turned them into range requests and downloaded blocks twice, the second patch reads whole blocks inside a sequential stream (DECISIONS #15).</figcaption></figure>
   </div>
   <div class="panel" id="f-write" hidden>
     <figure><div class="fig wide"><svg class="seq" id="seq-write"></svg></div>
@@ -641,7 +686,7 @@ details.data table { margin-top: 8px; font-size: 12.5px; }
         <g id="stateNodes"></g>
       </svg>
     </div>
-    <figcaption>Dots carry status color and every state is labeled in text. From Unreachable the app retries every 30 seconds on its own; saving fails at once with "read-only file system" until the center answers. Off is only entered by the user.</figcaption>
+    <figcaption>Each state carries the LED of the panel's faceplate (green ready, orange for activity, red unreachable, off otherwise) and is labeled in text. From Unreachable the app retries every 30 seconds on its own; saving fails at once with "read-only file system" until the center answers. Off is only entered by the user.</figcaption>
   </figure>
 </section>
 
@@ -652,17 +697,17 @@ details.data table { margin-top: 8px; font-size: 12.5px; }
     <table>
       <thead><tr><th>Credential</th><th>Held by</th><th>Stored</th><th>Gives</th><th>Taken back by</th></tr></thead>
       <tbody>
-        <tr><td class="k">Device token</td><td>Each Mac</td><td>Keychain</td><td>Control plane API as that Mac</td><td>Revoking the device <span class="pill good">immediate</span></td></tr>
-        <tr><td class="k">Valkey user</td><td>Each Mac</td><td>Keychain, passed to the VM for JuiceFS and the replica</td><td>Write the file tree, receive the replication stream, and through them the S3 key</td><td><code>ACL DELUSER</code> and <code>CLIENT KILL</code> <span class="pill good">immediate</span></td></tr>
-        <tr><td class="k">S3 key</td><td>Every Mac with a Valkey user, implicitly</td><td>Volume format in the metadata, on the master and in every replica</td><td>Read, write, delete objects in the bucket</td><td>New key pasted, old one deleted at the provider <span class="pill warn">manual</span></td></tr>
+        <tr><td class="k">Device token</td><td>Each Mac</td><td>Keychain</td><td>Control plane API as that Mac</td><td>Revoking the device <span class="st"><span class="led" data-state="ok"></span><span class="readout">Immediate</span></span></td></tr>
+        <tr><td class="k">Valkey user</td><td>Each Mac</td><td>Keychain, passed to the VM for JuiceFS and the replica</td><td>Write the file tree, receive the replication stream, and through them the S3 key</td><td><code>ACL DELUSER</code> and <code>CLIENT KILL</code> <span class="st"><span class="led" data-state="ok"></span><span class="readout">Immediate</span></span></td></tr>
+        <tr><td class="k">S3 key</td><td>Every Mac with a Valkey user, implicitly</td><td>Volume format in the metadata, on the master and in every replica</td><td>Read, write, delete objects in the bucket</td><td>New key pasted, old one deleted at the provider <span class="st"><span class="led" data-state="dl"></span><span class="readout">Manual</span></span></td></tr>
         <tr><td class="k">SMB password</td><td>Mac and its VM</td><td>Keychain (today in the mount URL)</td><td>The share, only on the private Mac-VM link</td><td>Reinstall</td></tr>
         <tr><td class="k">Valkey admin</td><td>Control plane</td><td>Server environment</td><td>Create and delete ACL users, format volumes</td><td>The operator</td></tr>
         <tr><td class="k">Magic link</td><td>The person's inbox</td><td>Hashed, single use, 15 minutes</td><td>One sign-in</td><td>Expiry</td></tr>
       </tbody>
     </table>
   </div>
-  <div class="callout risk"><b>Residual risk: the window before rotation</b>A revoked Mac keeps the replica it had, S3 key included, until the app clears it at the next heartbeat; whoever copied the key can delete or download raw blocks until the admin deletes it at the provider. Without metadata the blocks are 4 MB fragments with no names; deletion is the real risk. Mitigations: rotate right after revoking, and bucket versioning as a safety net (an open decision, it bills deleted blocks).</div>
-  <div class="callout info"><b>Permissions stay all or nothing</b>Everyone in an organization sees and can delete every file of its volumes. JuiceFS Community has no per-folder permissions; trash (7 days) and the bucket's copy at a second provider cover mistakes. The replicas in the Macs are not a backup: they follow the master, deletions included.</div>
+  <div class="notice"><div class="notice-h"><span class="st"><span class="led" data-state="dl"></span><span class="readout">Residual risk</span></span><b>The window before rotation</b></div><p>A revoked Mac keeps the replica it had, S3 key included, until the app clears it at the next heartbeat; whoever copied the key can delete or download raw blocks until the admin deletes it at the provider. Without metadata the blocks are 1 MB fragments with no names; deletion is the real risk. Mitigations: rotate right after revoking, and bucket versioning as a safety net (an open decision, it bills deleted blocks).</p></div>
+  <div class="notice"><div class="notice-h"><span class="slot-mark"></span><b>Permissions stay all or nothing</b></div><p>Everyone in an organization sees and can delete every file of its volumes. JuiceFS Community has no per-folder permissions; trash (7 days) and the bucket's copy at a second provider cover mistakes. The replicas in the Macs are not a backup: they follow the master, deletions included.</p></div>
 </section>
 
 <section id="model">
@@ -713,17 +758,17 @@ details.data table { margin-top: 8px; font-size: 12.5px; }
     <table>
       <thead><tr><th>Down</th><th>Mounted disks</th><th>What waits</th><th>Mitigation</th></tr></thead>
       <tbody>
-        <tr><td class="k">Control plane</td><td><span class="pill good">keep working</span></td><td>Sign-in, new Macs, revocation, rotation</td><td>It holds no file data; restart or redeploy</td></tr>
-        <tr><td class="k">Central Valkey</td><td><span class="pill warn">read only</span></td><td>Every change: saving, renaming, deleting. Browsing and reading go on from each replica</td><td>Every write on disk before the answer, a replica in the datacenter, a daily dump, alert</td></tr>
-        <tr><td class="k">S3</td><td><span class="pill warn">cache only</span></td><td>Uncached reads and every write</td><td>Writeback off: a saved file is on S3, never only on a Mac</td></tr>
-        <tr><td class="k">The Mac's network</td><td><span class="pill warn">read only</span></td><td>Saving fails in 0.1 s; uncached clips</td><td>The whole tree stays browsable; back within 0.2 s of the link returning</td></tr>
-        <tr><td class="k">The local replica</td><td><span class="pill good">keep working</span></td><td>Nothing; reads cross the network meanwhile</td><td>Behind over 2 s, stopped or restarted empty: reads go to the master until it catches up</td></tr>
-        <tr><td class="k">The VM</td><td><span class="pill warn">brief stop</span></td><td>Until the agent restarts it</td><td>Agent every 2 minutes, health check from inside the VM</td></tr>
-        <tr><td class="k">The Mac's disk space</td><td><span class="pill warn">cache freed</span></td><td>Cached clips must download again</td><td>Ceiling and emergency eviction computed on the Mac side</td></tr>
+        <tr><td class="k">Control plane</td><td><span class="st"><span class="led" data-state="ok"></span><span class="readout">Keep working</span></span></td><td>Sign-in, new Macs, revocation, rotation</td><td>It holds no file data; restart or redeploy</td></tr>
+        <tr><td class="k">Central Valkey</td><td><span class="st"><span class="led" data-state="err"></span><span class="readout">Read only</span></span></td><td>Every change: saving, renaming, deleting. Browsing and reading go on from each replica</td><td>Every write on disk before the answer, a replica in the datacenter, a daily dump, alert</td></tr>
+        <tr><td class="k">S3</td><td><span class="st"><span class="led" data-state="err"></span><span class="readout">Cache only</span></span></td><td>Uncached reads and every write</td><td>Writeback off: a saved file is on S3, never only on a Mac</td></tr>
+        <tr><td class="k">The Mac's network</td><td><span class="st"><span class="led" data-state="err"></span><span class="readout">Read only</span></span></td><td>Saving fails in 0.1 s; uncached clips</td><td>The whole tree stays browsable; back 0.9 s after the link returns</td></tr>
+        <tr><td class="k">The local replica</td><td><span class="st"><span class="led" data-state="ok"></span><span class="readout">Keep working</span></span></td><td>Nothing; reads cross the network meanwhile</td><td>Behind over 2 s, stopped or restarted empty: reads go to the master until it catches up</td></tr>
+        <tr><td class="k">The VM</td><td><span class="st"><span class="led" data-state="dl"></span><span class="readout">Brief stop</span></span></td><td>Until the agent restarts it</td><td>Agent every 2 minutes, health check from inside the VM</td></tr>
+        <tr><td class="k">The Mac's disk space</td><td><span class="st"><span class="led" data-state="dl"></span><span class="readout">Cache freed</span></span></td><td>Cached clips must download again</td><td>Ceiling and emergency eviction computed on the Mac side</td></tr>
       </tbody>
     </table>
   </div>
-  <div class="callout info"><b>Being refined: slow is not unreachable</b>A master that answers late, for example during a large copy, must not turn the disk read only. Offline will mean unambiguous unreachability, or several failed health checks in a row.</div>
+  <div class="notice"><div class="notice-h"><span class="st"><span class="led" data-state="ok"></span><span class="readout">Closed</span></span><b>Slow is not unreachable</b></div><p>A master that answers late, for example during a large copy, must not turn the disk read only. The patch goes offline only on unambiguous unreachability, or after 10 s without any answer from the master. Measured (<code>t13</code>): with the master answering in 1.2 s, give or take 0.6 s, 20 writes went through with no read-only error.</p></div>
 </section>
 
 <section id="deploy">
@@ -764,8 +809,8 @@ details.data table { margin-top: 8px; font-size: 12.5px; }
 
 <section id="performance">
   <p class="eyebrow">10 · Performance</p>
-  <h2>Measured: shared metadata at local speed</h2>
-  <p>Step 0 ran on 17/10/2026 in a local rig: two JuiceFS clients in containers standing in for two Macs' VMs, each with its local replica, mounted by the Mac over SMB, and the central metadata server behind a simulated 15 ms link, the same footage and the same tests for every option.</p>
+  <h2>Measured: metadata at local speed, data close to the line</h2>
+  <p>Two spikes ran on 17/10/2026 in a local rig: two JuiceFS clients in containers standing in for two Macs' VMs, each with its local replica, mounted by the Mac over SMB. The metadata spike put the central server behind a simulated 15 ms link, with the same footage and the same tests for every option; the data-path spike shaped the link to S3 and changed one thing at a time. Both are closed; the data path still has to be confirmed on OVH Milan.</p>
 
   <h3>Why remote metadata failed first</h3>
   <div class="grid g2">
@@ -788,7 +833,7 @@ details.data table { margin-top: 8px; font-size: 12.5px; }
       <div class="legend">
         <span><i class="sw" style="background:var(--bar)"></i>Valkey with the local replica (chosen)</span>
         <span><i class="sw" style="background:var(--bar-ext)"></i>Range across runs</span>
-        <span><i class="sw" style="background:var(--ink)"></i>Other options</span>
+        <span><i class="sw" style="background:var(--neutral)"></i>Other options</span>
       </div>
       <svg class="chart" id="ch-acc" viewBox="0 0 860 600" role="img" aria-label="Seconds per test for SQLite in the VM, PostgreSQL over the link, Valkey without and with the local replica"></svg>
     </div>
@@ -796,102 +841,209 @@ details.data table { margin-top: 8px; font-size: 12.5px; }
     <details class="data"><summary>Data</summary><table><tr><th>Test</th><th>SQLite in the VM</th><th>PostgreSQL over the link</th><th>Valkey, master only</th><th>Valkey with local replica</th></tr><tr><td>Cold listing of 300 files on another Mac</td><td>0.24 s</td><td>117 s</td><td>74.6 s</td><td>0.20-0.30 s</td></tr><tr><td>Creating 100 small files from the Finder</td><td>3.7 s</td><td>174 s</td><td>158 s</td><td>13.7-17 s</td></tr><tr><td>File created on Mac A visible on Mac B</td><td>n/a, one Mac</td><td>n/a</td><td>0.47 s</td><td>0.00-0.01 s</td></tr></table></details>
   </figure>
 
-  <h3>Acceptance, with the patch</h3>
+  <h3>Acceptance: 17 of 17</h3>
+  <p>Two clients, the Mac over SMB, the patched JuiceFS with both patches, the data path as the product runs it (<code>spike/acceptance.py</code>).</p>
   <div class="table-wrap">
     <table>
-      <thead><tr><th>Test</th><th>Measured</th><th>Threshold</th><th>Result</th></tr></thead>
+      <thead><tr><th>Check</th><th>Measured</th><th>Threshold</th><th>Result</th></tr></thead>
       <tbody>
-        <tr><td class="k">Cold listing of 300 files on B</td><td>0.20-0.30 s</td><td>under 0.5 s</td><td><span class="pill good">pass</span></td></tr>
-        <tr><td class="k">100 small files created on A</td><td>13.7-17 s</td><td>under 20 s, revised from 10 s</td><td><span class="pill good">pass</span></td></tr>
-        <tr><td class="k">Cold read of a clip on B (t03)</td><td>5.3-5.5 MB/s</td><td>at least 90% of 5.7 MB/s with local SQLite</td><td><span class="pill warn">pass, data path open</span></td></tr>
-        <tr><td class="k">File created on A visible on B</td><td>0.00-0.01 s</td><td>under 2 s</td><td><span class="pill good">pass</span></td></tr>
-        <tr><td class="k">Read-your-writes</td><td>0 stale reads in 1,000 cycles</td><td>0</td><td><span class="pill good">pass</span></td></tr>
-        <tr><td class="k">Concurrent creates, renames, deletes</td><td><code>fsck</code> clean</td><td>clean</td><td><span class="pill good">pass</span></td></tr>
-        <tr><td class="k">Offline: browsing and reading</td><td>keep working</td><td>keep working</td><td><span class="pill good">pass</span></td></tr>
-        <tr><td class="k">Offline: writes</td><td>fail in 0.1 s</td><td>fail within 20 s</td><td><span class="pill good">pass</span></td></tr>
-        <tr><td class="k">Link back</td><td>0.2 s</td><td>under 5 s</td><td><span class="pill good">pass</span></td></tr>
-        <tr><td class="k">Replica stopped, or rebuilt from scratch</td><td>handled</td><td>no errors</td><td><span class="pill good">pass</span></td></tr>
-        <tr><td class="k">Extended attributes between Macs</td><td>shared</td><td>shared</td><td><span class="pill good">pass</span></td></tr>
-        <tr><td class="k">Revocation</td><td>writes and replication stop</td><td>both stop</td><td><span class="pill good">pass</span></td></tr>
+        <tr><td class="k"><code>t01</code> Cold listing of 300 files on B</td><td>0.20-0.30 s</td><td>under 0.5 s</td><td><span class="st"><span class="led" data-state="ok"></span><span class="readout">Pass</span></span></td></tr>
+        <tr><td class="k"><code>t02</code> 100 small files created on A</td><td>13.7-17 s</td><td>under 20 s, revised from 10 s</td><td><span class="st"><span class="led" data-state="ok"></span><span class="readout">Pass</span></span></td></tr>
+        <tr><td class="k"><code>t03</code> Cold read of a clip on B</td><td>10.8 MB/s, 86% of the line</td><td>at least 80% of the 12.5 MB/s line</td><td><span class="st"><span class="led" data-state="ok"></span><span class="readout">Pass</span></span></td></tr>
+        <tr><td class="k"><code>t04</code> File created on A visible on B</td><td>0.00-0.01 s</td><td>under 2 s, worst of 20</td><td><span class="st"><span class="led" data-state="ok"></span><span class="readout">Pass</span></span></td></tr>
+        <tr><td class="k"><code>t05</code> Read-your-writes</td><td>0 stale reads in 1,000 cycles</td><td>0</td><td><span class="st"><span class="led" data-state="ok"></span><span class="readout">Pass</span></span></td></tr>
+        <tr><td class="k"><code>t06</code> Concurrent creates, renames, deletes</td><td><code>fsck</code> clean</td><td>clean</td><td><span class="st"><span class="led" data-state="ok"></span><span class="readout">Pass</span></span></td></tr>
+        <tr><td class="k"><code>t07</code> B reads a file that A rewrites and deletes</td><td>no read errors</td><td>0</td><td><span class="st"><span class="led" data-state="ok"></span><span class="readout">Pass</span></span></td></tr>
+        <tr><td class="k"><code>t08a</code> Offline: browsing and reading</td><td>keep working</td><td>keep working</td><td><span class="st"><span class="led" data-state="ok"></span><span class="readout">Pass</span></span></td></tr>
+        <tr><td class="k"><code>t08b</code> Offline: writes</td><td>fail in 0.1 s</td><td>fail within 20 s</td><td><span class="st"><span class="led" data-state="ok"></span><span class="readout">Pass</span></span></td></tr>
+        <tr><td class="k"><code>t09</code> Link back: B sees new files</td><td>0.9 s, 34 s without the replica</td><td>under 5 s</td><td><span class="st"><span class="led" data-state="ok"></span><span class="readout">Pass</span></span></td></tr>
+        <tr><td class="k"><code>t10a</code> Replica down: new files through the master</td><td>seen</td><td>seen</td><td><span class="st"><span class="led" data-state="ok"></span><span class="readout">Pass</span></span></td></tr>
+        <tr><td class="k"><code>t10b</code> Replica restarted empty resyncs</td><td>link up</td><td>on its own</td><td><span class="st"><span class="led" data-state="ok"></span><span class="readout">Pass</span></span></td></tr>
+        <tr><td class="k"><code>t11a</code> Extended attribute set on A, read on B</td><td>shared</td><td>shared</td><td><span class="st"><span class="led" data-state="ok"></span><span class="readout">Pass</span></span></td></tr>
+        <tr><td class="k"><code>t11b</code> Delete from the Mac over SMB</td><td>ok</td><td>ok</td><td><span class="st"><span class="led" data-state="ok"></span><span class="readout">Pass</span></span></td></tr>
+        <tr><td class="k"><code>t12a</code> Revoked Mac writes</td><td>refused</td><td>refused</td><td><span class="st"><span class="led" data-state="ok"></span><span class="readout">Pass</span></span></td></tr>
+        <tr><td class="k"><code>t12b</code> Revoked Mac receives changes</td><td>stopped</td><td>stopped</td><td><span class="st"><span class="led" data-state="ok"></span><span class="readout">Pass</span></span></td></tr>
+        <tr><td class="k"><code>t13</code> Slow master, 1.2 s give or take 0.6 s</td><td>20 writes, none read only</td><td>0 read only, 0 other errors</td><td><span class="st"><span class="led" data-state="ok"></span><span class="readout">Pass</span></span></td></tr>
       </tbody>
     </table>
   </div>
 
-  <h3>File data</h3>
+  <h3>File data: the data path</h3>
+  <p>The data-path spike (DECISIONS #15): 1 MB blocks instead of 4 MB, a 4 MB readahead instead of JuiceFS's default, and the second patch, which reads whole blocks when the Mac's SMB client sends its 128 KB pieces out of order. The link is one token bucket on everything Toxiproxy sends, 25 ms to S3, clips of 455 MB. Targets were set before measuring: a cold read at 80% of the line, a cold seek under 0.4 s at 100 Mbps, no single read over 3 s.</p>
+  <div class="grid g2">
+    <figure style="margin:0">
+      <div class="fig">
+        <svg class="chart" id="ch-cold" viewBox="0 0 480 220" role="img" aria-label="Cold read from the Mac over SMB on a simulated 100 Mbps link, before and after the data-path spike"></svg>
+      </div>
+      <figcaption>Cold read from the Mac over SMB, simulated 100 Mbps link (12.5 MB/s), MB/s. "SMB costs half the line" was mostly the simulation: JuiceFS's own download limit lets a megabyte through and then stalls, and 4 MB blocks made every out-of-order piece expensive. SMB multichannel is not needed.</figcaption>
+      <details class="data"><summary>Data</summary><table><tr><th>Read</th><th>MB/s</th></tr><tr><td>Before: 4 MB blocks, JuiceFS's download limit as the link (<code>t03</code>)</td><td>5.3-5.5</td></tr><tr><td>Now: a whole clip with <code>dd</code> (<code>t03</code>)</td><td>10.8 (86%)</td></tr><tr><td>Now: 1 MB reads</td><td>11.6 (93%)</td></tr><tr><td>Target, 80% of the line</td><td>10</td></tr><tr><td>The line</td><td>12.5</td></tr></table></details>
+    </figure>
+    <figure style="margin:0">
+      <div class="fig">
+        <svg class="chart" id="ch-seek" viewBox="0 0 480 260" role="img" aria-label="Cold seek and first read after a jump on a simulated 100 Mbps link"></svg>
+      </div>
+      <figcaption>Seconds at 100 Mbps, means. A cold read downloads the whole block that holds it, so 1 MB blocks halve a cold seek. After a jump, the readahead of the position just left keeps the line busy, so a short readahead keeps scrubbing fast. No read over 1.5 s in any run.</figcaption>
+      <details class="data"><summary>Data</summary><table><tr><th>Read</th><th>Mean</th></tr><tr><td>Cold seek, 4 MB blocks</td><td>0.68 s</td></tr><tr><td>Cold seek, 1 MB blocks</td><td>0.38 s, max 0.66 s</td></tr><tr><td>First read after a jump, JuiceFS's default readahead</td><td>0.78 s</td></tr><tr><td>First read after a jump, 16 MB readahead</td><td>0.55 s</td></tr><tr><td>First read after a jump, 4 MB readahead</td><td>0.40 s, max 0.64 s</td></tr></table></details>
+    </figure>
+  </div>
+  <div class="table-wrap" style="margin-top:18px">
+    <table>
+      <thead><tr><th>Operation, 1 MB blocks, 4 MB readahead</th><th>100 Mbps link</th><th>1 Gbps link</th></tr></thead>
+      <tbody>
+        <tr><td class="k">Cold read from the Mac, 1 MB reads</td><td>11.6 MB/s, 93% of the line</td><td>103 MB/s, 82%</td></tr>
+        <tr><td class="k">Cold read of a clip with <code>dd</code> (<code>t03</code>)</td><td>10.8 MB/s, 86%</td><td class="then">not measured</td></tr>
+        <tr><td class="k">Seek (1 MB read) not in cache</td><td>mean 0.38 s, max 0.66 s</td><td>mean 0.09 s</td></tr>
+        <tr><td class="k">Scrubbing: first read after a jump</td><td>mean 0.40 s, max 0.64 s</td><td>mean 0.08 s</td></tr>
+        <tr><td class="k">Warmup of a clip</td><td>38 s, 95% of the line</td><td class="then">not measured</td></tr>
+        <tr><td class="k">Copying a clip to the disk, 300 Mbps upload</td><td>31.7 MB/s</td><td class="then">not measured</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="small muted" style="margin-top:12px">At 1 Gbps the short readahead costs some sequential speed (82% of the line against 90%), still 13 times what a 60 Mbps clip needs. Whole-block reads cut the extra download from 12-13% to 4-6%, and the GETs for a clip from 722 to about 550; OVH bills neither requests nor traffic, so four times the requests of 4 MB blocks cost nothing.</p>
+
+  <h3>File data: on OVH Milan</h3>
   <div class="grid g2">
     <figure style="margin:0">
       <div class="fig">
         <svg class="chart" id="ch-thr" viewBox="0 0 480 220" role="img" aria-label="Throughput on OVH Milan"></svg>
       </div>
-      <figcaption>Throughput on OVH Milan, 170 Mbps home line, MB/s, with today's single-Mac disk. Every cold figure stays above what a 60 Mbps clip needs. Cached reads (about 540 MB/s) are off this scale.</figcaption>
+      <figcaption>Throughput on OVH Milan on 06/10/2026, 170 Mbps home line, MB/s, with today's single-Mac disk and 4 MB blocks. Every cold figure stays above what a 60 Mbps clip needs. Cached reads (about 540 MB/s) are off this scale.</figcaption>
       <details class="data"><summary>Data</summary><table><tr><th>Operation</th><th>MB/s</th></tr><tr><td>Copy 2.7 GB to the disk</td><td>23.9</td></tr><tr><td>Warmup of a 434 MB clip</td><td>14.3</td></tr><tr><td>Cold read of a 434 MB clip</td><td>12.1</td></tr><tr><td>Needed by a 60 Mbps clip</td><td>7.5</td></tr></table></details>
     </figure>
-    <figure style="margin:0">
-      <div class="fig">
-        <svg class="chart" id="ch-cold" viewBox="0 0 480 220" role="img" aria-label="Cold read of a clip on a simulated 100 Mbps link"></svg>
-      </div>
-      <figcaption>Cold read of a clip in the spike, simulated 100 Mbps link (12.5 MB/s), MB/s. The replica costs little against local metadata; SMB is what takes half the line.</figcaption>
-      <details class="data"><summary>Data</summary><table><tr><th>Metadata</th><th>MB/s</th></tr><tr><td>SQLite in the VM</td><td>5.7</td></tr><tr><td>Valkey with local replica</td><td>5.3-5.5</td></tr><tr><td>The line</td><td>12.5</td></tr></table></details>
-    </figure>
+    <div class="card small" style="align-self:start">
+      <p>The same package on the real service, before the data-path spike: a seek in cache 0-3 ms, like a local disk; a cold seek 0.9 s on average, 1.9 s at worst, because each one downloaded a 4 MB block.</p>
+      <p style="margin:0">Local Garage in Docker is not OVH: the spike isolates latency and bandwidth, not the real service. Its numbers become the product's only once the same run passes on OVH Milan.</p>
+    </div>
   </div>
-  <div class="callout risk"><b>The open limit is the data path, not the metadata</b>Over SMB the Mac gets about half the line on a clip never opened, one read took 15 s, and some cold reads in t03 ended in an I/O error. A separate spike comes before the build, one change at a time against targets set before measuring (cold read at least 80% of the line, cold seek under 0.4 s at 100 Mbps, no single read over 3 s): SMB multichannel, 1 MB blocks, more readahead.</div>
+  <div class="notice"><div class="notice-h"><span class="st"><span class="led" data-state="dl"></span><span class="readout">Next</span></span><b>The same numbers on OVH Milan</b></div><p>The data-path spike is closed; what is left is the same measures on OVH Milan with a zip that formats 1 MB blocks, the same run as the tester's new zip. During a large copy it also checks whether the file's mtime changes at every stat, which JuiceMount found stalls the macOS client for about 73 s on the file's lock.</p></div>
 </section>
 
 <section id="costs">
   <p class="eyebrow">11 · Costs</p>
-  <h2>Monthly cost for a team of three</h2>
+  <h2>Cost grows with terabytes, not people</h2>
+  <p>Floppy has no per-person price. Self-hosted, a team pays the storage (about 7.5 EUR/TB on OVH) and a fixed 20-30 EUR for the metadata server, the central Valkey and its replica in the datacenter (an estimate: the host is not chosen yet). Adding a person costs nothing; adding a terabyte costs the storage. The commercial products charge per person.</p>
   <figure>
     <div class="fig">
       <div class="legend">
-        <span><i class="sw" style="background:var(--meta)"></i>Floppy (OVH storage + metadata server), EUR</span>
-        <span><i class="sw" style="background:var(--data)"></i>SpaceFS Teams, USD</span>
+        <span><i class="sw" style="background:var(--meta)"></i>Floppy, any team size (storage + metadata server), EUR</span>
+        <span><i class="sw" style="background:var(--neutral)"></i>Floppy's bucket backup on B2, EUR</span>
+        <span><i class="sw" style="background:var(--data)"></i>SpaceFS Teams, 3 people, USD</span>
+        <span><i class="sw" style="background:var(--data);opacity:.55"></i>SpaceFS Teams, 10 people, USD</span>
       </div>
-      <svg class="chart" id="ch-cost" viewBox="0 0 760 250" role="img" aria-label="Monthly cost ranges by active terabytes"></svg>
+      <svg class="chart" id="ch-cost" viewBox="0 0 760 330" role="img" aria-label="Monthly cost by active terabytes: Floppy, its backup, SpaceFS Teams for 3 and 10 people"></svg>
     </div>
-    <figcaption>Estimates from docs/ARCHITECTURE.md, prices checked on 06/10/2026; each bar is a low to high range. Currencies differ as in the sources. Priced when the metadata was a managed PostgreSQL, not re-estimated for a Valkey server. Not counted: the time to run Floppy, and the control plane server (an existing Dokploy server in the first instance).</figcaption>
-    <details class="data"><summary>Data</summary><table><tr><th>Active TB</th><th>Floppy, EUR/month</th><th>SpaceFS Teams, USD/month</th></tr><tr><td>3</td><td>40-55</td><td>90</td></tr><tr><td>5</td><td>55-70</td><td>114-138</td></tr><tr><td>10</td><td>95-110</td><td>174-258</td></tr></table></details>
+    <figcaption>Estimates per month from docs/ARCHITECTURE.md; prices checked on 06/10/2026, the alternatives again on 17/10/2026. A bar that turns lighter is a low to high range. Currencies differ as in the sources. SpaceFS Teams: 30 $/person with 1 TB/person pooled, extra 6-12 $ per 500 GB. The backup is the bucket's copy at a second provider that Floppy needs anyway; the commercial prices do not say whether they include one. Not counted: the control plane server (an existing Dokploy server for the first instance).</figcaption>
+    <details class="data"><summary>Data</summary><table><tr><th>Active TB</th><th>SpaceFS Teams, 3 people</th><th>SpaceFS Teams, 10 people</th><th>Floppy, any team size</th><th>Floppy's bucket backup on B2</th></tr><tr><td>3 TB</td><td>90 $</td><td>300 $</td><td>about 40-55 EUR</td><td>about 20 EUR</td></tr><tr><td>5 TB</td><td>114-138 $</td><td>300 $</td><td>about 55-70 EUR</td><td>about 35 EUR</td></tr><tr><td>10 TB</td><td>174-258 $</td><td>300 $</td><td>about 95-110 EUR</td><td>about 70 EUR</td></tr></table></details>
   </figure>
+  <div class="grid g2" style="margin-top:18px">
+    <div class="table-wrap" style="align-self:start">
+      <table>
+        <thead><tr><th>S3 storage, excluding VAT</th><th>Space</th><th>Egress</th></tr></thead>
+        <tbody>
+          <tr><td class="k">OVH Object Storage Standard</td><td>about 8 $/TB a month</td><td>free within Europe</td></tr>
+          <tr><td class="k">Backblaze B2</td><td>6.95 $/TB a month</td><td>free up to 3 times the data</td></tr>
+          <tr><td class="k">Hetzner</td><td>6.49 EUR with 1 TB, then 8.70 EUR/TB</td><td>1 TB included</td></tr>
+          <tr><td class="k">Cloudflare R2</td><td>15 $/TB a month</td><td>free</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="notice" style="margin-top:0"><div class="notice-h"><span class="slot-mark"></span><b>What the licenses hide</b></div><p>The gap widens with every person, but what is left is the cost of running it: keeping the Valkey up and its backups checked, answering when a Mac does not mount, and carrying the JuiceFS patches across releases (half a day to a day per release that touches them, an estimate). For a small team that time is the real price; it pays off with more people, more terabytes, or data that must stay on infrastructure the team controls.</p></div>
+  </div>
 </section>
 
 <section id="plan">
   <p class="eyebrow">12 · Plan</p>
   <h2>Order of work</h2>
-  <p>Engineer days with a coding agent, low and high: a guess for everything still to do. Step 0 is done.</p>
+  <p>Both spikes are done, the metadata and the data path. Engineer days with a coding agent, low and high: a guess for everything still to do, in the order of docs/ROADMAP.md. The pilot follows the first instance: one shared disk, one or two weeks of real work in CapCut.</p>
   <figure>
     <div class="fig">
       <div class="legend">
         <span><i class="sw" style="background:var(--bar)"></i>Low estimate</span>
         <span><i class="sw" style="background:var(--bar-ext)"></i>Up to the high estimate</span>
       </div>
-      <svg class="chart" id="ch-plan" viewBox="0 0 760 300" role="img" aria-label="Plan as a timeline"></svg>
+      <svg class="chart" id="ch-plan" viewBox="0 0 760 330" role="img" aria-label="Plan as a timeline"></svg>
     </div>
     <details class="data"><summary>Data</summary><table id="plan-table"><tr><th>Step</th><th>Days</th><th>What</th></tr></table></details>
   </figure>
-  <h3>Step 0, the metadata spike: done</h3>
+
+  <h3>Done</h3>
   <div class="grid g2">
-    <div class="card small">The Finder on metadata behind a 15 ms link: PostgreSQL ruled out (117 s for a listing), Valkey with a local replica and the JuiceFS patch accepted. Numbers under Performance.</div>
-    <div class="card small">Revocation: deleting the Mac's Valkey user and killing its connections stops writes and replication, without corrupting the volume.</div>
-    <div class="card small">Offline: browsing and reading go on from the replica, writes fail at once, and the disk comes back 0.2 s after the link.</div>
-    <div class="card small">Still on it: a slow but alive master must not count as offline. Then the acceptance suite all green.</div>
+    <div class="card small">
+      <div class="notice-h"><span class="st"><span class="led" data-state="ok"></span><span class="readout">Done</span></span><b>Metadata spike</b></div>
+      <ul class="slots">
+        <li>The Finder on metadata behind a 15 ms link: PostgreSQL ruled out (117 s for a listing), Valkey with a local replica and the first JuiceFS patch accepted.</li>
+        <li>Revocation: deleting the Mac's Valkey user and killing its connections stops writes and replication, without corrupting the volume.</li>
+        <li>Offline: browsing and reading go on from the replica, writes fail at once, and the disk comes back 0.9 s after the link.</li>
+        <li>A slow but alive master never turns the disk read only.</li>
+      </ul>
+    </div>
+    <div class="card small">
+      <div class="notice-h"><span class="st"><span class="led" data-state="ok"></span><span class="readout">Done</span></span><b>Data-path spike</b></div>
+      <ul class="slots">
+        <li>Every target met at 100 Mbps: cold reads over SMB at 86-93% of the line, a cold seek in 0.38 s, no read over 1.5 s.</li>
+        <li>1 MB blocks and a 4 MB readahead in <code>floppy-mount</code> for new volumes; the second JuiceFS patch reads whole blocks.</li>
+        <li>The old <code>t03</code> I/O error does not come back: the acceptance suite passes 17 of 17.</li>
+        <li>SMB multichannel is not needed.</li>
+      </ul>
+    </div>
   </div>
-  <h3>Step 1, the data-path spike</h3>
+
+  <h3>Next</h3>
   <div class="grid g2">
-    <div class="card small">Targets set before measuring, at 100 Mbps: cold read at least 80% of the line, cold seek under 0.4 s, no single read over 3 s.</div>
-    <div class="card small">One change at a time: SMB multichannel, 1 MB blocks, more JuiceFS readahead. The I/O error seen in some cold reads belongs here.</div>
+    <div class="card small">
+      <div class="notice-h"><span class="st"><span class="led" data-state="dl"></span><span class="readout">Next</span></span><b>The data path on OVH</b></div>
+      <ul class="slots">
+        <li>The same measures on OVH Milan, with a zip that formats 1 MB blocks.</li>
+        <li>During a large copy: whether the file's mtime changes at every stat, which JuiceMount found stalls the macOS client for about 73 s.</li>
+      </ul>
+    </div>
+    <div class="card small">
+      <div class="notice-h"><span class="st"><span class="led" data-state="dl"></span><span class="readout">Next</span></span><b>The name</b></div>
+      <ul class="slots">
+        <li>Floppy is chosen and the repository renamed; EUIPO and UIBM are still to check, in classes 9 and 42.</li>
+        <li>Rename the GitHub repository and the URLs that point to it, and hand the tester a new zip before anyone uses the disk with CapCut projects.</li>
+      </ul>
+    </div>
+  </div>
+
+  <h3>Build</h3>
+  <ul class="slots">
+    <li><span><b>Design on paper.</b> This page's team architecture into ARCHITECTURE.md, and <code>docs/DATABASE_SCHEMA.md</code> for the control plane.</span></li>
+    <li><span><b>Engine.</b> The patched JuiceFS (both patches) and a Valkey replica in the VM's offline package set, <code>floppy status --json</code>, the metadata URL from the app instead of a config file, the SMB password in the Keychain.</span></li>
+    <li><span><b>Fast failure when a file cannot be read.</b> With the network down, a read of blocks not in cache waits for JuiceFS's retries and the Mac's 600 s SMB timeout. It should fail at once, as JuiceMount refuses reads of files not kept offline in 4-67 ms from a local index; it needs to know, per path, what is in the cache.</span></li>
+    <li><span><b>The Mac stays awake while data moves.</b> <code>caffeinate -i</code> during a copy, an upload or a warmup, released a couple of minutes after the traffic stops, so sleep does not cut a transfer halfway. No administrator rights.</span></li>
+    <li><span><b>Control plane.</b> FastAPI and React, accounts with magic link sign-in, organizations, disks, one Valkey user per Mac, key rotation, audit log, Docker Compose for self-hosting.</span></li>
+    <li><span><b>App.</b> Tauri from the Portsage skeleton, built from the concepts: panel, settings, first run.</span></li>
+    <li><span><b>Distribution and first instance.</b> The Homebrew cask, then the first self-hosted instance on Dokploy with a central Valkey and S3 in Milan.</span></li>
+  </ul>
+
+  <h3>Keeping the JuiceFS patches alive</h3>
+  <div class="card small">
+    <ul class="slots">
+      <li>JuiceFS stays pinned at v1.4.1 and moves only when a release brings something needed (a security or bug fix, performance), not with every Floppy release.</li>
+      <li>The patches move from <code>spike/juicefs-replica/</code> to a branch of a fork (<code>essedev/juicefs</code>), one commit per change, so an update is a rebase.</li>
+      <li>A scheduled GitHub Actions job applies them to each new JuiceFS release and runs the Go tests, so a break shows up before the update is needed.</li>
+      <li>An update ships only after the Go tests, JuiceFS's own Redis metadata tests, the acceptance suite and a run with mixed versions (some Macs on the old JuiceFS, some on the new, one Valkey); if mixed versions do not hold, the control plane enforces a minimum version.</li>
+      <li>Checked on 17/10/2026: no JuiceFS release after v1.4.1 yet; against <code>main</code>, 212 commits later, 25 of the first patch's 27 hunks in <code>redis.go</code> apply, and <code>doCleanStaleSession</code> and <code>doRemoveXattr</code> conflict.</li>
+      <li>Alongside: propose the read replica and the optimistic transactions upstream, so the fork does not have to live forever.</li>
+    </ul>
   </div>
 </section>
 
 <section id="decisions">
-  <p class="eyebrow">13 · Open decisions</p>
-  <h2>To close before or during the build</h2>
+  <p class="eyebrow">13 · Decisions</p>
+  <h2>Still open, and closed since the proposal</h2>
+  <p>Closed decisions are recorded in docs/DECISIONS.md and cited by number.</p>
   <div class="dec">
-    <div class="card"><b>Cache on revocation</b><p>The cache and the replica hold the organization's footage and file tree on a Mac that is no longer allowed.</p><span class="rec">the app clears both at the first heartbeat that says revoked.</span></div>
-    <div class="card"><b>Metadata cache timeouts</b><p>With reads from the local replica, longer JuiceFS cache timeouts save little and delay other people's changes, which now show up in 0.00-0.01 s.</p><span class="rec">keep the JuiceFS defaults unless the pilot shows otherwise.</span></div>
-    <div class="card"><b>Bucket versioning</b><p>A safety net for the rotation window, but deleted and compacted blocks stay billed.</p><span class="rec">on, with a lifecycle rule that expires old versions after a few days.</span></div>
-    <div class="card"><b>Where the central Valkey runs</b><p>A VPS next to the bucket in Milan, or a managed Valkey in the same region. It needs <code>appendfsync always</code>, a replica and replication open to the Macs.</p><span class="rec">decided with the first instance, on durability first and price second.</span></div>
-    <div class="card"><b>Keeping the JuiceFS patch</b><p>The read replica and the one-round-trip writes live in a fork of v1.4.1, to rebuild on every JuiceFS release.</p><span class="rec">propose it upstream, and pin the version in the package meanwhile.</span></div>
-    <div class="card"><b>Homebrew needs administrator rights</b><p>Installing Homebrew uses sudo; the app itself does not. It bends a "never compromise" rule.</p><span class="rec">accepted for now; a DMG into ~/Applications later if a team has standard accounts.</span></div>
-    <div class="card"><b>Mockup questions</b><p>Text when unreachable, full cache behavior, reconnection interval, "Turn off" or "Eject".</p><span class="rec closed">by the concepts on 17/10/2026: Turn off, a full cache frees the least recently used blocks, automatic reconnection every 30 s, settings in their own window. The Unreachable text, drawn before the replica, still has to say the disk is read only rather than closed.</span></div>
+    <div class="card"><b>Cache on revocation</b><p>The cache and the replica hold the organization's footage and file tree on a Mac that is no longer allowed.</p><span class="rec"><span class="st"><span class="led"></span><span class="readout">Proposal</span></span><span>The app clears both at the first heartbeat that says revoked.</span></span></div>
+    <div class="card"><b>Bucket versioning</b><p>A safety net for the rotation window, but deleted and compacted blocks stay billed.</p><span class="rec"><span class="st"><span class="led"></span><span class="readout">Proposal</span></span><span>On, with a lifecycle rule that expires old versions after a few days.</span></span></div>
+    <div class="card"><b>Where the central Valkey runs</b><p>A VPS next to the bucket in Milan, or a managed Valkey in the same region. It needs <code>appendfsync always</code>, a replica and replication open to the Macs.</p><span class="rec"><span class="st"><span class="led"></span><span class="readout">Proposal</span></span><span>Decided with the first instance, on durability first and price second.</span></span></div>
+    <div class="card"><b>Block size and readahead</b><p>A cold seek downloads the whole block that holds it, and after a jump the readahead of the position just left keeps the line busy.</p><span class="rec"><span class="st"><span class="led" data-state="ok"></span><span class="readout">Closed</span></span><span>1 MB blocks, a fixed 4 MB readahead, whole-block reads in the second patch (DECISIONS #15).</span></span></div>
+    <div class="card"><b>Metadata cache timeouts</b><p>With reads from the local replica, longer JuiceFS cache timeouts save little and delay other people's changes, which now show up in 0.00-0.01 s.</p><span class="rec"><span class="st"><span class="led" data-state="ok"></span><span class="readout">Closed</span></span><span>JuiceFS defaults. JuiceFS 1.4's Redis client-side cache stays off: it caches neither listings nor the missing <code>._</code> names, and the patch refuses to run with it (DECISIONS #5).</span></span></div>
+    <div class="card"><b>Keeping the JuiceFS patches</b><p>The read replica, the one-round-trip writes and the whole-block reads live on top of v1.4.1, to carry across JuiceFS releases.</p><span class="rec"><span class="st"><span class="led" data-state="ok"></span><span class="readout">Closed</span></span><span>Pinned, a fork branch with one commit per change and a scheduled job against each release (ROADMAP 3); proposed upstream meanwhile.</span></span></div>
+    <div class="card"><b>Homebrew needs administrator rights</b><p>Installing Homebrew uses sudo; the app itself does not. It bends a "never compromise" rule.</p><span class="rec"><span class="st"><span class="led" data-state="ok"></span><span class="readout">Closed</span></span><span>Accepted once, for Homebrew itself (DECISIONS #10); a DMG in ~/Applications stays the fallback if a team has standard accounts.</span></span></div>
+    <div class="card"><b>The name</b><p>"Fluix" collided with Fluix Limited in software, and the name ends up in <code>/Volumes/&lt;Name&gt;</code>, which CapCut projects reference.</p><span class="rec"><span class="st"><span class="led" data-state="ok"></span><span class="readout">Closed</span></span><span>Floppy (DECISIONS #14). EUIPO and UIBM are still to check.</span></span></div>
+    <div class="card"><b>Mockup questions</b><p>Text when unreachable, full cache behavior, reconnection interval, "Turn off" or "Eject".</p><span class="rec"><span class="st"><span class="led" data-state="ok"></span><span class="readout">Closed</span></span><span>By the concepts on 17/10/2026 (DECISIONS #12): Turn off, a full cache frees the least recently used blocks, automatic reconnection every 30 s, settings in their own window. The Unreachable text, drawn before the replica, still has to say the disk is read only rather than closed.</span></span></div>
   </div>
 </section>
 
@@ -1037,17 +1189,18 @@ details.data table { margin-top: 8px; font-size: 12.5px; }
      { id: "s3", label: "S3", sub: "blocks" }],
     [
       { f: "cc", t: "smb", l: "read 1 MB at 02:14", c: "ink" },
-      { f: "smb", t: "sb", l: "SMB read", c: "ink" },
-      { f: "sb", t: "jf", l: "FUSE read", c: "ink" },
+      { f: "smb", t: "sb", l: "128 KB pieces, some ahead", c: "ink" },
+      { f: "sb", t: "jf", l: "FUSE reads", c: "ink" },
       { f: "jf", t: "rp", l: "which block: local", c: "meta" },
       { k: "group", l: "Block already cached" },
-      { f: "jf", t: "ca", l: "read the 4 MB block", c: "ink" },
+      { f: "jf", t: "ca", l: "read the 1 MB block", c: "ink" },
       { k: "note", f: "cc", t: "jf", l: "0-3 ms, like a local disk" },
       { k: "group", l: "Block not cached" },
-      { f: "jf", t: "s3", l: "GET the whole 4 MB block", c: "data" },
+      { f: "jf", t: "s3", l: "GET the whole 1 MB block", c: "data" },
       { f: "jf", t: "ca", l: "keep a copy", c: "ink" },
-      { f: "jf", t: "s3", l: "prefetch the next blocks", c: "data" },
-      { k: "note", f: "cc", t: "jf", l: "about 0.9 s per cold seek on OVH Milan" }
+      { f: "jf", t: "s3", l: "readahead: the next 4 MB", c: "data" },
+      { k: "note", f: "jf", t: "s3", l: "pieces out of order: each block loaded once, whole (patch 0002)" },
+      { k: "note", f: "cc", t: "jf", l: "0.38 s per cold seek at 100 Mbps in the spike; 0.9 s on OVH with 4 MB blocks" }
     ]);
 
   seq("seq-write",
@@ -1062,7 +1215,7 @@ details.data table { margin-top: 8px; font-size: 12.5px; }
       { k: "note", f: "jf", t: "vk", l: "one round trip; a conflict retries with WATCH" },
       { f: "vk", t: "rp", l: "change pushed", c: "repl" },
       { k: "group", l: "Writing the contents" },
-      { f: "jf", t: "s3", l: "PUT 4 MB blocks", c: "data" },
+      { f: "jf", t: "s3", l: "PUT 1 MB blocks", c: "data" },
       { f: "jf", t: "vk", l: "commit the slices, one round trip", c: "meta" },
       { f: "jf", t: "rp", l: "reads wait for my count", c: "meta" },
       { k: "note", f: "fi", t: "jf", l: "about 9 round trips per new file from the Finder" }
@@ -1104,7 +1257,8 @@ details.data table { margin-top: 8px; font-size: 12.5px; }
       un: { x: 700, y: 200, l: "Unreachable", a: "Read only, retrying", st: "serious" },
       rv: { x: 890, y: 200, l: "Revoked", a: "Sign in again", st: "critical" }
     };
-    var col = { idle: "var(--text-3)", busy: "var(--meta)", good: "var(--good)", serious: "var(--serious)", critical: "var(--critical)" };
+    // The LED of the panel's faceplate (concept-c-app): green ready, orange activity, red unreachable, off otherwise.
+    var lens = { idle: "", busy: "dl", good: "ok", serious: "err", critical: "" };
     function c(k) { var s = S[k]; return { x: s.x + w / 2, y: s.y + h / 2 }; }
     function edge(a, b, label, opts) {
       opts = opts || {};
@@ -1135,17 +1289,21 @@ details.data table { margin-top: 8px; font-size: 12.5px; }
     Object.keys(S).forEach(function (k) {
       var s = S[k];
       el("rect", { x: s.x, y: s.y, width: w, height: h, rx: 10, "class": "node" + (k === "re" ? " hl" : "") }, N);
-      el("circle", { cx: s.x + 16, cy: s.y + 18, r: 5, fill: col[s.st] }, N);
-      el("text", { x: s.x + 28, y: s.y + 22, "class": "nt" }, N, s.l);
-      el("text", { x: s.x + 28, y: s.y + 39, "class": "ns" }, N, s.a);
+      // LED in its bezel: colour only in the lens, a highlight when lit, no glow.
+      el("circle", { cx: s.x + 16, cy: s.y + 17, r: 6.5, "class": "bezel-svg" }, N);
+      el("circle", { cx: s.x + 16, cy: s.y + 17, r: 3.4, "class": "lens-svg " + lens[s.st] }, N);
+      if (lens[s.st]) el("ellipse", { cx: s.x + 16, cy: s.y + 15.7, rx: 1.6, ry: 0.85, fill: "#fff", opacity: 0.5 }, N);
+      el("text", { x: s.x + 29, y: s.y + 22, "class": "nt" }, N, s.l);
+      el("text", { x: s.x + 29, y: s.y + 39, "class": "ns" }, N, s.a);
     });
   })();
 
   // Horizontal bar chart with optional reference line
   function hbar(id, rows, o) {
     var svg = document.getElementById(id);
-    var W = 480, left = o.left || 150, right = 40, top = 14, rowH = 40, barH = 14;
-    var H = top + rows.length * rowH + 40;
+    var W = 480, left = o.left || 150, right = 40, top = 14, rowH = o.rowH || 40, barH = 14;
+    var refs = o.refs || (o.ref ? [o.ref] : []);
+    var H = top + rows.length * rowH + 26 + Math.max(refs.length, 1) * 14;
     svg.setAttribute("viewBox", "0 0 " + W + " " + H);
     var sx = function (v) { return left + (v / o.max) * (W - left - right); };
     o.ticks.forEach(function (t) {
@@ -1161,14 +1319,24 @@ details.data table { margin-top: 8px; font-size: 12.5px; }
       if (wh > w + 1) el("rect", { x: left + w - 2, y: y - barH / 2, width: wh - w + 2, height: barH, rx: 4, "class": "bar-ext" }, svg);
       if (w > 4) el("path", { d: "M" + left + " " + (y - barH / 2) + " h" + (w - 4) + " a4 4 0 0 1 4 4 v" + (barH - 8) + " a4 4 0 0 1 -4 4 h" + (-(w - 4)) + "z", "class": cls }, svg);
       else el("rect", { x: left, y: y - barH / 2, width: 2, height: barH, "class": cls }, svg);
-      el("text", { x: left + wh + 6, y: y + 4, "class": "val-t" }, svg, r.t);
+      // Keep a value label clear of the reference lines: move it past any line it would cross.
+      var vt = el("text", { x: left + wh + 6, y: y + 4, "class": "val-t" }, svg, r.t);
+      // Measured before the web font may have loaded: leave room for the wider Departure Mono.
+      var lx = left + wh + 6, tw = vt.getComputedTextLength() * 1.3 + 4;
+      refs.map(function (ref) { return sx(ref.v); }).sort(function (a, b) { return a - b; }).forEach(function (rx) {
+        if (rx > lx - 4 && rx < lx + tw + 2) lx = rx + 6;
+      });
+      vt.setAttribute("x", lx);
       el("rect", { x: 0, y: y - rowH / 2, width: W, height: rowH, "class": "hit", "data-tip": r.tip }, svg);
     });
-    if (o.ref) {
-      var rx = sx(o.ref.v);
+    // Reference lines; their labels stack under the axis, anchored to the line, and
+    // flip to the left of it when they would run past the chart.
+    refs.forEach(function (ref, k) {
+      var rx = sx(ref.v);
       el("line", { x1: rx, x2: rx, y1: top - 6, y2: top + rows.length * rowH, "class": "refl" }, svg);
-      el("text", { x: rx + 4, y: top + rows.length * rowH + 32, "class": "ref-t" }, svg, o.ref.l);
-    }
+      var t = el("text", { x: rx + 4, y: top + rows.length * rowH + 32 + k * 14, "class": "ref-t" }, svg, ref.l);
+      if (ref.anchor === "end" || rx + 4 + t.getComputedTextLength() > W - 2) { t.setAttribute("x", rx - 4); t.setAttribute("text-anchor", "end"); }
+    });
   }
 
   hbar("ch-thr", [
@@ -1184,9 +1352,18 @@ details.data table { margin-top: 8px; font-size: 12.5px; }
   ], { max: 1200, ticks: [0, 400, 800, 1200], left: 150 });
 
   hbar("ch-cold", [
-    { l: "SQLite in the VM", v: 5.7, t: "5.7", cls: "bar-ink", tip: "<b>Local metadata, one Mac</b><br>5.7 MB/s, the t03 baseline" },
-    { l: "Valkey replica", v: 5.3, hi: 5.5, t: "5.3-5.5", tip: "<b>Valkey with the local replica</b><br>5.3-5.5 MB/s across runs" }
-  ], { max: 14, ticks: [0, 4, 8, 12], ref: { v: 12.5, l: "12.5, the line" }, left: 150 });
+    { l: "Before, 4 MB blocks", v: 5.3, hi: 5.5, t: "5.3-5.5", cls: "bar-ink", tip: "<b>Before the data-path spike</b><br>4 MB blocks, the link simulated with JuiceFS's download limit, t03: 5.3-5.5 MB/s" },
+    { l: "Now, a whole clip", v: 10.8, t: "10.8", tip: "<b>A whole clip with dd, t03</b><br>10.8 MB/s, 86% of the line" },
+    { l: "Now, 1 MB reads", v: 11.6, t: "11.6", tip: "<b>1 MB reads from the Mac</b><br>11.6 MB/s, 93% of the line" }
+  ], { max: 14, ticks: [0, 4, 8, 12], refs: [{ v: 10, l: "10, the 80% target", anchor: "end" }, { v: 12.5, l: "12.5, the line", anchor: "end" }], left: 130 });
+
+  hbar("ch-seek", [
+    { l: "Cold seek, 4 MB blocks", v: 0.68, t: "0.68", cls: "bar-ink", tip: "<b>Cold seek, 4 MB blocks</b><br>0.68 s, same link and readahead" },
+    { l: "Cold seek, 1 MB blocks", v: 0.38, t: "0.38", tip: "<b>Cold seek, 1 MB blocks</b><br>mean 0.38 s, max 0.66 s" },
+    { l: "Jump, default readahead", v: 0.78, t: "0.78", cls: "bar-ink", tip: "<b>First read after a jump</b><br>JuiceFS's default readahead (8 blocks): 0.78 s" },
+    { l: "Jump, 16 MB readahead", v: 0.55, t: "0.55", cls: "bar-ink", tip: "<b>First read after a jump</b><br>16 MB readahead: 0.55 s" },
+    { l: "Jump, 4 MB readahead", v: 0.40, t: "0.40", tip: "<b>First read after a jump</b><br>4 MB readahead: mean 0.40 s, max 0.64 s" }
+  ], { max: 1, ticks: [0, 0.25, 0.5, 0.75, 1], unit: " s", rowH: 34, refs: [{ v: 0.4, l: "0.4 s target" }], left: 160 });
 
   // Acceptance tests as small multiples: one panel per test, each with its own scale.
   (function () {
@@ -1243,30 +1420,38 @@ details.data table { margin-top: 8px; font-size: 12.5px; }
   // Cost ranges
   (function () {
     var svg = document.getElementById("ch-cost");
-    var W = 760, left = 70, right = 70, top = 10, groupH = 66, barH = 14, max = 280;
-    var data = [
-      { tb: "3 TB", f: [40, 55], s: [90, 90] },
-      { tb: "5 TB", f: [55, 70], s: [114, 138] },
-      { tb: "10 TB", f: [95, 110], s: [174, 258] }
+    var W = 760, left = 70, right = 90, top = 10, barH = 12, gap = 6, max = 320;
+    // Series in the order of the legend; a range draws its low value solid and the rest lighter.
+    var series = [
+      { k: "f", cls: "s1", cur: "EUR", name: "Floppy, any team size", about: true },
+      { k: "b", cls: "bar-ink", cur: "EUR", name: "Floppy's bucket backup on B2", about: true },
+      { k: "s3", cls: "s2", cur: "USD", name: "SpaceFS Teams, 3 people" },
+      { k: "s10", cls: "s2", cur: "USD", name: "SpaceFS Teams, 10 people", op: 0.55 }
     ];
-    var H = top + data.length * groupH + 30;
+    var data = [
+      { tb: "3 TB", f: [40, 55], b: [20, 20], s3: [90, 90], s10: [300, 300] },
+      { tb: "5 TB", f: [55, 70], b: [35, 35], s3: [114, 138], s10: [300, 300] },
+      { tb: "10 TB", f: [95, 110], b: [70, 70], s3: [174, 258], s10: [300, 300] }
+    ];
+    var groupH = series.length * (barH + gap) + 26;
+    var H = top + data.length * groupH + 24;
     svg.setAttribute("viewBox", "0 0 " + W + " " + H);
     var sx = function (v) { return left + (v / max) * (W - left - right); };
-    [0, 50, 100, 150, 200, 250].forEach(function (t) {
+    [0, 50, 100, 150, 200, 250, 300].forEach(function (t) {
       el("line", { x1: sx(t), x2: sx(t), y1: top, y2: top + data.length * groupH, "class": "grid-l" }, svg);
       el("text", { x: sx(t), y: top + data.length * groupH + 18, "text-anchor": "middle", "class": "axis-t" }, svg, t);
     });
     data.forEach(function (d, i) {
       var gy = top + i * groupH;
-      el("text", { x: left - 12, y: gy + groupH / 2 + 4, "text-anchor": "end", "class": "row-t" }, svg, d.tb);
-      [["f", "s1", "EUR", "Floppy"], ["s", "s2", "USD", "SpaceFS"]].forEach(function (k, j) {
-        var r = d[k[0]], y = gy + 14 + j * (barH + 8);
-        var x1 = sx(0), x2 = sx(r[1]), xlo = sx(r[0]);
-        el("rect", { x: x1, y: y, width: Math.max(xlo - x1, 1), height: barH, rx: 3, "class": k[1], opacity: 0.35 }, svg);
-        el("rect", { x: xlo - (r[0] === r[1] ? 3 : 0), y: y, width: Math.max(x2 - xlo, 3) + (r[0] === r[1] ? 3 : 0), height: barH, rx: 3, "class": k[1] }, svg);
-        var lab = (r[0] === r[1] ? r[0] : r[0] + "-" + r[1]) + " " + k[2];
-        el("text", { x: x2 + 6, y: y + 11, "class": "val-t" }, svg, lab);
-        el("rect", { x: 0, y: y - 4, width: W, height: barH + 8, "class": "hit", "data-tip": "<b>" + k[3] + ", " + d.tb + "</b><br>" + lab + " per month" }, svg);
+      el("text", { x: left - 12, y: gy + groupH / 2, "text-anchor": "end", "class": "row-t" }, svg, d.tb);
+      series.forEach(function (s, j) {
+        var r = d[s.k], y = gy + 12 + j * (barH + gap);
+        var x0 = sx(0), xlo = sx(r[0]), xhi = sx(r[1]);
+        el("rect", { x: x0, y: y, width: Math.max(xlo - x0, 2), height: barH, rx: 3, "class": s.cls, opacity: s.op || 1 }, svg);
+        if (xhi > xlo + 1) el("rect", { x: xlo - 3, y: y, width: xhi - xlo + 3, height: barH, rx: 3, "class": s.cls, opacity: 0.4 }, svg);
+        var lab = (s.about ? "about " : "") + (r[0] === r[1] ? r[0] : r[0] + "-" + r[1]) + " " + s.cur;
+        el("text", { x: xhi + 6, y: y + 10, "class": "val-t" }, svg, lab);
+        el("rect", { x: 0, y: y - gap / 2, width: W, height: barH + gap, "class": "hit", "data-tip": "<b>" + s.name + ", " + d.tb + "</b><br>" + lab + " per month" }, svg);
       });
     });
   })();
@@ -1274,13 +1459,14 @@ details.data table { margin-top: 8px; font-size: 12.5px; }
   // Plan timeline
   (function () {
     var steps = [
-      { l: "1. Data-path spike", lo: 1, hi: 2, after: [], what: "SMB multichannel, 1 MB blocks, readahead, against targets set first" },
-      { l: "2. Design docs", lo: 0.5, hi: 1, after: [0], what: "ARCHITECTURE, DATABASE_SCHEMA, decisions" },
+      { l: "1. OVH run, new zip", lo: 0.5, hi: 1, after: [], what: "The data path on OVH Milan with a zip that formats 1 MB blocks, the mtime check during a large copy, the zip to the tester" },
+      { l: "2. Design docs", lo: 0.5, hi: 1, after: [0], what: "The team architecture into ARCHITECTURE.md, DATABASE_SCHEMA.md for the control plane" },
       { l: "3. Control plane", lo: 4, hi: 6, after: [1], what: "Auth, orgs, devices, Valkey users, volumes, rotation, admin web" },
-      { l: "4. Engine changes", lo: 2, hi: 3, after: [1], what: "Patched JuiceFS and Valkey replica in the VM, status --json, metadata URL from the app, Keychain, revocation" },
-      { l: "5. Mac app", lo: 6, hi: 7, after: [3], what: "Tauri from Portsage, login, first run, panel, settings, diagnostics" },
-      { l: "6. Distribution", lo: 1, hi: 1, after: [2, 4], what: "Cask in its own tap, release with VM assets" },
-      { l: "7. First instance", lo: 1, hi: 1, after: [5], what: "Deploy with a central Valkey, create the organization, move the tester" }
+      { l: "4. Engine changes", lo: 3, hi: 4, after: [1], what: "Both JuiceFS patches and a Valkey replica in the VM, status --json, metadata URL from the app, Keychain, fast failure on unreadable files, the Mac awake while data moves" },
+      { l: "5. Patch upkeep", lo: 0.5, hi: 1, after: [1], what: "The patches on a fork branch, a scheduled job against each JuiceFS release" },
+      { l: "6. Mac app", lo: 6, hi: 7, after: [3], what: "Tauri from Portsage, login, first run, panel, settings, diagnostics" },
+      { l: "7. Distribution", lo: 1, hi: 1, after: [2, 5], what: "Cask in its own tap, release with VM assets" },
+      { l: "8. First instance", lo: 1, hi: 1, after: [6], what: "Deploy with a central Valkey, create the organization, move the tester" }
     ];
     steps.forEach(function (s, i) {
       s.slo = s.after.reduce(function (m, j) { return Math.max(m, steps[j].slo + steps[j].lo); }, 0);
@@ -1311,7 +1497,7 @@ details.data table { margin-top: 8px; font-size: 12.5px; }
       table.appendChild(tr);
     });
     el("text", { x: left, y: top + steps.length * rowH + 36, "class": "ref-t" }, svg,
-      "Total " + endLo + "-" + endHi + " days after step 0; control plane and engine run in parallel");
+      "Total " + endLo + "-" + endHi + " days, then the pilot; control plane, engine and patch upkeep run in parallel");
   })();
 })();
 </script>
