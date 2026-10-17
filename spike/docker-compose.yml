@@ -157,9 +157,76 @@ services:
       - "127.0.0.1:4506:445" # SMB of the second client
     depends_on:
       - toxiproxy
+
+  # The "perdisk" profile: one Valkey instance per disk, each behind the simulated
+  # link (Toxiproxy 4511-4513), and one client (drive-p) holding a local replica
+  # only of the disks its person may see (valkey-p1..3, on 6381-6383 in its
+  # network namespace). Each disk is its own JuiceFS mount at /mnt/drive/<disk>,
+  # mounted by spike/perdisk.py, which also sets the users and starts the replicas.
+  # A full sync waits repl-diskless-sync-delay (5 s by default) for more replicas
+  # to share it: SYNC_DELAY=0 starts it at once (t25).
+  valkey-disk1: &disk-master
+    image: valkey/valkey:8.1.4
+    profiles: [perdisk]
+    command: >-
+      valkey-server --requirepass ${VALKEY_PASSWORD:-} --appendonly yes
+      --appendfsync always --repl-backlog-size 256mb
+      --repl-diskless-sync-delay ${SYNC_DELAY:-5}
+  valkey-disk2: *disk-master
+  valkey-disk3: *disk-master
+
+  drive-p:
+    profiles: [perdisk]
+    build:
+      context: ./drive
+      args:
+        JUICEFS_SOURCE: ${JUICEFS_SOURCE:-replica}
+      additional_contexts:
+        replica: ./juicefs-replica/dist
+    privileged: true # FUSE inside the container
+    devices:
+      - /dev/fuse
+    entrypoint: ["/perdisk-entrypoint.sh"]
+    environment:
+      SMB_PASSWORD: ${SMB_PASSWORD:?run setup.sh first}
+      # How the share's root is kept read-only, and Samba's user (perdisk-entrypoint.sh)
+      ROOT_MODE: ${ROOT_MODE:-chmod}
+      SMB_FORCE_USER: ${SMB_FORCE_USER:-root}
+    volumes:
+      - ./drive/perdisk-entrypoint.sh:/perdisk-entrypoint.sh:ro
+      - drive-p-cache:/cache
+    ports:
+      - "127.0.0.1:4510:445" # SMB of the per-disk client
+    depends_on:
+      - toxiproxy
+
+  # One replica per visible disk, as the device's own Valkey user on that disk's
+  # instance: a device without a user there cannot replicate it.
+  valkey-p1: &disk-replica
+    image: valkey/valkey:8.1.4
+    profiles: [perdisk]
+    network_mode: "service:drive-p"
+    command: >-
+      valkey-server --port 6381 --replicaof toxiproxy 4511
+      --masteruser ${PERDISK_USER:-default} --masterauth ${PERDISK_PASSWORD:-}
+      --requirepass ${VALKEY_PASSWORD:-} --replica-read-only yes --save "" --appendonly no
+  valkey-p2:
+    <<: *disk-replica
+    command: >-
+      valkey-server --port 6382 --replicaof toxiproxy 4512
+      --masteruser ${PERDISK_USER:-default} --masterauth ${PERDISK_PASSWORD:-}
+      --requirepass ${VALKEY_PASSWORD:-} --replica-read-only yes --save "" --appendonly no
+  valkey-p3:
+    <<: *disk-replica
+    command: >-
+      valkey-server --port 6383 --replicaof toxiproxy 4513
+      --masteruser ${PERDISK_USER:-default} --masterauth ${PERDISK_PASSWORD:-}
+      --requirepass ${VALKEY_PASSWORD:-} --replica-read-only yes --save "" --appendonly no
+
 volumes:
   drive-cache:
   drive-b-cache:
+  drive-p-cache:
   valkey-data:
   garage-meta:
   garage-data:
