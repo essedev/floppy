@@ -26,7 +26,7 @@ A Valkey replica copies its whole instance, so the hosted service gives each org
 ## 5. Shared metadata on Valkey with a local replica in every VM
 
 **Active, 17/10/2026.** A central Valkey holds the metadata; each VM runs a replica of it, and a patched JuiceFS reads from the replica and writes to the master, with read-your-writes. Measured at 15 ms: a cold listing of 300 files from the Finder takes 0.2-0.3 s instead of 75-117 s, because Samba's ~2,700 metadata operations for that listing become local. Valkey because Redis moved to source-available licenses in 2024.
-**Ruled out:** PostgreSQL reached over the WAN (117 s), tuning Samba and caches around the round trips (vetoing `._` files, Finder attributes in a local index: they break sharing), plain objects with rclone (no locks, renames copy data), writing a file system with replicated metadata from scratch.
+**Ruled out:** PostgreSQL reached over the WAN (117 s), tuning Samba and caches around the round trips (vetoing `._` files, Finder attributes in a local index: they break sharing), plain objects with rclone (no locks, renames copy data), writing a file system with replicated metadata from scratch, JuiceFS 1.4's Redis client-side cache (`client-cache=true`, checked 17/10/2026: it caches only attributes and lookups of existing names, not listings, extended attributes or the missing `._` names, leaves writes at 3-6 round trips, and can serve stale data, upstream #7674 and #7676; the patch refuses to run with it).
 
 ## 6. Writes as optimistic transactions, offline as read-only
 

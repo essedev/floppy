@@ -2,7 +2,7 @@
 
 Floppy is a shared remote disk for teams that edit video: on a Mac it shows up as a volume in the Finder, the files live on S3 object storage, and the people working on it need to know nothing else. This document collects the analysis so far and the reasons behind the decisions, which are listed in [DECISIONS.md](DECISIONS.md). The project is between a test package (one disk per Mac, metadata in SQLite inside each VM, tested on an OVH bucket in Milan) and the team architecture: one disk per team, metadata in a central Valkey with a replica in each Mac's VM, a control plane for sign-in and access, a menu bar app. The team architecture is drawn in [architecture.html](architecture.html) and proven in a local spike; it is not built yet.
 
-Prices and features of third-party services were checked on 06/10/2026 and must be checked again before deciding.
+Prices and features of third-party services were checked on 06/10/2026, the alternatives again on 17/10/2026, and must be checked again before deciding.
 
 ## Guiding principle
 
@@ -125,7 +125,7 @@ Measures from the 06/10/2026 spike (`spike/bench.sh`): an Apple Silicon Mac, Gar
 | `--prefetch` | 8 | Measured: the best value cold over SMB |
 | `--buffer-size` | 256 MB | Measured: as fast as 1 GB and leaves room in a 1 GiB VM (see "Footprint") |
 | `--enable-xattr` | on | Samba stores the Finder's metadata there; without it, deleting from the Mac fails with "Operation not supported" |
-| Metadata cache | JuiceFS defaults | With the local replica reads are local, so longer kernel caches buy little and would delay other people's changes |
+| Metadata cache | JuiceFS defaults | With the local replica reads are local, so longer kernel caches buy little and would delay other people's changes. JuiceFS 1.4's Redis client-side cache (`client-cache=true`) stays off: the patch refuses it (DECISIONS #5) |
 | Samba | `fruit` module (with `samba-vfs-modules`), signing and encryption off, asynchronous I/O | Finder compatibility; signing off and asynchronous I/O take cached reads from 69 to 163 MB/s. Off only because SMB stays on the private Mac-VM link |
 | Samba, hidden files | `veto files` on `.accesslog`, `.config`, `.stats`, `.trash` | JuiceFS's internal files do not show up in the Finder |
 | Spotlight | `mdutil -i off` on the volume | No indexing that reads everything |
@@ -233,10 +233,15 @@ The macOS module, a command today (`macos/bin/floppy`) and the engine of the Tau
 | Simple S3 mount (rclone `--vfs-cache-mode full`) | Ruled out | No locks, risk of people overwriting each other; linear prefetch; a mount that hangs after the Mac sleeps |
 | Active project on SSD + `rclone sync` to S3 | Ruled out for a team | Robust for one person, does not give a shared disk |
 | Office NAS on 10 GbE + sync to S3 | To reconsider | It is the right architecture if the team works in the same office: local performance, simpler to run |
-| **SpaceFS Teams** | **Commercial benchmark** | Same architecture, app and support included. Young startup (2.4 M$ pre-seed in August 2026), performance not verified by third parties, data region not stated |
-| LucidLink | Mature alternative, pricier | Industry standard. Starter 7 $/member with 100 GB, Business 27 $/member with 400 GB, extra space on quote |
-| LucidLink Custom on one's own bucket | Possible | 32 GBP/TB of license plus storage, about 45 EUR/TB. OVH is not among the qualified providers |
-| Suite Studios | Not evaluated | Sources contradict each other on what it is (mounted filesystem or cloud workstation) |
+| **SpaceFS Teams** | **Commercial benchmark** | Same architecture, app and support included. Young startup (2.4 M$ pre-seed in August 2026), private beta, macOS 26.4 or later on Apple Silicon, performance not verified by third parties, data region not stated, how it mounts not documented |
+| LucidLink | Mature alternative, pricier | Industry standard, and the same design: metadata replicated to every client, data streamed from object storage. Starter 7 $/member with 100 GB, Business 27 $/member with 400 GB, extra space on quote. On the Mac it used macFUSE's kernel extension (2022-2023 sources) |
+| LucidLink Custom on one's own bucket | Possible | 32 GBP/TB of license plus storage, about 45 EUR/TB, Enterprise only. OVH is not among the qualified providers |
+| Suite Studios | Not evaluated | Sources still contradict each other, on what it is and on the price (40 $/TB plus compute, or about 75 $/TB) |
+| Shade | Not evaluated | A video library mounted as a drive, plus AI search and review: a suite more than a disk. 14 M$ in April 2026. One's own S3 bucket only on Enterprise |
+| Frame.io Drive (Adobe) | To watch | Frame.io projects mounted in the Finder with streaming and a local cache, out since 15/04/2026 starting from Enterprise plans. Included in Adobe plans, which makes it the alternative a Premiere team already has; no own bucket |
+| Storj Object Mount | Not evaluated | Mounts any S3 bucket ("Any S3", 39 $ per license a month): a per-person price, Mac support not confirmed |
+| JuiceFS Enterprise, mirror file system | Validates the design | Replicates the metadata to another region so clients there read it locally: the same idea as Floppy's replica, on a proprietary metadata engine |
+| [JuiceMount](https://github.com/lelanddutcher/juicemount) | The closest open source project, ideas taken | Apache-2.0, one author, beta (0.4.0, July 2026). JuiceFS behind an NFS server on `localhost` that answers the Finder from an in-memory copy of the metadata, refreshed from Redis every 30 s (other Macs' changes arrive late). Needs macFUSE and an administrator password per session, a NAS as backend, no locks yet, and remounts on its own. Ideas taken into [ROADMAP.md](ROADMAP.md); vetoing `._` files is not one of them (DECISIONS #5) |
 
 ## Costs
 
@@ -251,20 +256,27 @@ The macOS module, a command today (`macos/bin/floppy`) and the engine of the Tau
 
 Wasabi is left out: it changed its prices on 01/07/2026 and the new price list was not found.
 
-**Comparison for a team of 3** (estimates):
+**Floppy has no per-person price**: self-hosted, a team pays the storage (about 7.5 EUR/TB on OVH) and a fixed 20-30 EUR for the metadata server, the central Valkey and its replica in the datacenter (an estimate: the host is not chosen yet). Adding a person costs nothing; adding a TB costs the storage. The commercial products charge per person.
 
-| Active TB | SpaceFS Teams (30 $/person, 1 TB/person pooled, extra 6-12 $ per 500 GB) | Floppy (OVH storage + database) |
-|---|---|---|
-| 3 TB | 90 $ | about 40-55 EUR |
-| 5 TB | 114-138 $ | about 55-70 EUR |
-| 10 TB | 174-258 $ | about 95-110 EUR |
+**Comparison by team size** (estimates, per month):
 
-Doing it yourself costs about half, but the difference (about 500-1,800 EUR a year with 3-5 people and a few TB) has to be weighed against the time for setup, running it and, if needed, building the app. Floppy pays off with more people or more TB, or when the data must stay on infrastructure you control.
+| Active TB | SpaceFS Teams, 3 people | SpaceFS Teams, 10 people | Floppy, any team size | Floppy's bucket backup on B2 |
+|---|---|---|---|---|
+| 3 TB | 90 $ | 300 $ | about 40-55 EUR | about 20 EUR |
+| 5 TB | 114-138 $ | 300 $ | about 55-70 EUR | about 35 EUR |
+| 10 TB | 174-258 $ | 300 $ | about 95-110 EUR | about 70 EUR |
+
+SpaceFS Teams: 30 $/person with 1 TB/person pooled, extra 6-12 $ per 500 GB. The backup column is the bucket replica on a second provider that Floppy needs anyway ([Backup and resilience](#backup-and-resilience)); the commercial prices do not say whether they include one.
+
+The gap widens with every person, but what is left is the cost of running it, which licenses hide: keeping the Valkey up and its backups checked, answering when a Mac does not mount, and carrying the JuiceFS patch across releases (half a day to a day per release that touches it, an estimate). For a small team that time is the real price; it pays off with more people, more TB, or data that must stay on infrastructure the team controls.
 
 ## Sources
 
 - [SpaceFS](https://spacefs.com/), [RuntimeWire on SpaceFS](https://runtimewire.com/article/space-streams-cloud-files-directly-into-premiere-photoshop-and-other-mac-apps), [IT Brief UK](https://itbrief.co.uk/story/space-raises-usd-2-4-million-for-ai-native-filesystem)
 - [LucidLink, G-Cloud 2026 price list](https://assets.applytosupply.digitalmarketplace.service.gov.uk/g-cloud-15/documents/93417/461052283002657-pricing-document-2026-01-30-1117.pdf), [Cutsio, LucidLink pricing 2026](https://cutsio.com/blog/lucidlink-pricing-2026-plans-costs-hidden-fees), [Backblaze, LucidLink with B2](https://www.backblaze.com/docs/cloud-storage-integrate-lucidlink-with-backblaze-b2)
-- [Shade, Suite Studios vs LucidLink](https://shade.inc/blog/suite-studios-vs-lucidlink)
+- [Shade, Suite Studios vs LucidLink](https://shade.inc/blog/suite-studios-vs-lucidlink), [ProVideo Coalition on Suite Studios](https://www.provideocoalition.com/in-depth-suite-studios/)
+- [TechCrunch on Shade](https://techcrunch.com/2026/04/22/shade-lands-14m-to-let-creative-teams-search-their-video-libraries-in-plain-english), [Shade pricing](https://shade.inc/pricing), [RedShark on Frame.io Drive](https://www.redsharknews.com/frame-io-drive-mounted-storage-nab-2026), [Storj Object Mount pricing](https://www.storj.io/pricing/change-faqs)
+- [Tidbits on LucidLink](https://tidbits.com/2023/03/23/lucidlink-offers-streaming-vision-of-cloud-based-storage/), [Blocks&Files on LucidLink's metadata](https://blocksandfiles.com/2019/05/29/how-lucidlinks-metadata-acceleration-and-parallel-io-gets-faster-cloud-file-access/), [JuiceFS Enterprise mirror file system](https://cf.juicefs.com/en/blog/engineering/metadata-backup-mirror-file-system-resilience-strategies)
+- [JuiceMount](https://github.com/lelanddutcher/juicemount), read on 17/10/2026
 - [Backblaze B2 pricing](https://www.backblaze.com/cloud-storage/pricing), [OVH S3 FAQ](https://docs.ovhcloud.com/de/guides/storage-and-backup/object-storage/s3-faq.md), [getdeploying OVH vs Backblaze](https://getdeploying.com/backblaze-vs-ovh), [Hetzner pricing 2026](https://agentdeals.dev/hetzner-pricing-2026), [Wasabi pricing FAQ](https://docs.wasabi.com/docs/may-2026-wasabi-pricing-faqs)
 - [JuiceFS Q&A](https://juicefs.com/en/blog/usage-tips/juicefs-24-qas-for-beginners), [Pigsty, JuiceFS on PostgreSQL](https://pigsty.io/docs/juice/)

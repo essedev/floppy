@@ -6,7 +6,7 @@ Un disco remoto condiviso per chi monta video su macOS: compare nel Finder come 
 
 ## Perché esiste
 
-Montare video da un bucket nel cloud non funziona con un semplice mount di rete: una timeline legge pezzi sparsi di file grandi, e ogni lettura paga la latenza verso il datacenter. I filesystem in streaming con cache locale (LucidLink, SpaceFS) risolvono il problema, con un prezzo per utente. Floppy costruisce la stessa cosa con componenti open source, sullo storage che scegli tu: [JuiceFS](https://juicefs.com) divide i file in blocchi su S3 e li tiene in cache su ogni Mac.
+Montare video da un bucket nel cloud non funziona con un semplice mount di rete: una timeline legge pezzi sparsi di file grandi, e ogni lettura paga la latenza verso il datacenter. I filesystem in streaming con cache locale (LucidLink, SpaceFS) risolvono il problema, con un prezzo per utente. Floppy costruisce la stessa cosa con componenti open source, sullo storage che scegli tu: [JuiceFS](https://juicefs.com) divide i file in blocchi su S3 e li tiene in cache su ogni Mac. In self-hosting non ha un prezzo per utente: un team paga lo storage e un piccolo server per i metadati, qualunque sia il numero di persone.
 
 Su macOS JuiceFS richiederebbe l'estensione del kernel di macFUSE, cioè avviare ogni Mac in modalità di recupero. Floppy fa girare JuiceFS in una piccola VM Linux ([Lima](https://lima-vm.io), con il framework di virtualizzazione di Apple) e la condivide al Mac via SMB su un collegamento privato: nessuna estensione del kernel, nessun permesso di amministratore.
 

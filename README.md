@@ -6,7 +6,7 @@ A shared remote disk for video teams on macOS: it shows up in the Finder as a re
 
 ## Why it exists
 
-Editing video from a cloud bucket does not work with a plain network mount: a timeline reads scattered pieces of large files, and every read pays the latency to the datacenter. Streaming filesystems with a local cache (LucidLink, SpaceFS) solve this, at a per-seat price. Floppy builds the same thing from open source parts on storage you pick: [JuiceFS](https://juicefs.com) splits files into blocks on S3 and caches them on each Mac.
+Editing video from a cloud bucket does not work with a plain network mount: a timeline reads scattered pieces of large files, and every read pays the latency to the datacenter. Streaming filesystems with a local cache (LucidLink, SpaceFS) solve this, at a per-seat price. Floppy builds the same thing from open source parts on storage you pick: [JuiceFS](https://juicefs.com) splits files into blocks on S3 and caches them on each Mac. Self-hosted, it has no per-seat price: a team pays the storage and one small metadata server, however many people use it.
 
 On macOS JuiceFS would need macFUSE's kernel extension, which means booting every Mac into recovery mode. Floppy runs JuiceFS in a small Linux VM ([Lima](https://lima-vm.io), Apple's Virtualization framework) and shares it to the Mac over SMB on a private link: no kernel extension, no administrator rights.
 
