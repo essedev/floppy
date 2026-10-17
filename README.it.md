@@ -18,14 +18,14 @@ Finder  ->  SMB (private Mac-VM link)  ->  Samba + JuiceFS in a Lima VM  ->  S3 
 
 ## Installazione
 
-Floppy si distribuisce come zip costruito da una configurazione compilata. Per costruirlo serve Docker acceso, perché i pacchetti Debian della VM si scaricano in un container.
+Floppy si distribuisce come zip costruito da una configurazione compilata. Per costruirlo serve Docker acceso, perché il JuiceFS patchato si compila e i pacchetti Debian della VM si scaricano in container.
 
 ```bash
 cp macos/config.env.example my-test.env   # bucket, chiavi, SMB_PASSWORD
 scripts/package.sh my-test.env            # crea dist/floppy.zip
 ```
 
-Lo zip (circa 445 MB) contiene Lima, l'immagine Debian, JuiceFS e i pacchetti Debian, così l'installazione non scarica niente. Contiene anche le chiavi del bucket: va passato in privato. Sul Mac si scompatta e si lancia:
+Lo zip (circa 445 MB) contiene Lima, l'immagine Debian, JuiceFS con le patch di Floppy (`spike/juicefs-replica`) e i pacchetti Debian, così l'installazione non scarica niente. Contiene anche le chiavi del bucket: va passato in privato. Sul Mac si scompatta e si lancia:
 
 ```bash
 bash floppy/install.sh
@@ -47,7 +47,7 @@ Un agente launchd controlla ogni 2 minuti che VM, JuiceFS e Samba siano attivi e
 
 ## Stato
 
-Agli inizi: un pacchetto di test per macOS, provato su OVH Object Storage a Milano, con i metadati in SQLite dentro ogni VM, quindi ogni Mac ha il suo disco. La versione per i team è in costruzione: il control plane (`server/`, accesso, persone, dispositivi, dischi, cambio della chiave, modi dello storage) e la sua dashboard (`web/`) funzionano dall'inizio alla fine su uno stack locale; l'app nella barra dei menu (`app/`) ha l'interfaccia ma non è ancora collegata; il motore della versione per i team (una replica Valkey in ogni VM, il JuiceFS patchato, i dischi come cartelle) è il prossimo passo. Misure, decisioni e alternative sono in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), i piani in [docs/ROADMAP.md](docs/ROADMAP.md).
+Agli inizi: un pacchetto di test per macOS, provato su OVH Object Storage a Milano, con i metadati in SQLite dentro ogni VM, quindi ogni Mac ha il suo disco. La versione per i team è in costruzione: il control plane (`server/`, accesso, persone, dispositivi, dischi, cambio della chiave, modi dello storage) e la sua dashboard (`web/`) funzionano dall'inizio alla fine su uno stack locale; l'app nella barra dei menu (`app/`) ha l'interfaccia ma non è ancora collegata; il pacchetto di test usa già il JuiceFS patchato, e il resto del motore della versione per i team (una replica Valkey in ogni VM, i dischi come cartelle) è il prossimo passo. Misure, decisioni e alternative sono in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), i piani in [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Licenza
 

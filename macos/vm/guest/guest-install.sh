@@ -30,18 +30,19 @@ if ! command -v smbd >/dev/null || ! command -v fusermount3 >/dev/null; then
   fi
   if [ "$local_ok" = false ]; then
     apt-get update -q
-    apt-get install -y -q --no-install-recommends "${PACKAGES[@]}" ca-certificates curl
+    apt-get install -y -q --no-install-recommends "${PACKAGES[@]}" ca-certificates
   fi
 fi
 
-# The package ships the binary (no GitHub download from an office network);
-# the download stays as a fallback for a package without it.
+# The package ships the patched JuiceFS (spike/juicefs-replica, checked by
+# scripts/package.sh): there is no release of it to download, and the upstream
+# one lacks the patches. Without the file, an installed binary of the same
+# upstream version stays.
 if [ -f juicefs ]; then
   install -m 755 juicefs /usr/local/bin/juicefs
-elif ! juicefs version 2>/dev/null | grep -q "$JUICEFS_VERSION"; then
-  arch=$(dpkg --print-architecture)
-  curl -fsSL "https://github.com/juicedata/juicefs/releases/download/v${JUICEFS_VERSION}/juicefs-${JUICEFS_VERSION}-linux-${arch}.tar.gz" \
-    | tar -xz -C /usr/local/bin juicefs
+elif ! juicefs version 2>/dev/null | grep -q " $JUICEFS_VERSION+"; then
+  echo "guest-install: juicefs $JUICEFS_VERSION is missing from the package" >&2
+  exit 1
 fi
 
 install -d -m 700 /etc/floppy /var/lib/floppy /var/cache/floppy

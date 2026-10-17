@@ -18,14 +18,14 @@ Finder  ->  SMB (private Mac-VM link)  ->  Samba + JuiceFS in a Lima VM  ->  S3 
 
 ## Install
 
-Floppy ships as a zip built from a filled-in configuration. Building it needs Docker running, because the Debian packages for the VM are fetched in a container.
+Floppy ships as a zip built from a filled-in configuration. Building it needs Docker running, because the patched JuiceFS is built and the Debian packages for the VM are fetched in containers.
 
 ```bash
 cp macos/config.env.example my-test.env   # bucket, keys, SMB_PASSWORD
 scripts/package.sh my-test.env            # creates dist/floppy.zip
 ```
 
-The zip (about 445 MB) bundles Lima, the Debian image, JuiceFS and the Debian packages, so the install downloads nothing. It also holds the bucket keys: share it privately. On the Mac, unpack it and run:
+The zip (about 445 MB) bundles Lima, the Debian image, JuiceFS with Floppy's patches (`spike/juicefs-replica`) and the Debian packages, so the install downloads nothing. It also holds the bucket keys: share it privately. On the Mac, unpack it and run:
 
 ```bash
 bash floppy/install.sh
@@ -47,7 +47,7 @@ A launchd agent checks every 2 minutes that the VM, JuiceFS and Samba are runnin
 
 ## Status
 
-Early: a test package for macOS, tried on OVH Object Storage in Milan, with the metadata in SQLite inside each VM, so every Mac has its own disk. The team version is being built: the control plane (`server/`, sign-in, people, devices, disks, key rotation, storage modes) and its admin web (`web/`) work end to end on a local stack; the menu bar app (`app/`) has its interface but is not connected yet; the engine for the team version (a Valkey replica in each VM, the patched JuiceFS, disks as folders) is next. Measurements, decisions and alternatives are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), plans in [docs/ROADMAP.md](docs/ROADMAP.md).
+Early: a test package for macOS, tried on OVH Object Storage in Milan, with the metadata in SQLite inside each VM, so every Mac has its own disk. The team version is being built: the control plane (`server/`, sign-in, people, devices, disks, key rotation, storage modes) and its admin web (`web/`) work end to end on a local stack; the menu bar app (`app/`) has its interface but is not connected yet; the test package already runs the patched JuiceFS, and the rest of the engine for the team version (a Valkey replica in each VM, disks as folders) is next. Measurements, decisions and alternatives are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), plans in [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## License
 
