@@ -1,0 +1,79 @@
+---
+// Starlight Hero override, used only by the landing: tagline, lead, the two ways in, and the
+// drive faceplate. Strings come from i18n/landing.ts in the page's language.
+import { Icon } from '@astrojs/starlight/components';
+import { brand } from '@/brand';
+import { landing } from '@/i18n/landing';
+import { langOf, localePath } from '@/lib/locale';
+import Faceplate from './Faceplate.astro';
+
+const lang = langOf(Astro.locals.starlightRoute.lang);
+const t = landing[lang];
+---
+
+<div class="fx-hero">
+  <div class="fx-hero-text">
+    <h1 id="_top">{brand.tagline[lang]}</h1>
+    <p class="fx-lead">{t.lead}</p>
+    <div class="fx-actions">
+      <a class="fx-btn fx-btn-primary" href={localePath(lang, '/introduction/')}>{t.docsCta}</a>
+      <a class="fx-btn" href={brand.repo}><Icon name="github" size="1.1em" />{t.githubCta}</a>
+    </div>
+    <p class="fx-readout">{t.requirements}</p>
+  </div>
+  <figure class="fx-hero-face">
+    <Faceplate label={t.faceplate.label} used={t.faceplate.used} state={t.faceplate.state} />
+    <figcaption>{t.faceplate.caption}</figcaption>
+  </figure>
+</div>
+
+<style>
+  .fx-hero {
+    display: grid;
+    gap: 2.5rem;
+    align-items: center;
+    padding-block: 1.5rem 1rem;
+  }
+  @media (min-width: 56rem) {
+    .fx-hero {
+      grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+      gap: 4rem;
+      padding-block: 3.5rem 2rem;
+    }
+  }
+  h1 {
+    margin: 0;
+    color: var(--sl-color-white);
+    font-size: clamp(2.1rem, 1.3rem + 3vw, 3.25rem);
+    font-weight: 800;
+    line-height: 1.06;
+    letter-spacing: -0.025em;
+    text-wrap: balance;
+  }
+  .fx-lead {
+    margin: 1.25rem 0 0;
+    max-width: 34rem;
+    color: var(--sl-color-gray-2);
+    font-size: 1.125rem;
+    line-height: 1.6;
+  }
+  .fx-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    margin-top: 2rem;
+  }
+  .fx-hero-text .fx-readout {
+    margin: 1.5rem 0 0;
+  }
+  .fx-hero-face {
+    margin: 0;
+  }
+  figcaption {
+    margin-top: 1.25rem;
+    max-width: 30rem;
+    color: var(--fx-ink-2);
+    font-size: 0.9375rem;
+    line-height: 1.55;
+  }
+</style>

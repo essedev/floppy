@@ -1,0 +1,188 @@
+---
+// The architecture's three places and three kinds of traffic, simplified from
+// docs/architecture.html. Two drawings of the same picture: wide for desktop, tall for a
+// phone, so the labels keep a readable size. Traffic kinds differ by stroke, not by color:
+// orange is reserved for the LED.
+import { brand } from '@/brand';
+import type { LandingStrings } from '@/i18n/landing';
+
+interface Props {
+  /** Diagram labels, already localized. */
+  t: LandingStrings['diagram'];
+}
+
+const { t } = Astro.props;
+---
+
+<figure class="dg">
+  <svg class="dg-wide" viewBox="0 0 760 330" role="img" aria-label={t.label}>
+    <defs>
+      <marker id="dgw-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path class="dg-mk" d="M0 0L10 5L0 10z"></path>
+      </marker>
+      <marker id="dgw-d" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="3.6" markerHeight="3.6" orient="auto-start-reverse">
+        <path class="dg-mk-strong" d="M0 0L10 5L0 10z"></path>
+      </marker>
+    </defs>
+
+    <rect class="dg-zone" x="0.5" y="0.5" width="400" height="300" rx="14"></rect>
+    <text class="dg-z" x="20" y="30">{t.mac}</text>
+
+    <path class="dg-e dg-local" d="M105 104 V198" marker-start="url(#dgw-a)" marker-end="url(#dgw-a)"></path>
+    <text class="dg-l" x="117" y="156">{t.smb}</text>
+
+    <path class="dg-e dg-ctl" d="M382 76 H518" marker-start="url(#dgw-a)" marker-end="url(#dgw-a)"></path>
+    <text class="dg-l" x="450" y="66" text-anchor="middle">{t.ctl}</text>
+    <path class="dg-e dg-meta" d="M382 222 C450 222 450 178 518 178" marker-start="url(#dgw-a)" marker-end="url(#dgw-a)"></path>
+    <text class="dg-l" x="446" y="176" text-anchor="middle">{t.meta}</text>
+    <path class="dg-e dg-data" d="M384 252 C450 252 450 280 516 280" marker-start="url(#dgw-d)" marker-end="url(#dgw-d)"></path>
+    <text class="dg-l" x="452" y="292" text-anchor="middle">{t.data}</text>
+
+    <rect class="dg-box" x="20" y="48" width="170" height="56" rx="9"></rect>
+    <text class="dg-t" x="36" y="72">{t.finder}</text>
+    <text class="dg-s dg-ro" x="36" y="92">{brand.volume}</text>
+    <rect class="dg-box" x="210" y="48" width="170" height="56" rx="9"></rect>
+    <text class="dg-t" x="226" y="81">{t.app}</text>
+    <rect class="dg-box" x="20" y="200" width="360" height="76" rx="9"></rect>
+    <text class="dg-t" x="36" y="230">{t.vm}</text>
+    <text class="dg-s" x="36" y="254">{t.vmSub}</text>
+
+    <rect class="dg-box" x="520" y="48" width="240" height="56" rx="9"></rect>
+    <text class="dg-t" x="536" y="72">{t.controlPlane}</text>
+    <text class="dg-s" x="536" y="92">{t.controlPlaneSub}</text>
+    <rect class="dg-box" x="520" y="150" width="240" height="56" rx="9"></rect>
+    <text class="dg-t" x="536" y="174">{t.postgres}</text>
+    <text class="dg-s" x="536" y="194">{t.postgresSub}</text>
+    <rect class="dg-box" x="520" y="252" width="240" height="56" rx="9"></rect>
+    <text class="dg-t" x="536" y="276">{t.s3}</text>
+    <text class="dg-s" x="536" y="296">{t.s3Sub}</text>
+  </svg>
+
+  <svg class="dg-narrow" viewBox="0 0 340 392" role="img" aria-label={t.label}>
+    <defs>
+      <marker id="dgn-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path class="dg-mk" d="M0 0L10 5L0 10z"></path>
+      </marker>
+      <marker id="dgn-d" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="3.6" markerHeight="3.6" orient="auto-start-reverse">
+        <path class="dg-mk-strong" d="M0 0L10 5L0 10z"></path>
+      </marker>
+    </defs>
+
+    <rect class="dg-zone" x="0.5" y="0.5" width="339" height="250" rx="14"></rect>
+    <text class="dg-z" x="16" y="28">{t.mac}</text>
+
+    <path class="dg-e dg-local" d="M60 96 V158" marker-start="url(#dgn-a)" marker-end="url(#dgn-a)"></path>
+    <text class="dg-l" x="72" y="132">{t.smb}</text>
+
+    <path class="dg-e dg-data" d="M52 238 V326" marker-start="url(#dgn-d)" marker-end="url(#dgn-d)"></path>
+    <text class="dg-l" x="62" y="292">{t.data}</text>
+    <path class="dg-e dg-meta" d="M170 236 V328" marker-start="url(#dgn-a)" marker-end="url(#dgn-a)"></path>
+    <text class="dg-l" x="180" y="292">{t.meta}</text>
+    <path class="dg-e dg-ctl" d="M300 98 V328" marker-start="url(#dgn-a)" marker-end="url(#dgn-a)"></path>
+    <text class="dg-l" x="292" y="142" text-anchor="end">{t.ctl}</text>
+
+    <rect class="dg-box" x="14" y="42" width="150" height="54" rx="9"></rect>
+    <text class="dg-t" x="28" y="65">{t.finder}</text>
+    <text class="dg-s dg-ro" x="28" y="84">{brand.volume}</text>
+    <rect class="dg-box" x="176" y="42" width="150" height="54" rx="9"></rect>
+    <text class="dg-t" x="190" y="74">{t.app}</text>
+    <rect class="dg-box" x="14" y="160" width="240" height="76" rx="9"></rect>
+    <text class="dg-t" x="28" y="190">{t.vm}</text>
+    <text class="dg-s" x="28" y="213">{t.vmSub}</text>
+
+    <rect class="dg-box" x="0.5" y="330" width="104" height="60" rx="9"></rect>
+    <text class="dg-t dg-sm" x="52.5" y="365" text-anchor="middle">{t.s3}</text>
+    <rect class="dg-box" x="118" y="330" width="104" height="60" rx="9"></rect>
+    <text class="dg-t dg-sm" x="170" y="365" text-anchor="middle">{t.postgres}</text>
+    <rect class="dg-box" x="235.5" y="330" width="104" height="60" rx="9"></rect>
+    <text class="dg-t dg-sm" x="287.5" y="365" text-anchor="middle">{t.controlPlane}</text>
+  </svg>
+</figure>
+
+<style>
+  .dg {
+    margin: 0;
+  }
+  .dg svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    overflow: visible;
+  }
+  .dg .dg-wide {
+    display: none;
+  }
+  @media (min-width: 46rem) {
+    .dg .dg-wide {
+      display: block;
+    }
+    .dg .dg-narrow {
+      display: none;
+    }
+  }
+  .dg-zone {
+    fill: var(--fx-sunken);
+    stroke: var(--fx-line);
+  }
+  .dg-box {
+    fill: var(--fx-raised);
+    stroke: var(--fx-line-strong);
+  }
+  .dg-t {
+    fill: var(--fx-ink);
+    font-family: var(--__sl-font);
+    font-size: 15px;
+    font-weight: 600;
+  }
+  .dg-sm {
+    font-size: 13px;
+  }
+  .dg-s {
+    fill: var(--fx-ink-2);
+    font-family: var(--__sl-font);
+    font-size: 12.5px;
+  }
+  .dg-ro {
+    font-family: var(--fx-font-readout);
+    font-size: 11px;
+  }
+  .dg-z {
+    fill: var(--fx-ink-2);
+    font-family: var(--fx-font-readout);
+    font-size: 11px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+  .dg-l {
+    fill: var(--fx-ink-2);
+    font-family: var(--__sl-font);
+    font-size: 12.5px;
+  }
+  .dg-e {
+    fill: none;
+    stroke-linecap: round;
+  }
+  .dg-local {
+    stroke: var(--fx-ink-3);
+    stroke-width: 1.5;
+  }
+  .dg-meta {
+    stroke: var(--fx-ink-2);
+    stroke-width: 1.75;
+  }
+  .dg-ctl {
+    stroke: var(--fx-ink-2);
+    stroke-width: 1.75;
+    stroke-dasharray: 2 5;
+  }
+  .dg-data {
+    stroke: var(--fx-ink);
+    stroke-width: 5;
+  }
+  .dg-mk {
+    fill: var(--fx-ink-2);
+  }
+  .dg-mk-strong {
+    fill: var(--fx-ink);
+  }
+</style>

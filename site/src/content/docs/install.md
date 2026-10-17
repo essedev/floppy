@@ -1,0 +1,43 @@
+---
+title: Install on a Mac
+description: Install the app with Homebrew, sign in, and find the disk in the Finder.
+---
+
+:::caution[Not released yet]
+The cask and the menu bar app are being built. Until the first release, testers get a zip built from the repository: see the [README](%repo%#install).
+:::
+
+## Before you start
+
+- A Mac with Apple Silicon and macOS 13 or later.
+- [Homebrew](https://brew.sh) installed.
+- An invite from your team's admin: it arrives by email.
+
+## Install
+
+```sh
+brew install --cask %cask%
+```
+
+The app needs no administrator password and installs no kernel extension.
+
+## First start
+
+1. Open **%name%** from the Applications folder. Its icon appears in the menu bar.
+2. Choose **Sign in**: the browser opens, you enter your email and click the link you receive. The app never asks for a password.
+3. The app creates the Linux VM on this Mac and shows the progress. It takes about a minute and a half and downloads nothing: everything it needs is in the app.
+4. The disk appears in the Finder as **%name%**, under Locations, at `%volume%`.
+
+## Working with the disk
+
+- Open files straight from the Finder or from your editor. A clip you have never opened starts after about a second; one in the cache, at once.
+- Before editing a large project, choose **Make available** on its folder in the menu bar panel: the whole project comes into the cache.
+- When the Mac runs low on space, choose **Free up space** on projects you are not editing. The files stay on the disk and download again when opened.
+
+## Remove
+
+```sh
+brew uninstall --cask %cask%
+```
+
+TODO: whether uninstalling the cask also removes the VM and the cache, or the app does it from its settings, is not decided yet.

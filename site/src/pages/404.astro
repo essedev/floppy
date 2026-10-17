@@ -1,0 +1,16 @@
+---
+// Not-found page. Starlight's own 404 is disabled: it uses a hero, and the Hero override
+// belongs to the landing.
+import StarlightPage from '@astrojs/starlight/components/StarlightPage.astro';
+---
+
+<StarlightPage frontmatter={{ title: 'Page not found', template: 'splash', pagefind: false }}>
+  <p>
+    This page is not on the disk. Start from the <a href="/introduction/">introduction</a>, or
+    search the docs from the bar above.
+  </p>
+  <p lang="it">
+    Questa pagina non è sul disco. Riparti dall’<a href="/it/introduction/">introduzione</a>, o
+    cerca nella documentazione dalla barra in alto.
+  </p>
+</StarlightPage>

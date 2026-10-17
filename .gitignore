@@ -5,3 +5,4 @@ dist/
 !*.env.example
 .DS_Store
 spike/meta-bench.*.tsv
+__pycache__/

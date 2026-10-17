@@ -1,0 +1,265 @@
+/*
+  The Grafite drive identity on top of Starlight: putty and graphite surfaces, graphite as the
+  accent, brand orange only on the LED. Tokens come from docs/architecture.html and the
+  "Vocabolario dei dettagli" in docs/concepts/concept-c-app.html. Starlight's default theme is
+  dark on :root and light under [data-theme='light'], so the tokens follow the same order.
+*/
+
+:root {
+  --fx-page: #121211;
+  --fx-surface: #1d1c1a;
+  --fx-sunken: #161514;
+  --fx-raised: #262522;
+  --fx-line: #2f2d29;
+  --fx-line-strong: #44413c;
+  --fx-ink: #efece5;
+  --fx-ink-2: #a29e95;
+  --fx-ink-3: #8f8b83;
+  --fx-brand: #ff6a2e;
+  --fx-led-ok: #3fdc6c;
+  --fx-led-dl: #ff6a2e;
+  --fx-led-err: #ff4b33;
+  --fx-bezel: #0f0f0e;
+  --fx-bezel-rim: rgba(255, 255, 255, 0.06);
+
+  --fx-font-readout: 'Departure Mono', ui-monospace, Menlo, monospace;
+  --sl-font: 'Schibsted Grotesk';
+
+  --sl-color-white: #f7f5f0;
+  --sl-color-gray-1: #efece5;
+  --sl-color-gray-2: #d6d2ca;
+  --sl-color-gray-3: #a29e95;
+  --sl-color-gray-4: #6f6b64;
+  --sl-color-gray-5: #2f2d29;
+  --sl-color-gray-6: #1d1c1a;
+  --sl-color-black: #121211;
+
+  --sl-color-accent-low: #2f2d29;
+  --sl-color-accent: #d6d2ca;
+  --sl-color-accent-high: #efece5;
+
+  --sl-color-bg: var(--fx-surface);
+  --sl-color-bg-nav: var(--fx-page);
+  --sl-color-bg-sidebar: var(--fx-page);
+  --sl-color-bg-inline-code: var(--fx-raised);
+  --sl-color-hairline-light: var(--fx-line-strong);
+  --sl-color-hairline: var(--fx-line);
+  --sl-color-hairline-shade: #0b0b0a;
+  --sl-color-text-invert: var(--fx-page);
+
+  /* Cards already have a hairline: no second edge from a shadow. */
+  --sl-shadow-md: none;
+}
+
+:root[data-theme='light'] {
+  --fx-page: #e6e3dc;
+  --fx-surface: #f4f2ed;
+  --fx-sunken: #ebe8e1;
+  --fx-raised: #fbfaf7;
+  --fx-line: #dcd8cf;
+  --fx-line-strong: #c9c4b9;
+  --fx-ink: #1d1c1a;
+  --fx-ink-2: #625f58;
+  --fx-ink-3: #706c64;
+  --fx-brand: #ff5b1f;
+  --fx-led-ok: #2fbf57;
+  --fx-led-dl: #ff5b1f;
+  --fx-led-err: #ff3b24;
+  --fx-bezel: #dcd8ce;
+  --fx-bezel-rim: rgba(255, 255, 255, 0.55);
+
+  --sl-color-white: #1d1c1a;
+  --sl-color-gray-1: #262522;
+  --sl-color-gray-2: #34322e;
+  --sl-color-gray-3: #5c5952;
+  --sl-color-gray-4: #8a867d;
+  --sl-color-gray-5: #c9c4b9;
+  --sl-color-gray-6: #dcd8cf;
+  --sl-color-gray-7: #ebe8e1;
+  --sl-color-black: #f4f2ed;
+
+  --sl-color-accent-low: #dcd8cf;
+  --sl-color-accent: #1d1c1a;
+  --sl-color-accent-high: #1d1c1a;
+
+  --sl-color-bg: var(--fx-surface);
+  --sl-color-bg-nav: var(--fx-page);
+  --sl-color-bg-sidebar: var(--fx-page);
+  --sl-color-bg-inline-code: var(--fx-sunken);
+  --sl-color-hairline-light: var(--fx-line);
+  --sl-color-hairline: var(--fx-line);
+  --sl-color-hairline-shade: var(--fx-line-strong);
+  --sl-color-text-invert: var(--fx-surface);
+}
+
+/* Headings: the wordmark's tight grotesk, without squeezing the letters. */
+.sl-markdown-content :is(h1, h2, h3, h4),
+h1#_top {
+  font-weight: 700;
+  letter-spacing: -0.015em;
+}
+
+/* Links in prose stay ink, underlined; graphite is the accent, orange is not. */
+.sl-markdown-content a:not(.not-content *) {
+  color: var(--sl-color-white);
+  text-decoration-color: var(--fx-ink-3);
+  text-underline-offset: 0.18em;
+}
+.sl-markdown-content a:not(.not-content *):hover {
+  text-decoration-color: currentColor;
+}
+
+/* Active sidebar entry: a raised row like a macOS source list, no filled accent block. */
+.sidebar-content a[aria-current='page'],
+.sidebar-content a[aria-current='page']:hover,
+.sidebar-content a[aria-current='page']:focus {
+  background: var(--fx-raised);
+  color: var(--sl-color-white);
+  font-weight: 600;
+  box-shadow: 0 0 0 1px var(--fx-line);
+}
+
+/* List marker: the slot, 12x4, 10px from the text, centered on the first line. */
+.sl-markdown-content ul:not(.not-content *) {
+  list-style: none;
+  padding-inline-start: 22px;
+}
+.sl-markdown-content ul:not(.not-content *) > li {
+  position: relative;
+}
+.sl-markdown-content ul:not(.not-content *) > li::before {
+  content: '';
+  position: absolute;
+  inset-inline-start: -22px;
+  top: calc(0.875em - 2px);
+  width: 12px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--fx-ink-3);
+  box-shadow: inset 0 1px 1px rgba(0, 0, 0, 0.3);
+}
+
+/* Asides: sunken surface, no colored stripe or tint; the kind is an LED in its bezel. */
+.starlight-aside {
+  border: 1px solid var(--fx-line);
+  border-radius: 10px;
+  background: var(--fx-sunken);
+  color: var(--sl-color-gray-2);
+}
+.starlight-aside__title {
+  color: var(--fx-ink-2);
+  font-family: var(--fx-font-readout);
+  font-size: 0.75rem;
+  font-weight: 400;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  line-height: 1.4;
+  align-items: center;
+}
+.starlight-aside__icon {
+  display: none;
+}
+.starlight-aside__title::before {
+  content: '';
+  flex: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--fx-lens) 0 3.5px, transparent 3.5px), var(--fx-bezel);
+  box-shadow:
+    inset 0 1px 1.5px rgba(0, 0, 0, 0.35),
+    0 1px 0 var(--fx-bezel-rim);
+}
+.starlight-aside--note {
+  --fx-lens: rgba(138, 134, 125, 0.35);
+}
+.starlight-aside--tip {
+  --fx-lens: var(--fx-led-ok);
+}
+.starlight-aside--caution {
+  --fx-lens: var(--fx-led-dl);
+}
+.starlight-aside--danger {
+  --fx-lens: var(--fx-led-err);
+}
+
+/* A readout: Departure Mono, uppercase, ink-2. Color lives in the LED, never in the text. */
+.fx-readout {
+  font-family: var(--fx-font-readout);
+  font-size: 0.75rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--fx-ink-2);
+  line-height: 1.4;
+}
+
+/* LED in its bezel; the lens takes the state color through --fx-lens. */
+.fx-led {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--fx-bezel);
+  box-shadow:
+    inset 0 1px 1.5px rgba(0, 0, 0, 0.35),
+    0 1px 0 var(--fx-bezel-rim);
+}
+.fx-led::after {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--fx-lens, rgba(138, 134, 125, 0.35));
+}
+.fx-led[data-state='ok'] {
+  --fx-lens: var(--fx-led-ok);
+}
+.fx-led[data-state='dl'] {
+  --fx-lens: var(--fx-led-dl);
+}
+.fx-led:is([data-state='ok'], [data-state='dl'])::after {
+  box-shadow:
+    inset 0 1px 1px rgba(255, 255, 255, 0.55),
+    inset 0 -1px 1px rgba(0, 0, 0, 0.25);
+}
+
+/* Buttons: rounded rectangles like the app's, never pills. Primary is graphite on putty. */
+.fx-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 2.75rem;
+  padding: 0.6rem 1.1rem;
+  border: 1px solid var(--fx-line-strong);
+  border-radius: 9px;
+  background: var(--fx-raised);
+  color: var(--sl-color-white);
+  font-size: 1rem;
+  font-weight: 600;
+  line-height: 1.2;
+  text-decoration: none;
+  cursor: pointer;
+}
+.fx-btn:hover {
+  border-color: var(--fx-ink-3);
+}
+.fx-btn-primary {
+  border-color: var(--sl-color-white);
+  background: var(--sl-color-white);
+  color: var(--sl-color-black);
+}
+.fx-btn-primary:hover {
+  border-color: var(--sl-color-gray-2);
+  background: var(--sl-color-gray-2);
+}
+.fx-btn:focus-visible {
+  outline: 2px solid var(--sl-color-white);
+  outline-offset: 2px;
+}
+
+/* The search shortcut hint sits inside a control: keep it at a readable size. */
+site-search kbd {
+  font-size: 0.8125rem;
+}
