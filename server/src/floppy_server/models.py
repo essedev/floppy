@@ -81,18 +81,19 @@ VOLUME_STATES = ("creating", "ready", "failed")
 KEY_STATES = ("pending", "active", "retiring", "retired", "rejected")
 ROTATION_STATES = ("applying", "awaiting_old_key_deletion", "failed", "superseded", "closed")
 STEP_STATES = ("pending", "running", "done", "failed")
-EXPOSURE_KINDS = ("person_removed", "device_revoked")
+EXPOSURE_KINDS = ("person_removed", "device_revoked", "access_removed")
 ACTOR_KINDS = ("person", "system", "operator")
 AUDIT_CATEGORIES = ("access", "people", "devices", "key", "disks", "settings")
 AUDIT_TARGETS = ("person", "device", "disk", "key", "organization")
 MAIL_LANGUAGES = ("it", "en")
 STORAGE_MODES = ("manual", "managed")
 STORAGE_PROVIDERS = ("ovh", "aws", "minio", "garage")
-KEY_SCOPES = ("team", "person", "device")
-KEY_HOLDERS = ("team", "person", "device", "control_plane")
+ACCESS_LEVELS = ("none", "read", "write")
+KEY_HOLDERS = ("disk", "device", "control_plane")
+INSTANCE_STATES = ("ready", "stopped")
+PROBE_STATES = ("ok", "failing", "unknown")
 KEY_ORIGINS = ("pasted", "provider")
 VERSIONING_STATES = ("enabled", "suspended", "off", "unknown")
-ROTATION_TRIGGERS = ("admin", "revocation")
 AUDIT_ACTIONS = (
     "organization_created",
     "signed_in",
@@ -114,19 +115,18 @@ AUDIT_ACTIONS = (
     "key_deleted",
     "disk_created",
     "disk_updated",
+    "disk_access_changed",
     "settings_updated",
 )
 
 
 class Organization(Base):
-    """A tenant: a team with its bucket and its Valkey instance."""
+    """A tenant: a team, its storage mode and its mail. Buckets and instances are per disk."""
 
     __tablename__ = "organizations"
     __table_args__ = (
         CheckConstraint("length(btrim(name)) BETWEEN 1 AND 100", name="name_length"),
         CheckConstraint("slug ~ '^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$'", name="slug_format"),
-        CheckConstraint("position('@' in valkey_url) = 0", name="valkey_url_no_credentials"),
-        CheckConstraint("valkey_databases BETWEEN 2 AND 1024", name="valkey_databases_range"),
         CheckConstraint("smtp_port BETWEEN 1 AND 65535", name="smtp_port_range"),
         CheckConstraint("(smtp_host IS NULL) = (smtp_port IS NULL)", name="smtp_host_port"),
         CheckConstraint(_in("mail_language", *MAIL_LANGUAGES), name="mail_language"),
@@ -136,42 +136,20 @@ class Organization(Base):
             "(storage_mode = 'managed') = (storage_provider IS NOT NULL)",
             name="storage_provider_managed",
         ),
-        CheckConstraint(_in("storage_key_scope", *KEY_SCOPES), name="storage_key_scope"),
-        CheckConstraint(
-            "storage_mode = 'managed' OR storage_key_scope IN ('team', 'person')",
-            name="storage_key_scope_manual",
-        ),
         CheckConstraint(
             "storage_mode = 'managed' OR storage_admin_credentials_enc IS NULL",
             name="storage_admin_credentials_managed",
         ),
         UniqueConstraint("slug", name="uq_organizations_slug"),
-        Index(
-            "uq_organizations_valkey_url",
-            text("lower(valkey_url)"),
-            unique=True,
-            postgresql_where=text("deleted_at IS NULL"),
-        ),
-        Index(
-            "uq_organizations_s3_endpoint_s3_bucket",
-            "s3_endpoint",
-            "s3_bucket",
-            unique=True,
-            postgresql_where=text("deleted_at IS NULL"),
-        ),
     )
 
     id: Mapped[UUID] = _id()
     name: Mapped[str] = mapped_column(Text)
     slug: Mapped[str] = mapped_column(Text)
+    # The defaults of new disks: where the admin starts from (manual), where the adapter
+    # creates buckets (managed). Each disk keeps its own copy.
     s3_endpoint: Mapped[str] = mapped_column(Text)
     s3_region: Mapped[str] = mapped_column(Text)
-    s3_bucket: Mapped[str] = mapped_column(Text)
-    valkey_url: Mapped[str] = mapped_column(Text)
-    valkey_admin_url: Mapped[str | None] = mapped_column(Text)
-    valkey_admin_username: Mapped[str | None] = mapped_column(Text)
-    valkey_admin_password_enc: Mapped[bytes | None] = mapped_column(LargeBinary)
-    valkey_databases: Mapped[int] = mapped_column(Integer, server_default=text("16"))
     smtp_host: Mapped[str | None] = mapped_column(Text)
     smtp_port: Mapped[int | None] = mapped_column(Integer)
     smtp_username: Mapped[str | None] = mapped_column(Text)
@@ -180,7 +158,6 @@ class Organization(Base):
     mail_language: Mapped[str] = mapped_column(Text, server_default=text("'it'"))
     storage_mode: Mapped[str] = mapped_column(Text, server_default=text("'manual'"))
     storage_provider: Mapped[str | None] = mapped_column(Text)
-    storage_key_scope: Mapped[str] = mapped_column(Text, server_default=text("'team'"))
     storage_admin_credentials_enc: Mapped[bytes | None] = mapped_column(LargeBinary)
     created_at: Mapped[datetime] = _ts(default=True)
     updated_at: Mapped[datetime] = mapped_column(
@@ -190,26 +167,16 @@ class Organization(Base):
 
 
 class OrganizationStatus(Base):
-    """What the control plane last saw of an organization's services, for `GET /health`."""
+    """What the control plane last saw of an organization's mail, for `GET /health`."""
 
     __tablename__ = "organization_status"
     __table_args__ = (
-        CheckConstraint(_in("metadata_state", "ok", "down"), name="metadata_state"),
-        CheckConstraint(_in("storage_state", "ok", "failing"), name="storage_state"),
         CheckConstraint(_in("mail_state", "ok", "unconfigured", "failing"), name="mail_state"),
-        CheckConstraint(_in("bucket_versioning", *VERSIONING_STATES), name="bucket_versioning"),
     )
 
     organization_id: Mapped[UUID] = mapped_column(
         PgUUID(as_uuid=True), ForeignKey("organizations.id"), primary_key=True
     )
-    metadata_state: Mapped[str] = mapped_column(Text, server_default=text("'ok'"))
-    metadata_latency_ms: Mapped[int | None] = mapped_column(Integer)
-    metadata_checked_at: Mapped[datetime | None] = _ts(nullable=True)
-    storage_state: Mapped[str] = mapped_column(Text, server_default=text("'ok'"))
-    storage_probed_at: Mapped[datetime | None] = _ts(nullable=True)
-    bucket_versioning: Mapped[str] = mapped_column(Text, server_default=text("'unknown'"))
-    bucket_old_versions_days: Mapped[int | None] = mapped_column(Integer)
     mail_state: Mapped[str] = mapped_column(Text, server_default=text("'unconfigured'"))
     mail_sent_at: Mapped[datetime | None] = _ts(nullable=True)
     updated_at: Mapped[datetime] = mapped_column(
@@ -427,7 +394,7 @@ class WebSession(Base):
 
 
 class Device(Base):
-    """A Mac: the app's device token and the Mac's own Valkey user (DECISIONS #7)."""
+    """A device: the app's device token and its one Valkey password (DECISIONS #7)."""
 
     __tablename__ = "devices"
     __table_args__ = (
@@ -456,11 +423,6 @@ class Device(Base):
             "user_id",
             postgresql_where=text("state <> 'revoked'"),
         ),
-        Index(
-            "ix_devices_organization_id_cleanup_owed",
-            "organization_id",
-            postgresql_where=text("state = 'revoked' AND valkey_user_deleted_at IS NULL"),
-        ),
     )
 
     id: Mapped[UUID] = _id()
@@ -475,12 +437,12 @@ class Device(Base):
         PgUUID(as_uuid=True), ForeignKey("sign_in_requests.id")
     )
     token_hash: Mapped[bytes] = mapped_column(LargeBinary)
+    # The same user name on every disk's instance the device may see.
     valkey_username: Mapped[str] = mapped_column(
         Text, Computed("'floppy_d_' || replace(id::text, '-', '')", persisted=True)
     )
     valkey_password_sha256: Mapped[bytes | None] = mapped_column(LargeBinary)
     valkey_user_created_at: Mapped[datetime | None] = _ts(nullable=True)
-    valkey_user_deleted_at: Mapped[datetime | None] = _ts(nullable=True)
     activated_at: Mapped[datetime | None] = _ts(nullable=True)
     revoked_at: Mapped[datetime | None] = _ts(nullable=True)
     revoked_by_user_id: Mapped[UUID | None] = mapped_column(
@@ -495,7 +457,7 @@ class Device(Base):
 
 
 class DeviceStatus(Base):
-    """What a Mac last reported in its heartbeat. One row per device, overwritten."""
+    """What a device last reported in its heartbeat. One row per device, overwritten."""
 
     __tablename__ = "device_status"
     __table_args__ = (
@@ -530,42 +492,44 @@ class DeviceStatus(Base):
 
 
 class S3Key(Base):
-    """One of the organization's S3 keys, one row per key ever pasted or created (DECISIONS #22)."""
+    """One S3 key, one row per key ever pasted or created (DECISIONS #24)."""
 
     __tablename__ = "s3_keys"
     __table_args__ = (
         _tenant_unique("s3_keys"),
         CheckConstraint(_in("state", *KEY_STATES), name="state"),
-        _tenant_fk(["membership_id"], "memberships"),
+        _tenant_fk(["volume_id"], "volumes"),
         _tenant_fk(["device_id"], "devices"),
-        # A Mac's own key never has its secret here; the others keep it until retired.
+        # A device's own key never has its secret here; the others keep it until retired.
         CheckConstraint(
             "(holder = 'device' OR state IN ('retired', 'rejected')) = (secret_key_enc IS NULL)",
             name="secret_wiped",
         ),
         CheckConstraint(_in("holder", *KEY_HOLDERS), name="holder"),
-        CheckConstraint("(holder = 'person') = (membership_id IS NOT NULL)", name="person_holder"),
+        CheckConstraint("(holder = 'disk') = (volume_id IS NOT NULL)", name="disk_holder"),
         CheckConstraint("(holder = 'device') = (device_id IS NOT NULL)", name="device_holder"),
         CheckConstraint(_in("origin", *KEY_ORIGINS), name="origin"),
         CheckConstraint("(origin = 'provider') = (provider_ref IS NOT NULL)", name="provider_ref"),
+        # A disk's key is pasted (manual); the others come from the adapter (managed).
+        CheckConstraint("(holder = 'disk') = (origin = 'pasted')", name="holder_origin"),
         CheckConstraint("length(access_key_id) BETWEEN 1 AND 256", name="access_key_id_length"),
         Index(
-            "uq_s3_keys_organization_id_active",
+            "uq_s3_keys_volume_id_active",
+            "volume_id",
+            unique=True,
+            postgresql_where=text("holder = 'disk' AND state = 'active'"),
+        ),
+        Index(
+            "uq_s3_keys_organization_id_control_plane",
             "organization_id",
             unique=True,
-            postgresql_where=text("state = 'active' AND holder IN ('team', 'control_plane')"),
+            postgresql_where=text("holder = 'control_plane' AND state = 'active'"),
         ),
         Index(
             "uq_s3_keys_device_id_live",
             "device_id",
             unique=True,
             postgresql_where=text("holder = 'device' AND state IN ('pending', 'active')"),
-        ),
-        Index(
-            "uq_s3_keys_membership_id_live",
-            "membership_id",
-            unique=True,
-            postgresql_where=text("holder = 'person' AND state IN ('pending', 'active')"),
         ),
         Index(
             "ix_s3_keys_organization_id_deletion_owed",
@@ -590,8 +554,8 @@ class S3Key(Base):
         Text, Computed("right(access_key_id, 5)", persisted=True)
     )
     secret_key_enc: Mapped[bytes | None] = mapped_column(LargeBinary)
-    holder: Mapped[str] = mapped_column(Text, server_default=text("'team'"))
-    membership_id: Mapped[UUID | None] = mapped_column(PgUUID(as_uuid=True))
+    holder: Mapped[str] = mapped_column(Text)
+    volume_id: Mapped[UUID | None] = mapped_column(PgUUID(as_uuid=True))
     device_id: Mapped[UUID | None] = mapped_column(PgUUID(as_uuid=True))
     origin: Mapped[str] = mapped_column(Text, server_default=text("'pasted'"))
     provider_ref: Mapped[str | None] = mapped_column(Text)
@@ -607,14 +571,13 @@ class S3Key(Base):
 
 
 class Volume(Base):
-    """A disk: a JuiceFS volume, a prefix in the bucket and a database on Valkey."""
+    """A disk: a JuiceFS volume with its own bucket and its own Valkey instance."""
 
     __tablename__ = "volumes"
     __table_args__ = (
         _tenant_unique("volumes"),
-        _tenant_fk(["s3_key_id"], "s3_keys"),
-        # The folder in /Volumes/Floppy (DATABASE_SCHEMA.md, "Disks on a Mac"): ASCII only, so
-        # no Unicode normalization can change a path CapCut keeps.
+        # The folder in /Volumes/Floppy (DATABASE_SCHEMA.md, "Disks on a device"): ASCII only,
+        # so no Unicode normalization can change a path CapCut keeps.
         CheckConstraint(
             "name ~ '^[A-Za-z0-9]([A-Za-z0-9 ._-]{0,58}[A-Za-z0-9])?$'", name="name_format"
         ),
@@ -622,7 +585,6 @@ class Volume(Base):
         CheckConstraint(
             "volume_name ~ '^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$'", name="volume_name_format"
         ),
-        CheckConstraint("meta_db >= 1", name="meta_db_positive"),
         CheckConstraint(_in("state", *VOLUME_STATES), name="state"),
         CheckConstraint("block_size_kb > 0", name="block_size_positive"),
         CheckConstraint("trash_days BETWEEN 0 AND 365", name="trash_days_range"),
@@ -638,7 +600,15 @@ class Volume(Base):
         UniqueConstraint(
             "organization_id", "volume_name", name="uq_volumes_organization_id_volume_name"
         ),
-        UniqueConstraint("organization_id", "meta_db", name="uq_volumes_organization_id_meta_db"),
+        # One bucket per disk, across organizations (DECISIONS #23); a failed creation
+        # releases it, a deleted disk keeps it (its objects are there).
+        Index(
+            "uq_volumes_s3_endpoint_s3_bucket",
+            "s3_endpoint",
+            "s3_bucket",
+            unique=True,
+            postgresql_where=text("state <> 'failed'"),
+        ),
     )
 
     id: Mapped[UUID] = _id()
@@ -650,9 +620,7 @@ class Volume(Base):
     s3_endpoint: Mapped[str] = mapped_column(Text)
     s3_region: Mapped[str] = mapped_column(Text)
     s3_bucket: Mapped[str] = mapped_column(Text)
-    meta_db: Mapped[int] = mapped_column(Integer)
     juicefs_uuid: Mapped[UUID | None] = mapped_column(PgUUID(as_uuid=True))
-    s3_key_id: Mapped[UUID | None] = mapped_column(PgUUID(as_uuid=True))
     state: Mapped[str] = mapped_column(Text, server_default=text("'creating'"))
     block_size_kb: Mapped[int] = mapped_column(Integer, server_default=text("1024"))
     trash_days: Mapped[int] = mapped_column(Integer, server_default=text("7"))
@@ -667,10 +635,14 @@ class Volume(Base):
 
 
 class VolumeStatus(Base):
-    """What the control plane last measured of a disk. One row per volume, overwritten."""
+    """What the control plane last measured of a disk's instance and bucket, overwritten."""
 
     __tablename__ = "volume_status"
-    __table_args__ = (_tenant_fk(["volume_id"], "volumes"),)
+    __table_args__ = (
+        _tenant_fk(["volume_id"], "volumes"),
+        CheckConstraint(_in("storage_state", *PROBE_STATES), name="storage_state"),
+        CheckConstraint(_in("bucket_versioning", *VERSIONING_STATES), name="bucket_versioning"),
+    )
 
     volume_id: Mapped[UUID] = mapped_column(PgUUID(as_uuid=True), primary_key=True)
     organization_id: Mapped[UUID] = mapped_column(
@@ -678,40 +650,170 @@ class VolumeStatus(Base):
     )
     reachable: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
     checked_at: Mapped[datetime | None] = _ts(nullable=True)
+    meta_latency_ms: Mapped[int | None] = mapped_column(Integer)
     used_bytes: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
     file_count: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
     trash_bytes: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
     last_write_at: Mapped[datetime | None] = _ts(nullable=True)
+    storage_state: Mapped[str] = mapped_column(Text, server_default=text("'unknown'"))
+    storage_probed_at: Mapped[datetime | None] = _ts(nullable=True)
+    bucket_versioning: Mapped[str] = mapped_column(Text, server_default=text("'unknown'"))
+    bucket_old_versions_days: Mapped[int | None] = mapped_column(Integer)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=NOW, onupdate=func.now()
+    )
+
+
+class MetaInstance(Base):
+    """A disk's own Valkey instance, created by the meta service (DECISIONS #23, #25)."""
+
+    __tablename__ = "meta_instances"
+    __table_args__ = (
+        _tenant_unique("meta_instances"),
+        _tenant_fk(["volume_id"], "volumes"),
+        CheckConstraint(_in("state", *INSTANCE_STATES), name="state"),
+        CheckConstraint("position('@' in url) = 0", name="url_no_credentials"),
+        CheckConstraint("position('@' in admin_url) = 0", name="admin_url_no_credentials"),
+        CheckConstraint("length(service_ref) BETWEEN 1 AND 200", name="service_ref_length"),
+        CheckConstraint("(state = 'stopped') = (stopped_at IS NOT NULL)", name="stopped_at"),
+        Index(
+            "uq_meta_instances_volume_id_ready",
+            "volume_id",
+            unique=True,
+            postgresql_where=text("state = 'ready'"),
+        ),
+        # A replica copies its whole instance: two disks never share one (DECISIONS #2).
+        Index(
+            "uq_meta_instances_url_ready",
+            text("lower(url)"),
+            unique=True,
+            postgresql_where=text("state = 'ready'"),
+        ),
+    )
+
+    id: Mapped[UUID] = _id()
+    organization_id: Mapped[UUID] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("organizations.id")
+    )
+    volume_id: Mapped[UUID] = mapped_column(PgUUID(as_uuid=True))
+    service_ref: Mapped[str] = mapped_column(Text)
+    url: Mapped[str] = mapped_column(Text)
+    admin_url: Mapped[str | None] = mapped_column(Text)
+    admin_username: Mapped[str | None] = mapped_column(Text)
+    admin_password_enc: Mapped[bytes | None] = mapped_column(LargeBinary)
+    state: Mapped[str] = mapped_column(Text, server_default=text("'ready'"))
+    created_at: Mapped[datetime] = _ts(default=True)
+    stopped_at: Mapped[datetime | None] = _ts(nullable=True)
+
+
+class DiskAccess(Base):
+    """What a person may do on a disk: none, read or write. A missing row is none."""
+
+    __tablename__ = "disk_access"
+    __table_args__ = (
+        _tenant_unique("disk_access"),
+        _tenant_fk(["volume_id"], "volumes"),
+        _tenant_fk(["membership_id"], "memberships"),
+        CheckConstraint(_in("access", *ACCESS_LEVELS), name="access"),
+        UniqueConstraint(
+            "volume_id", "membership_id", name="uq_disk_access_volume_id_membership_id"
+        ),
+        Index("ix_disk_access_organization_id_membership_id", "organization_id", "membership_id"),
+    )
+
+    id: Mapped[UUID] = _id()
+    organization_id: Mapped[UUID] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("organizations.id")
+    )
+    volume_id: Mapped[UUID] = mapped_column(PgUUID(as_uuid=True))
+    membership_id: Mapped[UUID] = mapped_column(PgUUID(as_uuid=True))
+    access: Mapped[str] = mapped_column(Text)
+    set_by_user_id: Mapped[UUID | None] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("users.id")
+    )
+    created_at: Mapped[datetime] = _ts(default=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=NOW, onupdate=func.now()
+    )
+
+
+class MetaUser(Base):
+    """A device's Valkey user on one disk's instance: the ACL it must have, and if applied."""
+
+    __tablename__ = "meta_users"
+    __table_args__ = (
+        _tenant_fk(["device_id"], "devices"),
+        _tenant_fk(["volume_id"], "volumes"),
+        CheckConstraint(_in("access", *ACCESS_LEVELS), name="access"),
+        Index(
+            "ix_meta_users_organization_id_owed",
+            "organization_id",
+            postgresql_where=text("applied_at IS NULL"),
+        ),
+    )
+
+    device_id: Mapped[UUID] = mapped_column(PgUUID(as_uuid=True), primary_key=True)
+    volume_id: Mapped[UUID] = mapped_column(PgUUID(as_uuid=True), primary_key=True)
+    organization_id: Mapped[UUID] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("organizations.id")
+    )
+    access: Mapped[str] = mapped_column(Text)
+    applied_at: Mapped[datetime | None] = _ts(nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=NOW, onupdate=func.now()
+    )
+
+
+class S3KeyGrant(Base):
+    """Managed: what a device's key may do on a disk's bucket, and whether the provider has it."""
+
+    __tablename__ = "s3_key_grants"
+    __table_args__ = (
+        _tenant_fk(["key_id"], "s3_keys"),
+        _tenant_fk(["volume_id"], "volumes"),
+        CheckConstraint(_in("access", *ACCESS_LEVELS), name="access"),
+        Index(
+            "ix_s3_key_grants_organization_id_owed",
+            "organization_id",
+            postgresql_where=text("applied_at IS NULL"),
+        ),
+    )
+
+    key_id: Mapped[UUID] = mapped_column(PgUUID(as_uuid=True), primary_key=True)
+    volume_id: Mapped[UUID] = mapped_column(PgUUID(as_uuid=True), primary_key=True)
+    organization_id: Mapped[UUID] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("organizations.id")
+    )
+    access: Mapped[str] = mapped_column(Text)
+    applied_at: Mapped[datetime | None] = _ts(nullable=True)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=NOW, onupdate=func.now()
     )
 
 
 class KeyRotation(Base):
-    """A key rotation; the row is also the worker's job."""
+    """A rotation of one disk's key (manual); the row is also the worker's job."""
 
     __tablename__ = "key_rotations"
     __table_args__ = (
         _tenant_unique("key_rotations"),
+        _tenant_fk(["volume_id"], "volumes"),
         _tenant_fk(["old_key_id"], "s3_keys", name="fk_key_rotations_old_key_id_s3_keys"),
         _tenant_fk(["new_key_id"], "s3_keys", name="fk_key_rotations_new_key_id_s3_keys"),
         CheckConstraint("old_key_id <> new_key_id", name="keys_differ"),
         CheckConstraint(_in("state", *ROTATION_STATES), name="state"),
         CheckConstraint(_in("probe_state", *STEP_STATES), name="probe_state"),
-        CheckConstraint("macs_total >= 0", name="macs_total_positive"),
-        CheckConstraint(_in("trigger", *ROTATION_TRIGGERS), name="trigger"),
-        CheckConstraint(
-            "(trigger = 'admin') = (started_by_user_id IS NOT NULL)", name="trigger_started_by"
-        ),
+        CheckConstraint(_in("config_state", *STEP_STATES), name="config_state"),
+        CheckConstraint("devices_total >= 0", name="devices_total_positive"),
         Index(
-            "uq_key_rotations_organization_id_applying",
-            "organization_id",
+            "uq_key_rotations_volume_id_applying",
+            "volume_id",
             unique=True,
             postgresql_where=text("state = 'applying'"),
         ),
         Index(
-            "uq_key_rotations_organization_id_awaiting",
-            "organization_id",
+            "uq_key_rotations_volume_id_awaiting",
+            "volume_id",
             unique=True,
             postgresql_where=text("state = 'awaiting_old_key_deletion'"),
         ),
@@ -721,17 +823,17 @@ class KeyRotation(Base):
     organization_id: Mapped[UUID] = mapped_column(
         PgUUID(as_uuid=True), ForeignKey("organizations.id")
     )
+    volume_id: Mapped[UUID] = mapped_column(PgUUID(as_uuid=True))
     old_key_id: Mapped[UUID] = mapped_column(PgUUID(as_uuid=True))
     new_key_id: Mapped[UUID] = mapped_column(PgUUID(as_uuid=True))
     state: Mapped[str] = mapped_column(Text, server_default=text("'applying'"))
     probe_state: Mapped[str] = mapped_column(Text, server_default=text("'pending'"))
     probe_error_code: Mapped[str | None] = mapped_column(Text)
     probe_error_request: Mapped[str | None] = mapped_column(Text)
-    macs_total: Mapped[int] = mapped_column(Integer)
-    started_by_user_id: Mapped[UUID | None] = mapped_column(
-        PgUUID(as_uuid=True), ForeignKey("users.id")
-    )
-    trigger: Mapped[str] = mapped_column(Text, server_default=text("'admin'"))
+    config_state: Mapped[str] = mapped_column(Text, server_default=text("'pending'"))
+    config_error: Mapped[str | None] = mapped_column(Text)
+    devices_total: Mapped[int] = mapped_column(Integer)
+    started_by_user_id: Mapped[UUID] = mapped_column(PgUUID(as_uuid=True), ForeignKey("users.id"))
     started_at: Mapped[datetime] = _ts(default=True)
     applied_at: Mapped[datetime | None] = _ts(nullable=True)
     failed_at: Mapped[datetime | None] = _ts(nullable=True)
@@ -742,47 +844,29 @@ class KeyRotation(Base):
     )
 
 
-class KeyRotationVolume(Base):
-    """One step of a rotation: `juicefs config` on one disk."""
-
-    __tablename__ = "key_rotation_volumes"
-    __table_args__ = (
-        _tenant_fk(["rotation_id"], "key_rotations"),
-        _tenant_fk(["volume_id"], "volumes"),
-        CheckConstraint(_in("state", *STEP_STATES), name="state"),
-    )
-
-    rotation_id: Mapped[UUID] = mapped_column(PgUUID(as_uuid=True), primary_key=True)
-    volume_id: Mapped[UUID] = mapped_column(PgUUID(as_uuid=True), primary_key=True)
-    organization_id: Mapped[UUID] = mapped_column(
-        PgUUID(as_uuid=True), ForeignKey("organizations.id")
-    )
-    state: Mapped[str] = mapped_column(Text, server_default=text("'pending'"))
-    error: Mapped[str | None] = mapped_column(Text)
-    started_at: Mapped[datetime | None] = _ts(nullable=True)
-    finished_at: Mapped[datetime | None] = _ts(nullable=True)
-
-
 class KeyExposure(Base):
-    """Why the key window is open: someone who could read the key no longer has access."""
+    """Why a disk's key window is open: someone who could read its key lost access to it."""
 
     __tablename__ = "key_exposures"
     __table_args__ = (
         _tenant_unique("key_exposures"),
+        _tenant_fk(["volume_id"], "volumes"),
         _tenant_fk(["membership_id"], "memberships"),
         _tenant_fk(["device_id"], "devices"),
         _tenant_fk(["closed_by_rotation_id"], "key_rotations"),
         CheckConstraint(_in("kind", *EXPOSURE_KINDS), name="kind"),
         CheckConstraint(
-            "(kind = 'person_removed') = (membership_id IS NOT NULL)", name="person_removed"
+            "(kind IN ('person_removed', 'access_removed')) = (membership_id IS NOT NULL)",
+            name="membership_kind",
         ),
         CheckConstraint(
             "(kind = 'device_revoked') = (device_id IS NOT NULL)", name="device_revoked"
         ),
         CheckConstraint("(closed_at IS NULL) = (closed_by_rotation_id IS NULL)", name="closed"),
         Index(
-            "ix_key_exposures_organization_id_open",
+            "ix_key_exposures_organization_id_volume_id_open",
             "organization_id",
+            "volume_id",
             postgresql_where=text("closed_at IS NULL"),
         ),
     )
@@ -791,6 +875,7 @@ class KeyExposure(Base):
     organization_id: Mapped[UUID] = mapped_column(
         PgUUID(as_uuid=True), ForeignKey("organizations.id")
     )
+    volume_id: Mapped[UUID] = mapped_column(PgUUID(as_uuid=True))
     kind: Mapped[str] = mapped_column(Text)
     membership_id: Mapped[UUID | None] = mapped_column(PgUUID(as_uuid=True))
     device_id: Mapped[UUID | None] = mapped_column(PgUUID(as_uuid=True))
@@ -847,7 +932,7 @@ class AuditEvent(Base):
 async def lock_organization(session: AsyncSession, organization_id: UUID) -> None:
     """
     Takes the organization's row lock for organization-level invariants: the last admin,
-    one rotation at a time, allocating a disk's Valkey database.
+    a disk's name, one rotation applying per disk.
     """
     await session.execute(
         select(Organization.id).where(Organization.id == organization_id).with_for_update()
@@ -856,8 +941,8 @@ async def lock_organization(session: AsyncSession, organization_id: UUID) -> Non
 
 async def advisory_lock(db: AsyncSession, job: str, organization_id: UUID, *, wait: bool) -> bool:
     """
-    A transaction-level advisory lock for one job on one organization (the ACL reconciler and
-    Mac registration share `acl`). With `wait=False`, returns whether it was taken.
+    A transaction-level advisory lock for one job on one organization (the reconciler of
+    instance users and grants takes `acl`). With `wait=False`, returns whether it was taken.
     """
     key = func.hashtextextended(f"{job}:{organization_id}", 0)
     if wait:
