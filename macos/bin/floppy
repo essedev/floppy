@@ -336,7 +336,64 @@ cmd_stop() {
   return 0
 }
 
+json_str() {
+  if [ -z "$1" ]; then printf 'null'; return 0; fi
+  printf '"%s"' "$(printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g')"
+}
+json_int() {
+  case "$1" in
+    ""|*[!0-9]*) printf 'null' ;;
+    *) printf '%s' "$1" ;;
+  esac
+}
+
+# The same facts as `floppy status`, as one JSON object on stdout for the menu
+# bar app. A value the command cannot know is null. It only reads: it never
+# starts, mounts or repairs anything, and it works with no install at all.
+cmd_status_json() {
+  local configured=false installed=false stopped=false st vm out="" mp
+  local responding=null drive="" used="" limit="" reserve=""
+  [ -f "$FLOPPY_HOME/config.env" ] && configured=true
+  [ -f "$INSTALLED_MARK" ] && installed=true
+  [ -f "$STOPPED_FLAG" ] && stopped=true
+  st=$(vm_status)
+  case "$st" in
+    "") vm=missing ;;
+    Running) vm=running ;;
+    Stopped) vm=stopped ;;
+    *) vm=other ;;
+  esac
+  if [ "$vm" = running ]; then
+    # One call into the VM for its health, the drive service and the cache:
+    # each call is a round trip through limactl.
+    # shellcheck disable=SC2016 # $CACHE_SIZE_MB expands inside the VM
+    if out=$(in_vm sudo sh -c '
+        du -sm /var/cache/floppy 2>/dev/null | cut -f1
+        if [ -f /etc/floppy/config.env ]; then . /etc/floppy/config.env; fi
+        echo "${CACHE_SIZE_MB:-}"
+        systemctl is-active floppy-mount 2>/dev/null || true' 2>/dev/null); then
+      used=$(printf '%s\n' "$out" | sed -n 1p)
+      limit=$(printf '%s\n' "$out" | sed -n 2p)
+      drive=$(printf '%s\n' "$out" | sed -n 3p)
+    else
+      vm=broken
+    fi
+  fi
+  mp=$(mount_point)
+  if [ -n "$mp" ]; then
+    if mount_alive; then responding=true; else responding=false; fi
+  fi
+  if [ "$configured" = true ]; then reserve=$(reserve_mb); fi
+  printf '{"version":1,"configured":%s,"installed":%s,"stopped":%s,"vm":"%s",' \
+    "$configured" "$installed" "$stopped" "$vm"
+  printf '"mount_point":%s,"responding":%s,"drive":%s,' \
+    "$(json_str "$mp")" "$responding" "$(json_str "$drive")"
+  printf '"cache_used_mb":%s,"cache_limit_mb":%s,"mac_free_mb":%s,"reserve_mb":%s}\n' \
+    "$(json_int "$used")" "$(json_int "$limit")" "$(json_int "$(mac_free_mb)")" "$(json_int "$reserve")"
+}
+
 cmd_status() {
+  if [ "${1:-}" = --json ]; then cmd_status_json; return 0; fi
   local st
   st=$(vm_status)
   if [ "$st" = Running ] && ! vm_healthy; then st="Running but not responding (VM error, see $LIMA_LOG)"; fi
@@ -394,5 +451,5 @@ cmd_uninstall() {
 
 case "${1:-}" in
   setup|start|tick|stop|status|warmup|free|uninstall) cmd="$1"; shift; "cmd_$cmd" "$@" ;;
-  *) log "usage: floppy setup|start|stop|status|warmup <path>|free <path>|uninstall"; exit 2 ;;
+  *) log "usage: floppy setup|start|stop|status [--json]|warmup <path>|free <path>|uninstall"; exit 2 ;;
 esac
