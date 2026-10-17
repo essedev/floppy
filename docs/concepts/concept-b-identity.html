@@ -21,7 +21,7 @@
   X  oggi: lo stile di Portsage, valori copiati da concept-a-panel.html.
   D  Drive: Fluix è un oggetto, il frontale di un lettore. Plastica color stucco, la fessura che
      si riempie con la cache, un LED che è lo stato. Arancione solo per l'attività.
-  E  Floppy: il dischetto, giocoso. Ogni progetto è un dischetto colorato, l'etichetta parla,
+  E  Diskette: il dischetto, giocoso. Ogni progetto è un dischetto colorato, l'etichetta parla,
      lo sportellino scorre quando scarica.
   F  Studio: un'unità rack da studio. Grafite e alluminio, display ambra, tre LED: rete,
      attività, errore. Il logo è una F fatta dalla fessura.
@@ -95,7 +95,7 @@ body[data-base="d"] {
 body[data-base="e"] {
   --page: #f1ede3; --surface: #fffdf8; --raised: #ffffff; --sunken: #f4f0e6; --line: #e8e2d4; --ink: #16181d; --ink-2: #5d6270; --ink-3: #6f7583;
   --brand: #2d5bd7; --on-brand: #ffffff; --good: #1d9a5c; --bad: #e0412c; --track: #ece6d9; --idle: #cfc8b8;
-  --fl-blue: #2d5bd7; --fl-yellow: #f2bf26; --fl-red: #e8412c; --fl-black: #23252b; --fl-green: #1fa463; --shutter: #cfd4dc; --label: #ffffff;
+  --dk-blue: #2d5bd7; --dk-yellow: #f2bf26; --dk-red: #e8412c; --dk-black: #23252b; --dk-green: #1fa463; --shutter: #cfd4dc; --label: #ffffff;
   --led-ok: #1fa463; --led-dl: #2d5bd7; --led-err: #e8412c; --led-idle: #cfc8b8;
   --f-ui: "Instrument Sans", var(--sans); --f-head: "Bricolage Grotesque", var(--sans); --f-ro: "Martian Mono", var(--mono);
   --wall: radial-gradient(60% 60% at 20% 15%, #ffd86b 0, transparent 60%), radial-gradient(60% 70% at 85% 85%, #8fb0ff 0, transparent 60%), linear-gradient(160deg, #f6e9c9, #dfe6f6);
@@ -103,7 +103,7 @@ body[data-base="e"] {
 :root[data-theme="dark"] body[data-base="e"] {
   --page: #0f1116; --surface: #181b22; --raised: #1f232c; --sunken: #13151b; --line: #282d38; --ink: #f1f2f5; --ink-2: #a5aab7; --ink-3: #8a90a0;
   --brand: #5b84f0; --good: #39c47e; --bad: #ff6a55; --track: #252a35; --idle: #3a404d;
-  --fl-blue: #4a76ee; --fl-yellow: #f2c230; --fl-red: #f0553f; --fl-black: #0b0c0f; --fl-green: #2dbb75; --shutter: #9aa2b1; --label: #eef0f4;
+  --dk-blue: #4a76ee; --dk-yellow: #f2c230; --dk-red: #f0553f; --dk-black: #0b0c0f; --dk-green: #2dbb75; --shutter: #9aa2b1; --label: #eef0f4;
   --led-ok: #39c47e; --led-dl: #5b84f0; --led-err: #ff6a55; --led-idle: #3a404d;
   --wall: radial-gradient(60% 60% at 20% 15%, #3b2f7a 0, transparent 60%), radial-gradient(60% 70% at 85% 85%, #123a5c 0, transparent 60%), linear-gradient(160deg, #0f1222, #08090d);
 }
@@ -232,7 +232,7 @@ body[data-base="d"] .dot.full { background: var(--led-ok); box-shadow: 0 0 6px v
 body[data-base="d"] .dot.part { background: conic-gradient(var(--ink-2) var(--p), transparent 0); }
 body[data-base="d"] .dot.dl { background: var(--led-dl); box-shadow: 0 0 6px var(--led-dl); }
 
-/* E, Floppy */
+/* E, Diskette */
 body[data-base="e"] .pop { border-radius: 24px; box-shadow: 0 0 0 0.5px rgba(20, 30, 60, 0.14), 0 30px 60px -22px rgba(30, 50, 110, 0.4); }
 :root[data-theme="dark"] body[data-base="e"] .pop { box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.8), 0 30px 60px -22px rgba(0, 0, 0, 0.8); }
 body[data-base="e"] .status { padding: 20px 20px 18px; }
@@ -414,9 +414,9 @@ body[data-base="f"] .mini { border: 1px solid var(--line); border-radius: 8px; }
         <h1>From one disk per Mac to one disk per team</h1>
         <p class="lead">One shared disk per team with the metadata in PostgreSQL, personal access through a login, and a menu bar app that installs and drives everything.</p>
         <div class="tiles">
-          <div class="tile" style="--c:var(--fl-green)"><div class="v">3<small>ms</small></div><div class="k">Seek in cache</div></div>
-          <div class="tile" style="--c:var(--fl-yellow)"><div class="v">0.9<small>s</small></div><div class="k">Seek on a clip never opened</div></div>
-          <div class="tile" style="--c:var(--fl-blue)"><div class="v">12.1<small>MB/s</small></div><div class="k">Cold playback, 7.5 needed</div></div>
+          <div class="tile" style="--c:var(--dk-green)"><div class="v">3<small>ms</small></div><div class="k">Seek in cache</div></div>
+          <div class="tile" style="--c:var(--dk-yellow)"><div class="v">0.9<small>s</small></div><div class="k">Seek on a clip never opened</div></div>
+          <div class="tile" style="--c:var(--dk-blue)"><div class="v">12.1<small>MB/s</small></div><div class="k">Cold playback, 7.5 needed</div></div>
         </div>
         <div class="mini">
           <svg viewBox="0 0 640 164" role="img" aria-label="Mac, control plane, S3 and PostgreSQL">
@@ -446,23 +446,23 @@ body[data-base="f"] .mini { border: 1px solid var(--line); border-radius: 8px; }
 const DESC = {
   x: "oggi: lo stile di Portsage, il termine di paragone",
   d: "Drive: un oggetto, il frontale di un lettore; il LED è lo stato, la fessura si riempie con la cache",
-  e: "Floppy: il dischetto, giocoso; ogni progetto ha il suo colore, l'etichetta parla",
+  e: "Diskette: il dischetto, giocoso; ogni progetto ha il suo colore, l'etichetta parla",
   f: "Studio: un'unità rack; display ambra, tre LED, la F fatta dalla fessura"
 };
 const NOTES = {
   x: "Font di sistema, ambra di Portsage, titoli di sezione in monospace, card su sfondo grigio.",
   d: "Schibsted Grotesk per tutto il testo, Departure Mono per le letture da display. Stucco e grafite, separazioni fatte col tono invece che con le linee. Il LED ha quattro stati: verde collegato, arancione lampeggiante durante un download, rosso non raggiungibile, spento. L'arancione compare solo quando qualcosa si muove.",
-  e: "Bricolage Grotesque nei titoli, Instrument Sans nel testo, Martian Mono nei numeri. Colori dei dischetti degli anni novanta. Lo sportellino del floppy scorre quando scarica. È la più calda e la più facile da ricordare; il rischio è il dischetto letto come \"salva\".",
+  e: "Bricolage Grotesque nei titoli, Instrument Sans nel testo, Martian Mono nei numeri. Colori dei dischetti degli anni novanta. Lo sportellino del dischetto scorre quando scarica. È la più calda e la più facile da ricordare; il rischio è il dischetto letto come \"salva\".",
   f: "Archivo larga per etichette e titoli, JetBrains Mono nel display. Il frontale è un'unità rack con viti, display ambra e tre LED con etichetta. Il pulsante principale è un tasto fisico. La più professionale, la più fredda per chi monta con CapCut."
 };
 
 const LIMIT = 100, OTHER = 3.1, RATE = 14.5;
 const P = [
-  { id: "moretti", name: "Pastificio Moretti - Spot Natale", size: 38.2, avail: 38.2, c: "--fl-red" },
-  { id: "arnaldi", name: "Cantine Arnaldi - Vendemmia", size: 24.6, avail: 6.9, c: "--fl-yellow" },
-  { id: "showreel", name: "Showreel 2026", size: 11.4, avail: 0, c: "--fl-blue" },
-  { id: "lirica", name: "Fondazione Lirica - Backstage", size: 31.5, avail: 0, c: "--fl-black" },
-  { id: "archivio", name: "Archivio 2025", size: 412, avail: 0, c: "--fl-green" }
+  { id: "moretti", name: "Pastificio Moretti - Spot Natale", size: 38.2, avail: 38.2, c: "--dk-red" },
+  { id: "arnaldi", name: "Cantine Arnaldi - Vendemmia", size: 24.6, avail: 6.9, c: "--dk-yellow" },
+  { id: "showreel", name: "Showreel 2026", size: 11.4, avail: 0, c: "--dk-blue" },
+  { id: "lirica", name: "Fondazione Lirica - Backstage", size: 31.5, avail: 0, c: "--dk-black" },
+  { id: "archivio", name: "Archivio 2025", size: 412, avail: 0, c: "--dk-green" }
 ];
 const nf1 = new Intl.NumberFormat("it-IT", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 const nf0 = new Intl.NumberFormat("it-IT", { maximumFractionDigits: 0 });
@@ -490,7 +490,7 @@ function markD(size, ledCls = "led-dl", blink = false) {
   return `<svg width="${size * 1.6}" height="${size}" viewBox="0 0 64 40" aria-hidden="true"><rect x="2" y="3" width="60" height="34" rx="9" fill="var(--ink)"/><rect x="10" y="13" width="34" height="6" rx="3" fill="var(--surface)"/><circle cx="51" cy="27" r="3.6" class="${ledCls}${blink ? " blink" : ""}"/></svg>`;
 }
 function markE(size) {
-  return `<svg width="${size}" height="${size}" viewBox="0 0 40 40" aria-hidden="true"><path d="M5 7a3 3 0 0 1 3-3h22l6 6v23a3 3 0 0 1-3 3H8a3 3 0 0 1-3-3Z" fill="var(--fl-blue)"/><g class="shutter"><rect x="12" y="4" width="15" height="11" rx="1.2" fill="var(--shutter)"/><rect x="21" y="6" width="3.6" height="7" rx="1" fill="var(--fl-blue)"/></g><rect x="9" y="20" width="22" height="13" rx="1.6" fill="var(--label)"/><path d="M12 25h16M12 29h11" stroke="var(--fl-blue)" stroke-width="1.4" stroke-linecap="round" opacity=".55"/></svg>`;
+  return `<svg width="${size}" height="${size}" viewBox="0 0 40 40" aria-hidden="true"><path d="M5 7a3 3 0 0 1 3-3h22l6 6v23a3 3 0 0 1-3 3H8a3 3 0 0 1-3-3Z" fill="var(--dk-blue)"/><g class="shutter"><rect x="12" y="4" width="15" height="11" rx="1.2" fill="var(--shutter)"/><rect x="21" y="6" width="3.6" height="7" rx="1" fill="var(--dk-blue)"/></g><rect x="9" y="20" width="22" height="13" rx="1.6" fill="var(--label)"/><path d="M12 25h16M12 29h11" stroke="var(--dk-blue)" stroke-width="1.4" stroke-linecap="round" opacity=".55"/></svg>`;
 }
 function markF(size, ledCls = "led-dl") {
   return `<svg width="${size}" height="${size}" viewBox="0 0 40 40" aria-hidden="true"><rect x="8" y="5" width="7" height="30" rx="2" fill="currentColor"/><rect x="8" y="5" width="25" height="7" rx="2" fill="currentColor"/><rect x="8" y="18" width="16" height="5.5" rx="2.75" fill="currentColor"/><circle cx="30" cy="20.75" r="3.2" class="${ledCls}"/></svg>`;
@@ -623,7 +623,7 @@ function panel(v) {
   const face = v === "d" ? faceD() : v === "f" ? faceF() : "";
 
   const u = used();
-  const shades = v === "e" ? ["var(--fl-red)", "var(--fl-yellow)"] : v === "f" ? ["var(--ink-2)", "var(--brand)"] : v === "d" ? ["var(--ink)", "var(--ink-2)"] : ["#d4a044", "color-mix(in srgb, #d4a044 62%, var(--surface))"];
+  const shades = v === "e" ? ["var(--dk-red)", "var(--dk-yellow)"] : v === "f" ? ["var(--ink-2)", "var(--brand)"] : v === "d" ? ["var(--ink)", "var(--ink-2)"] : ["#d4a044", "color-mix(in srgb, #d4a044 62%, var(--surface))"];
   const parts = P.filter((p) => p.avail > 0).map((p, i) => ({ n: p.name, g: p.avail, c: shades[i] }));
   parts.push({ n: "Altri file aperti di recente", g: OTHER, c: "var(--idle)" });
   const free = Math.max(0, LIMIT - u);

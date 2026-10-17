@@ -56,7 +56,7 @@ A Valkey replica copies its whole instance, so the hosted service gives each org
 ## 11. Identity: the drive, Grafite faceplate with the Essenziale icons
 
 **Active, 17/10/2026.** The mark is a drive's slot and LED on one axis; the faceplate is a dark device in both themes; the LED is the state (green connected, orange blinking activity, red unreachable, off). Details come from the object: an LED in its bezel, Departure Mono readouts, the slot as list marker. Concepts: [concept-b-identity](concepts/concept-b-identity.html), [concept-c-app](concepts/concept-c-app.html).
-**Ruled out:** Portsage's look, the Floppy and Studio directions, generic UI-kit details (pills, glowing dots, colored side stripes).
+**Ruled out:** Portsage's look, the Diskette and Studio directions, generic UI-kit details (pills, glowing dots, colored side stripes).
 
 ## 12. App and onboarding behavior
 
@@ -68,7 +68,8 @@ A Valkey replica copies its whole instance, so the hosted service gives each org
 **Active, 17/10/2026.** The public site is static content: presentation, docs for installers and self-hosters, changelog, download; Starlight gives docs, search and English and Italian. The application part is the control plane's web.
 **Ruled out:** Next.js (an application framework for a content site).
 
-## 14. Rename the product
+## 14. The product is called Floppy
 
-**Proposed, 17/10/2026.** "Fluix" collides with Fluix Limited (fluix.io, document workflow software, US filing 97697627 in class 9). The name ends up in `/Volumes/<Name>`, which CapCut projects reference, so it must change before the pilot. Candidates are being checked against domains and trademarks. Criteria: an English-sounding name for an international product (no Italian words), no negative meaning in Italian, registrable in classes 9 and 42, at least `.app` or `.io` free, no Minecraft terms (Mojang/Microsoft) even if the "chest you open anywhere" idea stays.
-**Ruled out:** keeping the name for a commercial product.
+**Active, 17/10/2026.** The product is renamed from "Fluix" to "Floppy": the disk, `/Volumes/Floppy`, the `floppy` command, the VM, the services and the data folder. "Fluix" collided with Fluix Limited (fluix.io, document workflow software, US filing 97697627 in class 9), and the name ends up in `/Volumes/<Name>`, which CapCut projects reference, so it had to change before the pilot. Checked for "Floppy": no active product with that name in storage, sync or video; the only relevant US mark, FLOPPY by Hyperfoo, Inc. (Reg. 5310681, registered 17/10/2017, data software), is dead, cancelled under Section 8. EUIPO and UIBM are still to check.
+Criteria that emerged while choosing: a real word of one or two syllables, read the same in Italian and English; taken from the object the identity draws, a drive (DECISIONS #11); no suffixes like -ly, -bay, -box, -ix, -ite; a conflict counts only in software, storage or video. Domains are not a requirement and are set aside for now: floppy.com is held by Arrow, floppy.app and getfloppy.com are for sale.
+**Ruled out:** keeping "Fluix" for a commercial product; coined names with a suffix; requiring a free domain to pick the name.
