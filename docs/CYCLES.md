@@ -2,6 +2,18 @@
 
 Log of the work done, most recent first. Plans are in [ROADMAP.md](ROADMAP.md), the reasons behind the choices in [ARCHITECTURE.md](ARCHITECTURE.md).
 
+## 9. The team product takes shape (17/10/2026)
+
+- **Shared design system** (`design/tokens.css`, `design/mark/`): the tokens, detail set A and the final marks for every surface; colour lives only in the LED, the slot included.
+- **Mac app** (`app/`, Tauri from the Portsage skeleton): the menu bar icon in five states, the panel with the Grafite faceplate, Settings and first run; it reads the engine through `floppy status --json`. Tested against a fake engine only.
+- **Admin web** (`web/`): every screen of concept E on a typed contract, with a fake API or the real server; "devices" instead of Macs; pages at full width.
+- **Control plane** (`server/`, phases 1 and 2): the schema (DATABASE_SCHEMA.md, DECISIONS #16-#22), sign-in by link, code and invitation, people, devices with one Valkey user each, disks with a real `juicefs format`, key rotation, audit log, rate limits, mail in Italian and English, storage modes with team, per-person and per-device S3 keys and a Garage adapter. 142 tests on real PostgreSQL, Valkey and Garage.
+- **JuiceFS patch 0003**: `config` and `format` take the S3 key from the environment. A volume formatted without a key lets each Mac mount with its own key from the environment, so per-person and per-device keys need no mount patch (verified on Garage).
+- **Site**: a landing for teams sharing big files, with use cases, written for the finished product; header controls drawn from the faceplate; docs pages aligned; Starlight kept for the docs only.
+- **Architecture page**: the target architecture only, a plain-words explanation of blocks and caching, and a section on the JuiceFS patches.
+- **Name**: Floppy (DECISIONS #14); no live FLOPPY mark for software in the EU; Italian marks from the 1990s still to check on UIBM.
+- **In progress**: per-disk permissions (none, read, read-write) with one Valkey instance and one bucket per disk, being verified in the spike before the decisions and the code change.
+
 ## 8. The data path (17/10/2026)
 
 - **Bench and link** (`spike/data-bench.sh`, the `shaped` profile): cold reads inside the Linux box and from the Mac, seeks, scrubbing. JuiceFS's own download limit, used so far to simulate the link, lets a megabyte through and then stalls: a seek took 34 ms alone and 390 ms right after another. The link is now a token bucket on Toxiproxy.
