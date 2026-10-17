@@ -17,6 +17,7 @@ spike/juicefs-replica/test.sh  # the patches' Go tests
 JUICEFS_SOURCE=replica docker compose -f spike/docker-compose.yml --profile replica build drive drive-b
 spike/acceptance.py [--baseline] [t01 ...]   # two clients, central Valkey + replicas, 17 checks
 SMB_FORCE_USER=drive spike/perdisk.py [t14 ...]   # per-disk permissions: one Valkey and one bucket per disk, 52 checks
+spike/metatls.py               # disks' Valkey behind Traefik, one TLS port routed by name (profile metatls), 14 checks
 ```
 
 ## Gotchas
