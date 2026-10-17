@@ -38,7 +38,7 @@ async def test_link_signs_in_and_sets_an_httponly_cookie(
         "name": "Studio studio-a",
         "diskCount": 0,
         "peopleCount": 1,
-        "macCount": 0,
+        "deviceCount": 0,
     }
     assert (await client.get("/session")).json() == session
     status = await client.get(f"/auth/sign-in/{body['requestId']}")
@@ -218,7 +218,7 @@ async def test_unauthorized_and_forbidden(
     await invite_and_join(admin, member, ctx, "marco@studio-a.test")
     response = await member.get("/people")
     assert (response.status_code, response.json()["code"]) == (403, "forbidden")
-    assert (await member.get("/macs")).status_code == 200
+    assert (await member.get("/devices")).status_code == 200
 
 
 async def test_invitation_link_activates_and_signs_in(

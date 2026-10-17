@@ -102,6 +102,7 @@ class EnrolledMac:
     token: str
     valkey_user: str
     valkey_password: str | None
+    s3: dict[str, str] | None = None
 
     @property
     def auth(self) -> dict[str, str]:
@@ -158,4 +159,5 @@ async def enrol_mac(
         token=token,
         valkey_user=reg["valkeyUsername"],
         valkey_password=reg["valkeyPassword"],
+        s3=reg["s3"],
     )

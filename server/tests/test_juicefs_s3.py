@@ -56,7 +56,14 @@ def image() -> str:
 
 def formatter(image: str) -> JuiceFSFormatter:
     # Variables are passed by name only: their values never reach a command line.
-    names = ("ACCESS_KEY", "SECRET_KEY", "META_PASSWORD", "AWS_REGION")
+    names = (
+        "ACCESS_KEY",
+        "SECRET_KEY",
+        "AWS_ACCESS_KEY_ID",
+        "AWS_SECRET_ACCESS_KEY",
+        "META_PASSWORD",
+        "AWS_REGION",
+    )
     env_flags = [flag for name in names for flag in ("-e", name)]
     prefix = ["docker", "run", "--rm", "-i", "--network", NETWORK, *env_flags]
     return JuiceFSFormatter([*prefix, "--entrypoint", "juicefs", image], timeout_seconds=90)
@@ -111,12 +118,27 @@ async def test_format_and_trash_days_on_garage(image: str, volume_db: aioredis.R
     assert (await setting(volume_db))["TrashDays"] == 3
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="juicefs config changes only flags given in argv; the key must come from the "
-    "environment (patch pending in spike/juicefs-replica)",
-)
+async def test_a_format_without_a_key_for_person_and_device_scopes(
+    image: str, volume_db: aioredis.Redis
+) -> None:
+    # The control plane's key reaches JuiceFS as AWS_* and is used, not stored: each Mac
+    # mounts with its own (spike/juicefs-replica/test.sh proves the mounts).
+    name = f"test-{uuid.uuid4().hex[:10]}"
+    own = key("FLOPPY_TEST_S3")
+    jfs = formatter(image)
+    volume_uuid = await jfs.format(
+        location(name), own, block_size_kb=1024, trash_days=7, store_key=False
+    )
+    format_ = await setting(volume_db)
+    assert format_["UUID"] == str(volume_uuid)
+    assert format_.get("AccessKey", "") == ""
+    assert own.secret_key not in json.dumps(format_)
+    await jfs.set_trash_days(location(name), 2)
+    assert (await setting(volume_db))["TrashDays"] == 2
+
+
 async def test_config_puts_a_new_key_in_the_format(image: str, volume_db: aioredis.Redis) -> None:
+    # Needs patch 0003 (spike/juicefs-replica): the key reaches config through the environment.
     name = f"test-{uuid.uuid4().hex[:10]}"
     first, second = key("FLOPPY_TEST_S3"), key("FLOPPY_TEST_S3_SECOND")
     jfs = formatter(image)

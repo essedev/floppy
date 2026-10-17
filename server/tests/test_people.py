@@ -22,7 +22,7 @@ async def test_invite_lists_the_person_as_invited(
     assert person["name"] is None
     assert person["invitedBy"] == "Giulia"
     assert person["inviteExpiresAt"] is not None
-    assert person["macCount"] == 0
+    assert person["deviceCount"] == 0
     assert person["isMe"] is False
     mail = mailer(ctx).last_to("marco@studio-a.test")
     assert "/invito?token=" in mail.text
@@ -127,7 +127,7 @@ async def test_removing_an_invited_person_revokes_the_invitation_and_opens_no_wi
     assert response.status_code == 200
     body = response.json()
     assert body["person"]["status"] == "removed"
-    assert body["revokedMacs"] == 0
+    assert body["revokedDevices"] == 0
     assert body["key"]["window"] is None
     dead = await clients().post("/auth/invitation", json={"token": token})
     assert dead.json()["code"] == "link_invalid"
@@ -161,8 +161,8 @@ async def test_removing_a_person_revokes_macs_sessions_and_opens_the_window(
     response = await admin.delete(f"/people/{person['id']}")
     assert response.status_code == 200
     body = response.json()
-    assert body["revokedMacs"] == 2
-    assert body["person"]["macCount"] == 0
+    assert body["revokedDevices"] == 2
+    assert body["person"]["deviceCount"] == 0
     window = body["key"]["window"]
     assert [r["kind"] for r in window["reasons"]] == ["person_removed"]
     assert window["reasons"][0]["label"] == "Marco"
@@ -195,8 +195,8 @@ async def test_removing_a_person_revokes_macs_sessions_and_opens_the_window(
     assert all(cleaned)
     assert sessions == ["membership_removed"]
     assert exposures == ["person_removed"]
-    assert ("person_removed", {"macs": 2}) in logged
-    assert logged.count(("mac_revoked", {"reason": "member_removed"})) == 2
+    assert ("person_removed", {"devices": 2}) in logged
+    assert logged.count(("device_revoked", {"reason": "member_removed"})) == 2
     # Removed people cannot sign in again.
     started = await clients().post("/auth/sign-in", json={"email": "marco@studio-a.test"})
     assert started.status_code == 200

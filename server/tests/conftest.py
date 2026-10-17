@@ -12,6 +12,7 @@ import asyncio
 import os
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
+from typing import Any
 from uuid import UUID
 
 import asyncpg  # type: ignore[import-untyped]
@@ -186,10 +187,15 @@ async def make_org(
     *,
     key: str = "AKIAFIRSTKEY00001",
     valkey_url: str | None = None,
+    **options: Any,
 ) -> Org:
-    """An organization through the real bootstrap."""
+    """
+    An organization through the real bootstrap; `options` reach `BootstrapInput` (mail
+    language, storage mode, provider and key scope). A managed one gets no pasted key.
+    """
     bucket = f"bucket-{slug}"
     valkey = valkey_url or f"redis://valkey-{slug}.test:6379"
+    managed = options.get("storage_mode") == "managed"
     org_id = await bootstrap(
         ctx,
         BootstrapInput(
@@ -199,9 +205,10 @@ async def make_org(
             s3_endpoint="https://s3.test",
             s3_region="eu-south",
             s3_bucket=bucket,
-            s3_access_key_id=key,
-            s3_secret_key="first-secret-key-value-0001",
+            s3_access_key_id="" if managed else key,
+            s3_secret_key="" if managed else "first-secret-key-value-0001",
             valkey_url=valkey,
+            **options,
         ),
     )
     return Org(id=org_id, admin_email=admin_email, bucket=bucket, valkey_url=valkey)

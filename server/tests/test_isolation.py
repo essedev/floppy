@@ -37,7 +37,7 @@ async def test_another_organizations_rows_are_never_reachable(
         await admin_a.patch(f"/people/{person_b['id']}", json={"role": "admin"}),
         await admin_a.delete(f"/people/{person_b['id']}"),
         await admin_a.post(f"/people/{person_b['id']}/resend"),
-        await admin_a.post(f"/macs/{mac_b.id}/revoke"),
+        await admin_a.post(f"/devices/{mac_b.id}/revoke"),
         await admin_a.get(f"/disks/{disk_b['id']}"),
         await admin_a.patch(f"/disks/{disk_b['id']}", json={"trashDays": 1}),
         await admin_a.get(f"/key/rotations/{rotation_b['id']}"),
@@ -51,7 +51,7 @@ async def test_another_organizations_rows_are_never_reachable(
 
     # Lists show only the caller's organization.
     assert {p["email"] for p in (await admin_a.get("/people")).json()} == {a.admin_email}
-    assert (await admin_a.get("/macs")).json() == []
+    assert (await admin_a.get("/devices")).json() == []
     assert (await admin_a.get("/disks")).json() == []
     audit_a = (await admin_a.get("/audit", params={"sinceDays": 90, "limit": 100})).json()["items"]
     assert all(e["target"]["id"] != person_b["id"] for e in audit_a)
@@ -60,7 +60,7 @@ async def test_another_organizations_rows_are_never_reachable(
     assert (key_a["bucket"], key_a["accessKeyTail"], key_a["rotation"]) == (a.bucket, "00001", None)
     assert (await admin_a.get("/settings")).json()["storage"]["bucket"] == a.bucket
     session_a = (await admin_a.get("/session")).json()["organization"]
-    assert (session_a["peopleCount"], session_a["diskCount"], session_a["macCount"]) == (1, 0, 0)
+    assert (session_a["peopleCount"], session_a["diskCount"], session_a["deviceCount"]) == (1, 0, 0)
 
     # A device token works only for its own organization's configuration.
     config = (await clients().get("/device/config", headers=mac_b.auth)).json()
@@ -73,7 +73,7 @@ async def test_another_organizations_rows_are_never_reachable(
         b.admin_email: "admin",
         "bea@b.test": "member",
     }
-    assert [m["state"] for m in (await admin_b.get("/macs")).json()] == ["active"]
+    assert [m["state"] for m in (await admin_b.get("/devices")).json()] == ["active"]
 
 
 async def test_one_address_one_organization(ctx: Context, clients: ClientFactory) -> None:

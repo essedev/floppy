@@ -35,7 +35,7 @@ async def test_enrolment_by_link_registers_a_valkey_user(
     users = fake_valkey(ctx).users[org.valkey_url]
     assert users[mac.valkey_user] == hashlib.sha256(mac.valkey_password.encode()).digest()
 
-    macs = (await admin.get("/macs")).json()
+    macs = (await admin.get("/devices")).json()
     assert len(macs) == 1
     listed = macs[0]
     assert listed["state"] == "active"
@@ -49,6 +49,8 @@ async def test_enrolment_by_link_registers_a_valkey_user(
     config = await app.get("/device/config", headers=mac.auth)
     assert config.json() == {
         "valkeyUrl": org.valkey_url,
+        "keyScope": "team",
+        "s3AccessKeyTail": None,
         "disks": [],
     }
     async with owner_engine.connect() as conn:
@@ -57,7 +59,7 @@ async def test_enrolment_by_link_registers_a_valkey_user(
             await conn.execute(select(AuditEvent.action, AuditEvent.detail).order_by(AuditEvent.id))
         ).all()
     assert stored == (token_hash(mac.token), "active")
-    assert ("mac_registered", {"appVersion": "0.4.0", "macosVersion": "15.5"}) in actions
+    assert ("device_registered", {"appVersion": "0.4.0", "macosVersion": "15.5"}) in actions
     assert ("signed_in", {"via": "link", "kind": "app"}) in actions
 
 
@@ -196,7 +198,7 @@ async def test_registering_while_valkey_is_down_keeps_the_mac_pending(
         "/device/register", json={"appVersion": "0.4.0", "macosVersion": "15.5"}, headers=mac.auth
     )
     assert (response.status_code, response.json()["code"]) == (503, "metadata_unavailable")
-    macs = (await admin.get("/macs")).json()
+    macs = (await admin.get("/devices")).json()
     assert macs[0]["state"] == "pending"
 
 
@@ -219,14 +221,14 @@ async def test_heartbeat_reports_status_and_logs_an_outdated_app_once(
     for _ in range(2):
         response = await app.post("/device/heartbeat", json=beat, headers=mac.auth)
         assert response.json() == {"state": "active"}
-    listed = (await admin.get("/macs")).json()[0]
+    listed = (await admin.get("/devices")).json()[0]
     assert listed["appOutdated"] is True
     assert listed["replica"] == {"mode": "replica", "lagMs": 12}
     async with owner_engine.connect() as conn:
         outdated = (
             (
                 await conn.execute(
-                    select(AuditEvent.detail).where(AuditEvent.action == "mac_seen_outdated")
+                    select(AuditEvent.detail).where(AuditEvent.action == "device_seen_outdated")
                 )
             )
             .scalars()
@@ -246,16 +248,16 @@ async def test_admin_revokes_a_mac_and_the_window_opens(
     await invite_and_join(admin, marco, ctx, "marco@studio-a.test")
     app = clients()
     mac = await enrol_mac(app, marco, ctx, "marco@studio-a.test", name="iMac di Marco")
-    response = await admin.post(f"/macs/{mac.id}/revoke")
+    response = await admin.post(f"/devices/{mac.id}/revoke")
     assert response.status_code == 200
     body = response.json()
-    assert body["mac"]["state"] == "revoked"
-    assert body["mac"]["revokedBy"] == "Giulia"
-    assert body["mac"]["connected"] is False
+    assert body["device"]["state"] == "revoked"
+    assert body["device"]["revokedBy"] == "Giulia"
+    assert body["device"]["connected"] is False
     assert [r["label"] for r in body["key"]["window"]["reasons"]] == ["iMac di Marco"]
     assert mac.valkey_user not in fake_valkey(ctx).users[org.valkey_url]
     assert mac.valkey_user in fake_valkey(ctx).killed
-    again = await admin.post(f"/macs/{mac.id}/revoke")
+    again = await admin.post(f"/devices/{mac.id}/revoke")
     assert (again.status_code, again.json()["code"]) == (409, "invalid_state")
     # A revoked device token no longer configures anything; the heartbeat says why.
     assert (await app.get("/device/config", headers=mac.auth)).status_code == 401
@@ -279,22 +281,22 @@ async def test_members_see_and_revoke_only_their_own_macs(
     await invite_and_join(admin, marco, ctx, "marco@studio-a.test")
     giulia_mac = await enrol_mac(clients(), admin, ctx, org.admin_email)
     marco_mac = await enrol_mac(clients(), marco, ctx, "marco@studio-a.test", name="iMac di Marco")
-    seen = [m["id"] for m in (await marco.get("/macs")).json()]
+    seen = [m["id"] for m in (await marco.get("/devices")).json()]
     assert seen == [marco_mac.id]
-    other = await marco.post(f"/macs/{giulia_mac.id}/revoke")
+    other = await marco.post(f"/devices/{giulia_mac.id}/revoke")
     assert (other.status_code, other.json()["code"]) == (404, "not_found")
-    own = await marco.post(f"/macs/{marco_mac.id}/revoke")
+    own = await marco.post(f"/devices/{marco_mac.id}/revoke")
     assert own.status_code == 200
     assert own.json()["key"] is None
     session = (await marco.get("/session")).json()
-    assert session["organization"]["macCount"] == 0
+    assert session["organization"]["deviceCount"] == 0
     async with owner_engine.connect() as conn:
         reason = (
             await conn.execute(select(Device.revoke_reason).where(Device.state == "revoked"))
         ).scalar_one()
         exposures = (await conn.execute(select(KeyExposure.kind))).scalars().all()
     assert reason == "owner"
-    assert exposures == ["mac_revoked"]
+    assert exposures == ["device_revoked"]
 
 
 async def test_signing_out_from_the_app_opens_no_window(
@@ -316,7 +318,7 @@ async def test_signing_out_from_the_app_opens_no_window(
             (await conn.execute(select(AuditEvent.action).order_by(AuditEvent.id))).scalars().all()
         )
         reason = (await conn.execute(select(Device.revoke_reason))).scalar_one()
-    assert actions[-1] == "mac_signed_out"
+    assert actions[-1] == "device_signed_out"
     assert reason == "signed_out"
 
 
@@ -324,7 +326,7 @@ async def test_revoking_a_pending_mac_opens_no_window(
     org: Org, ctx: Context, admin: httpx.AsyncClient, clients: ClientFactory
 ) -> None:
     mac = await enrol_mac(clients(), admin, ctx, org.admin_email, register=False)
-    response = await admin.post(f"/macs/{mac.id}/revoke")
+    response = await admin.post(f"/devices/{mac.id}/revoke")
     assert response.json()["key"]["window"] is None
 
 
@@ -338,7 +340,7 @@ async def test_revocation_while_valkey_is_down_is_finished_by_the_reconciler(
     mac = await enrol_mac(clients(), admin, ctx, org.admin_email)
     valkey = fake_valkey(ctx)
     valkey.down = True
-    response = await admin.post(f"/macs/{mac.id}/revoke")
+    response = await admin.post(f"/devices/{mac.id}/revoke")
     assert response.status_code == 200
     assert mac.valkey_user in valkey.users[org.valkey_url]
     async with owner_engine.connect() as conn:
@@ -375,7 +377,7 @@ async def test_pending_macs_expire_after_a_day(
     async with owner_engine.begin() as conn:
         await conn.execute(update(Device).values(created_at=utcnow() - timedelta(hours=25)))
     await expire_stale_rows(ctx)
-    listed = (await admin.get("/macs")).json()[0]
+    listed = (await admin.get("/devices")).json()[0]
     assert (listed["id"], listed["state"], listed["revokedBy"]) == (mac.id, "revoked", None)
     async with owner_engine.connect() as conn:
         row = (
@@ -386,7 +388,7 @@ async def test_pending_macs_expire_after_a_day(
         logged = (
             await conn.execute(
                 select(AuditEvent.actor_kind, AuditEvent.detail).where(
-                    AuditEvent.action == "mac_revoked"
+                    AuditEvent.action == "device_revoked"
                 )
             )
         ).one()

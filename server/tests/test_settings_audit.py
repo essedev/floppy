@@ -21,6 +21,10 @@ async def test_settings_round_trip_with_a_write_only_password(
     settings = (await admin.get("/settings")).json()
     assert settings == {
         "organizationName": "Studio studio-a",
+        "mailLanguage": "it",
+        "storageMode": "manual",
+        "storageProvider": None,
+        "storageKeyScope": "team",
         "mail": {"host": "", "port": 0, "username": "", "sender": "", "passwordSet": False},
         "storage": {"endpoint": "https://s3.test", "region": "eu-south", "bucket": org.bucket},
         "storageLocked": False,
@@ -142,7 +146,16 @@ async def test_audit_filters_search_and_pages(
     ).json()
     ids = [e["id"] for e in page["items"] + rest["items"]]
     assert len(ids) == len(set(ids)) == 6  # five invitations and the admin's sign-in
-    assert rest["nextCursor"] is None
+    last = (
+        await admin.get("/audit", params={"sinceDays": 7, "limit": 3, "cursor": rest["nextCursor"]})
+    ).json()
+    assert [e["action"] for e in last["items"]] == ["organization_created"]
+    assert last["items"][0]["actor"] == {
+        "kind": "operator",
+        "id": None,
+        "label": "floppy-server bootstrap",
+    }
+    assert last["nextCursor"] is None
     first = page["items"][0]
     assert first["action"] == "person_invited"
     assert first["actor"] == {"kind": "person", "id": first["actor"]["id"], "label": "Giulia"}
@@ -209,7 +222,7 @@ async def test_no_secret_reaches_an_answer_or_the_audit_log(
     )
     for path in (
         "/people",
-        "/macs",
+        "/devices",
         "/disks",
         "/key",
         f"/key/rotations/{rotation.json()['id']}",

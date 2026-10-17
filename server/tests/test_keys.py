@@ -42,10 +42,15 @@ async def test_key_status_after_bootstrap(org: Org, admin: httpx.AsyncClient) ->
     key = (await admin.get("/key")).json()
     assert key == {
         "bucket": org.bucket,
+        "storageMode": "manual",
+        "storageProvider": None,
+        "keyScope": "team",
         "accessKeyTail": "00001",
         "rotatedAt": None,
         "window": None,
         "rotation": None,
+        "keys": [],
+        "versioning": {"state": "unknown", "oldVersionsDays": None},
     }
 
 
@@ -203,7 +208,7 @@ async def test_the_window_closes_only_for_exposures_before_the_rotation(
 
     rotation = (await admin.post("/key/rotations", json=NEW_KEY)).json()
     # Revoked while the rotation applies: it may already have read the new key.
-    await admin.post(f"/macs/{late_mac.id}/revoke")
+    await admin.post(f"/devices/{late_mac.id}/revoke")
     await run_rotations(ctx)
     closed = (
         await admin.post(f"/key/rotations/{rotation['id']}/close", json={"oldKeyDeleted": True})
@@ -214,7 +219,7 @@ async def test_the_window_closes_only_for_exposures_before_the_rotation(
             await conn.execute(select(KeyExposure.kind, KeyExposure.closed_by_rotation_id))
         ).all()
     assert sorted((k, c is not None) for k, c in rows) == [
-        ("mac_revoked", False),
+        ("device_revoked", False),
         ("person_removed", True),
     ]
 

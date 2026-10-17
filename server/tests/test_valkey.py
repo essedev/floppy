@@ -165,7 +165,7 @@ async def test_enrolment_revocation_and_reconciler_on_real_valkey(
         # DELUSER closed the old connection; the Mac reconnects with the same password.
         probe = mac_client(mac.valkey_user, mac.valkey_password)
         assert await probe.ping()
-        response = await admin.post(f"/macs/{mac.id}/revoke")
+        response = await admin.post(f"/devices/{mac.id}/revoke")
         assert response.status_code == 200
         assert mac.valkey_user not in await ctx.metadata.device_users(target)
         with pytest.raises((RedisConnectionError, AuthenticationError, ResponseError)):
