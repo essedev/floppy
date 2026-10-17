@@ -30,6 +30,8 @@ export interface Backend {
   openInFinder(path?: string): Promise<void>;
   getSetup(): Promise<SetupProgress>;
   runSetup(): Promise<void>;
+  /** Installs or updates the engine from the app, then sets it up. */
+  installEngine(): Promise<void>;
   appInfo(): Promise<AppInfo>;
   openSettings(): Promise<void>;
   openWelcome(): Promise<void>;
@@ -82,6 +84,7 @@ const tauriBackend: Backend = {
   openInFinder: (path) => invoke("open_in_finder", { path: path ?? null }),
   getSetup: () => invoke("get_setup"),
   runSetup: () => invoke("run_setup"),
+  installEngine: () => invoke("install_engine"),
   appInfo: () => invoke("app_info"),
   openSettings: () => invoke("open_settings"),
   openWelcome: () => invoke("open_welcome"),

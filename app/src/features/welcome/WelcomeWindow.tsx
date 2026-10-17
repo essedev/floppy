@@ -1,7 +1,8 @@
 /**
  * The first-run window (concept-d-onboarding, DECISIONS #12): sign-in to the
- * team (the flow in features/account), then the engine: no package,
- * `floppy setup` in three steps, or the disk ready.
+ * team (the flow in features/account), then the engine: installed from the
+ * app's bundle and set up in four steps (or updated, or only set up), or the
+ * disk ready.
  */
 
 import { type ComponentProps, type ReactNode, useState } from "react";
@@ -83,10 +84,15 @@ function SignInStage({ view, computerName, version, onNext }: { view: AuthView; 
 }
 
 function EngineStage({ status, setup, version }: { status: DiskStatus; setup: SetupProgress; version?: string }) {
-  const run = useDiskAction(backend.runSetup);
+  const install = useDiskAction(backend.installEngine);
+  const setupOnly = useDiskAction(backend.runSetup);
   const openFinder = useDiskAction<string | undefined>(backend.openInFinder);
+  // The bundle's install runs setup too; a plain setup is for an engine that
+  // is already this app's but never finished preparing.
+  const installing = status.install !== null || status.job?.kind === "install";
+  const run = installing ? install : setupOnly;
 
-  if (setup.running || (setup.error && !setup.done) || (status.state === "needs_setup" && !setup.done)) {
+  if (setup.running || (setup.error && !setup.done) || (status.state === "needs_setup" && !setup.done) || status.install !== null) {
     if (setup.error && !setup.running) {
       const space = setup.error.kind === "space";
       const free = status.space?.mac_free_mb;
@@ -111,13 +117,24 @@ function EngineStage({ status, setup, version }: { status: DiskStatus; setup: Se
         </>
       );
     }
+    const p = it.welcome.prepare;
+    const update = status.install === "update";
+    // A setup alone starts at the second step: the copy is not part of it.
+    const first = installing ? 0 : 1;
+    const steps = p.steps.slice(first);
     return (
       <>
-        <Face led={setup.running ? "dl" : "off"} blink={setup.running} readout={setup.running ? it.face.starting : it.face.needsSetup} fill={setup.running ? (setup.step + 0.5) / 3 : 0} />
+        <Face
+          led={setup.running ? "dl" : "off"}
+          blink={setup.running}
+          readout={setup.running ? it.face.starting : it.face.needsSetup}
+          fill={setup.running ? (setup.step - first + 0.5) / steps.length : 0}
+        />
         <Body>
-          <Heading title={it.welcome.prepare.title} body={it.welcome.prepare.body} />
+          <Heading title={update ? p.updateTitle : p.title} body={update ? p.updateBody : p.body} />
           <ol className="m-0 flex list-none flex-col rounded-[14px] bg-sunken p-1.5">
-            {it.welcome.prepare.steps.map((label, i) => {
+            {steps.map((label, at) => {
+              const i = at + first;
               const done = setup.step > i;
               const now = setup.running && setup.step === i;
               return (
@@ -135,7 +152,7 @@ function EngineStage({ status, setup, version }: { status: DiskStatus; setup: Se
           </ol>
           {!setup.running && (
             <Button variant="primary" size="lg" className="w-full" disabled={run.isPending} onClick={() => run.mutate()}>
-              {it.welcome.prepare.start}
+              {status.install === "fresh" ? p.install : update ? p.update : p.start}
             </Button>
           )}
           {run.error && <Notice led="err">{it.errors[run.error.code] ?? run.error.message}</Notice>}
@@ -146,13 +163,16 @@ function EngineStage({ status, setup, version }: { status: DiskStatus; setup: Se
   }
 
   if (status.state === "not_installed") {
+    // Installed from the bundle but with no disk configured yet, or a build
+    // without the engine at all.
+    const copy = status.bundled ? it.welcome.notConfigured : it.welcome.missing;
     return (
       <>
         <Face led="off" readout={it.face.notInstalled} />
         <Body>
-          <Heading title={it.welcome.missing.title} body={it.welcome.missing.body} />
+          <Heading title={copy.title} body={copy.body} />
           <Button variant="primary" size="lg" className="w-full" onClick={() => void backend.refresh()}>
-            {it.welcome.missing.check}
+            {copy.check}
           </Button>
           <Foot version={version} />
         </Body>

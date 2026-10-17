@@ -104,6 +104,7 @@ function ActionError({ error }: { error: CommandError | null }) {
 function StatusSection({ status }: { status: DiskStatus }) {
   const seconds = useCountdown(status);
   const start = useDiskAction(backend.start);
+  const install = useDiskAction(backend.installEngine);
   const cancel = useDiskAction(backend.cancel);
   const openFinder = useDiskAction<string | undefined>(backend.openInFinder);
   const freeAll = useDiskAction<string>(backend.free);
@@ -186,7 +187,14 @@ function StatusSection({ status }: { status: DiskStatus }) {
       break;
     case "needs_setup":
     case "not_installed": {
-      const copy = status.state === "needs_setup" ? it.panel.needsSetup : it.panel.notInstalled;
+      const copy =
+        status.state === "needs_setup"
+          ? it.panel.needsSetup
+          : status.install === "fresh"
+            ? it.panel.notInstalled
+            : status.bundled
+              ? it.panel.notConfigured
+              : it.panel.noBundle;
       title = copy.title;
       body = copy.body;
       actions = (
@@ -198,6 +206,18 @@ function StatusSection({ status }: { status: DiskStatus }) {
     }
   }
 
+  // An engine update restarts the disk (`floppy setup`), so it waits for the
+  // user: the app never remounts by itself.
+  if (status.install === "update" && !["not_installed", "needs_setup", "starting", "stopping"].includes(status.state)) {
+    extra.push(
+      <Notice key="update" led="dl" title={it.panel.update.title}>
+        <span className="block">{it.panel.update.body}</span>
+        <Button size="sm" className="mt-2 bg-raised shadow-[0_0_0_0.5px_rgba(0,0,0,0.12)]" disabled={!!status.job || install.isPending} onClick={() => install.mutate()}>
+          {it.panel.update.action}
+        </Button>
+      </Notice>,
+    );
+  }
   if (status.state === "connected" && status.wrong_mount_point && status.mount_point) {
     extra.push(
       <Notice key="mount" led="err" title={it.notices.wrongMount.title(status.mount_point)}>
@@ -243,7 +263,7 @@ function StatusSection({ status }: { status: DiskStatus }) {
     );
   }
 
-  const failure = start.error ?? cancel.error ?? openFinder.error ?? freeAll.error ?? null;
+  const failure = start.error ?? install.error ?? cancel.error ?? openFinder.error ?? freeAll.error ?? null;
   return (
     <section className="flex flex-col gap-4 px-5 pt-5 pb-[22px]">
       <div>

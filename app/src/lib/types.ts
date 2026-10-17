@@ -19,8 +19,8 @@ export type Problem =
   | "not_responding"
   | "engine";
 
-/** What the app has running: one `floppy` command at a time. */
-export type JobKind = "setup" | "start" | "stop" | "warmup" | "free";
+/** What the app has running: one job at a time; `install` runs the bundled install.sh. */
+export type JobKind = "install" | "setup" | "start" | "stop" | "warmup" | "free";
 
 /** Space on this Mac and in the cache, in MB, with the command's reserve. */
 export interface Space {
@@ -59,9 +59,13 @@ export interface DiskStatus {
   next_check_s: number;
   checked_ms: number;
   engine_path: string;
+  /** What this Mac needs from the engine in the app (`installer.rs`), if anything. */
+  install: "fresh" | "update" | null;
+  /** The app carries an engine: a missing command can be installed. */
+  bundled: boolean;
 }
 
-/** Where `floppy setup` is: step 0 virtual disk, 1 start, 2 connect, 3 done. */
+/** Where the install and `floppy setup` are: step 0 copy, 1 virtual disk, 2 start, 3 connect, 4 done. */
 export interface SetupProgress {
   running: boolean;
   step: number;
@@ -127,6 +131,7 @@ export interface CommandError {
     | "not_on_disk"
     | "nothing_to_cancel"
     | "list_timeout"
+    | "no_bundle"
     | "engine"
     | "io"
     | "auth_busy"

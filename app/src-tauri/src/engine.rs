@@ -1,5 +1,5 @@
 //! The engine is the `floppy` command (`macos/bin/floppy`, installed in
-//! `~/.floppy/bin/floppy`). The app never touches the VM, the mount, launchd
+//! `~/.floppy/bin/floppy` from the app's bundle, see `installer`). The app never touches the VM, the mount, launchd
 //! or `nsmb.conf` itself: it runs the command and reads what it answers.
 //!
 //! No Tauri dependency here, so the module is tested against fake commands.
@@ -14,6 +14,8 @@ use std::time::{Duration, Instant};
 
 /// Overrides where the command lives: a fake script in tests and development.
 pub const ENGINE_ENV: &str = "FLOPPY_BIN";
+/// Overrides the engine's home, `~/.floppy`; the command honors it too.
+pub const HOME_ENV: &str = "FLOPPY_HOME";
 /// Where the disk must be mounted: CapCut projects reference media by full path.
 pub const EXPECTED_MOUNT_POINT: &str = "/Volumes/Floppy";
 /// The command's default when `config.env` sets no `RESERVE_MB`.
@@ -25,12 +27,21 @@ pub const STATUS_TIMEOUT: Duration = Duration::from_secs(25);
 /// launchd (which gives this one) or from a terminal (which gives the user's).
 const ENGINE_PATH_VAR: &str = "/usr/bin:/bin:/usr/sbin:/sbin";
 
-/// The `floppy` command to run: `FLOPPY_BIN`, else `~/.floppy/bin/floppy`.
+/// The `floppy` command to run: `FLOPPY_BIN`, else `bin/floppy` in the
+/// engine's home.
 pub fn engine_path() -> PathBuf {
     if let Some(p) = std::env::var_os(ENGINE_ENV).filter(|p| !p.is_empty()) {
         return PathBuf::from(p);
     }
-    home_dir().join(".floppy/bin/floppy")
+    floppy_home().join("bin/floppy")
+}
+
+/// The engine's home: `FLOPPY_HOME`, else `~/.floppy`.
+pub fn floppy_home() -> PathBuf {
+    std::env::var_os(HOME_ENV)
+        .filter(|p| !p.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| home_dir().join(".floppy"))
 }
 
 fn home_dir() -> PathBuf {
@@ -117,7 +128,8 @@ pub struct Finished {
     pub stderr: String,
 }
 
-fn command(bin: &Path, args: &[&str]) -> Command {
+/// A command with the fixed PATH, piped output and its own process group.
+pub fn command(bin: &Path, args: &[&str]) -> Command {
     let mut cmd = Command::new(bin);
     cmd.args(args)
         .env("PATH", ENGINE_PATH_VAR)
@@ -135,9 +147,12 @@ pub fn spawn(bin: &Path, args: &[&str]) -> Result<Child, EngineError> {
     if !is_executable(bin) {
         return Err(EngineError::Missing(bin.display().to_string()));
     }
-    command(bin, args)
-        .spawn()
-        .map_err(|e| EngineError::Spawn(e.to_string()))
+    spawn_command(command(bin, args))
+}
+
+/// Starts a command built with `command`.
+pub fn spawn_command(mut cmd: Command) -> Result<Child, EngineError> {
+    cmd.spawn().map_err(|e| EngineError::Spawn(e.to_string()))
 }
 
 /// Sends `signal` to the whole process group of a command started by `spawn`.
@@ -242,7 +257,7 @@ pub fn follow(
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DiskState {
-    /// No command, or no configuration: today's install comes from the zip.
+    /// No command, or no configuration yet.
     NotInstalled,
     /// Configured but `floppy setup` never completed.
     NeedsSetup,
@@ -270,6 +285,8 @@ pub enum Problem {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum JobKind {
+    /// The bundled engine copied into the engine's home, then `floppy setup`.
+    Install,
     Setup,
     Start,
     Stop,
@@ -283,7 +300,9 @@ pub fn derive(
     job: Option<JobKind>,
 ) -> (DiskState, Option<Problem>) {
     match job {
-        Some(JobKind::Setup | JobKind::Start) => return (DiskState::Starting, None),
+        Some(JobKind::Install | JobKind::Setup | JobKind::Start) => {
+            return (DiskState::Starting, None);
+        }
         Some(JobKind::Stop) => return (DiskState::Stopping, None),
         _ => {}
     }

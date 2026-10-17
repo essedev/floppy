@@ -7,6 +7,7 @@ mod account;
 mod commands;
 mod core;
 mod engine;
+mod installer;
 mod prefs;
 mod text;
 mod tray;
@@ -61,6 +62,20 @@ fn on_account(app: &tauri::AppHandle, event: AccountEvent) {
     }
 }
 
+/// The engine this build carries, installed into the engine's home. None in
+/// development (`tauri dev` bundles nothing) and when `FLOPPY_BIN` points the
+/// app at another command, which an install would not replace.
+fn bundled_engine(app: &tauri::App) -> Option<installer::Installer> {
+    if std::env::var_os(engine::ENGINE_ENV).is_some_and(|p| !p.is_empty()) {
+        return None;
+    }
+    let bundle = installer::Bundle::find(&app.path().resource_dir().ok()?)?;
+    Some(installer::Installer {
+        bundle,
+        home: engine::floppy_home(),
+    })
+}
+
 /// The macOS version as the server accepts it (`^[0-9A-Za-z.+-]+$`).
 fn macos_version() -> String {
     std::process::Command::new("/usr/bin/sw_vers")
@@ -104,6 +119,7 @@ pub fn run() {
             commands::open_in_finder,
             commands::get_setup,
             commands::run_setup,
+            commands::install_engine,
             commands::app_info,
             commands::open_settings,
             commands::open_welcome,
@@ -151,7 +167,7 @@ pub fn run() {
                 .build(app)?;
             let tray = tray::TrayState::new(icon);
 
-            let core = Core::new(engine::engine_path(), move |event| {
+            let core = Core::new(engine::engine_path(), bundled_engine(app), move |event| {
                 on_event(&handle, &tray, event)
             });
             app.manage(Arc::clone(&core));

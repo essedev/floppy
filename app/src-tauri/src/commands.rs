@@ -26,6 +26,7 @@ impl From<CoreError> for CommandError {
             CoreError::NotOnDisk(_) => "not_on_disk",
             CoreError::NothingToCancel => "nothing_to_cancel",
             CoreError::ListTimeout => "list_timeout",
+            CoreError::NoBundle => "no_bundle",
             CoreError::Engine(_) => "engine",
         };
         CommandError {
@@ -129,6 +130,12 @@ pub fn get_setup(core: CoreState) -> SetupProgress {
 #[tauri::command]
 pub fn run_setup(core: CoreState) -> Result<(), CommandError> {
     Ok(core.run_job(JobKind::Setup, None)?)
+}
+
+/// Installs or updates the engine from the app's bundle, then sets it up.
+#[tauri::command]
+pub fn install_engine(core: CoreState) -> Result<(), CommandError> {
+    Ok(core.run_job(JobKind::Install, None)?)
 }
 
 /// Facts about this app and this Mac for Settings and the first run.

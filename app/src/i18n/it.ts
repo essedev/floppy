@@ -45,8 +45,21 @@ export const it = {
     },
     off: { title: "Floppy è spento", body: "Accendilo per ritrovare i progetti nel Finder." },
     notInstalled: {
+      title: "Floppy non è ancora su questo Mac",
+      body: "Manca un passo per installarlo: lo fai dalla finestra di preparazione.",
+    },
+    notConfigured: {
+      title: "Floppy è installato, manca il disco",
+      body: "Il disco del team arriva dopo l'accesso. Se hai già fatto l'accesso, avvisa chi gestisce il team.",
+    },
+    noBundle: {
       title: "Floppy non è installato su questo Mac",
-      body: "Serve il pacchetto che ti manda chi gestisce il team.",
+      body: "Questa copia dell'app non contiene il motore di Floppy: installala con Homebrew.",
+    },
+    update: {
+      title: "Un aggiornamento di Floppy è pronto",
+      body: "Si applica riavviando il disco, in circa un minuto: prima salva e chiudi i progetti aperti.",
+      action: "Aggiorna ora",
     },
     needsSetup: {
       title: "Floppy non è ancora pronto",
@@ -106,6 +119,8 @@ export const it = {
             return "Non sono riuscito a spegnere Floppy";
           case "setup":
             return "La preparazione non è andata a buon fine";
+          case "install":
+            return "L'installazione non è andata a buon fine";
         }
       },
     },
@@ -297,15 +312,24 @@ export const it = {
     continue: "Continua",
     invite: "Serve un invito del tuo team",
     missing: {
-      title: "Manca il pacchetto di Floppy",
-      body: "Per ora Floppy si installa dal pacchetto che ti manda chi gestisce il team: aprilo e segui le istruzioni. Poi torna qui.",
+      title: "Manca il motore di Floppy",
+      body: "Questa copia dell'app non lo contiene. Installa Floppy con Homebrew, poi torna qui.",
+      check: "Controlla di nuovo",
+    },
+    notConfigured: {
+      title: "Floppy è installato",
+      body: "Manca solo il disco del team: arriva dopo l'accesso, appena il team ti dà accesso a un disco.",
       check: "Controlla di nuovo",
     },
     prepare: {
       title: "Preparo Floppy su questo Mac",
       body: "Ci vuole circa un minuto e mezzo. Puoi lasciare la finestra aperta e fare altro.",
       start: "Prepara il disco",
-      steps: ["Preparo il disco virtuale", "Avvio", "Collego il disco"],
+      install: "Installa Floppy",
+      update: "Aggiorna Floppy",
+      updateTitle: "Aggiorno Floppy su questo Mac",
+      updateBody: "Floppy è già qui: lo porto alla versione dell'app. I file e il disco restano come sono; il disco si riavvia, quindi chiudi i progetti aperti.",
+      steps: ["Copio Floppy su questo Mac", "Preparo il disco virtuale", "Avvio", "Collego il disco"],
     },
     spaceError: {
       title: "Serve più spazio su questo Mac",
@@ -346,6 +370,7 @@ export const it = {
     not_on_disk: "Questa cartella non è su Floppy.",
     nothing_to_cancel: "Non c'è niente da interrompere.",
     list_timeout: "Il disco non ha risposto in tempo.",
+    no_bundle: "Questa copia dell'app non contiene il motore di Floppy.",
     engine: "Il comando di Floppy non ha risposto.",
     io: "Qualcosa non ha funzionato sul Mac.",
     auth_busy: "Floppy sta già facendo un passo dell'accesso: aspetta che finisca.",

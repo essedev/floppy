@@ -4,6 +4,7 @@
 //! fake `floppy` command.
 
 use crate::engine::{self, DiskState, EngineError, EngineReport, JobKind, Problem, Space};
+use crate::installer::{InstallNeed, Installer};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
@@ -55,13 +56,19 @@ pub struct DiskStatus {
     pub next_check_s: u64,
     pub checked_ms: u64,
     pub engine_path: String,
+    /// What this Mac needs from the engine in the app's bundle, if anything.
+    pub install: Option<InstallNeed>,
+    /// The app carries an engine: a missing command can be installed.
+    pub bundled: bool,
 }
 
-/// Where `floppy setup` is, in the three steps the first-run window shows.
+/// Where the install and `floppy setup` are, in the four steps the first-run
+/// window shows.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct SetupProgress {
     pub running: bool,
-    /// 0 virtual disk, 1 start, 2 connect the disk; 3 when done.
+    /// 0 copy the engine, 1 virtual disk, 2 start, 3 connect the disk; 4
+    /// when done. A setup alone starts at 1.
     pub step: u8,
     pub done: bool,
     pub error: Option<SetupError>,
@@ -111,6 +118,8 @@ pub enum CoreError {
     NothingToCancel,
     #[error("listing the disk did not answer in time")]
     ListTimeout,
+    #[error("this build of the app carries no engine")]
+    NoBundle,
     #[error(transparent)]
     Engine(#[from] EngineError),
 }
@@ -129,6 +138,7 @@ struct Inner {
     checked_ms: u64,
     shown: Option<DiskState>,
     setup: SetupProgress,
+    install: Option<InstallNeed>,
 }
 
 type Emit = Box<dyn Fn(Event) + Send + Sync>;
@@ -137,6 +147,7 @@ type Emit = Box<dyn Fn(Event) + Send + Sync>;
 /// checking thread and the job threads.
 pub struct Core {
     engine: PathBuf,
+    installer: Option<Installer>,
     inner: Mutex<Inner>,
     emit: Emit,
     wake: Mutex<Sender<()>>,
@@ -157,11 +168,18 @@ fn folder_name(path: &str) -> Option<String> {
 }
 
 impl Core {
-    /// A core that runs `engine` and reports through `emit`.
-    pub fn new(engine: PathBuf, emit: impl Fn(Event) + Send + Sync + 'static) -> Arc<Self> {
+    /// A core that runs `engine`, installs it from `installer` when the app
+    /// carries one, and reports through `emit`.
+    pub fn new(
+        engine: PathBuf,
+        installer: Option<Installer>,
+        emit: impl Fn(Event) + Send + Sync + 'static,
+    ) -> Arc<Self> {
         let (tx, rx) = mpsc::channel();
+        let install = installer.as_ref().and_then(Installer::need);
         Arc::new(Core {
             engine,
+            installer,
             inner: Mutex::new(Inner {
                 report: None,
                 job: None,
@@ -170,6 +188,7 @@ impl Core {
                 checked_ms: 0,
                 shown: None,
                 setup: SetupProgress::default(),
+                install,
             }),
             emit: Box::new(emit),
             wake: Mutex::new(tx),
@@ -232,6 +251,8 @@ impl Core {
             next_check_s: inner.next_check.as_secs(),
             checked_ms: inner.checked_ms,
             engine_path: self.engine.display().to_string(),
+            install: inner.install,
+            bundled: self.installer.is_some(),
         }
     }
 
@@ -248,7 +269,16 @@ impl Core {
     /// Runs `floppy status --json` now and publishes the result.
     pub fn refresh(&self) {
         let report = engine::status(&self.engine);
+        let install = self.installer.as_ref().and_then(Installer::need);
         let mut inner = self.lock();
+        // While the install runs the home is half copied: keep what it was.
+        if inner
+            .job
+            .as_ref()
+            .is_none_or(|j| j.info.kind != JobKind::Install)
+        {
+            inner.install = install;
+        }
         let (state, _) = engine::derive(&report, inner.job.as_ref().map(|j| j.info.kind));
         inner.next_check = if state == DiskState::Unreachable {
             RETRY_INTERVAL
@@ -312,9 +342,11 @@ impl Core {
         list_folders(Path::new(&mp), LIST_TIMEOUT)
     }
 
-    /// Starts a job: `floppy start|stop|setup`, or `warmup|free <path>`.
+    /// Starts a job: the bundled install, `floppy start|stop|setup`, or
+    /// `warmup|free <path>`.
     pub fn run_job(self: &Arc<Self>, kind: JobKind, path: Option<String>) -> Result<(), CoreError> {
         let mut args: Vec<&str> = vec![match kind {
+            JobKind::Install => "install",
             JobKind::Setup => "setup",
             JobKind::Start => "start",
             JobKind::Stop => "stop",
@@ -328,7 +360,14 @@ impl Core {
         if inner.job.is_some() {
             return Err(CoreError::Busy);
         }
-        let child = engine::spawn(&self.engine, &args)?;
+        let child = match kind {
+            JobKind::Install => self
+                .installer
+                .as_ref()
+                .ok_or(CoreError::NoBundle)?
+                .spawn()?,
+            _ => engine::spawn(&self.engine, &args)?,
+        };
         let info = JobInfo {
             kind,
             name: path.as_deref().and_then(folder_name),
@@ -343,9 +382,10 @@ impl Core {
         if inner.last_error.as_ref().is_some_and(|e| e.kind == kind) {
             inner.last_error = None;
         }
-        if kind == JobKind::Setup {
+        if matches!(kind, JobKind::Install | JobKind::Setup) {
             inner.setup = SetupProgress {
                 running: true,
+                step: if kind == JobKind::Install { 0 } else { 1 },
                 ..SetupProgress::default()
             };
             (self.emit)(Event::Setup(inner.setup.clone()));
@@ -356,7 +396,7 @@ impl Core {
         let core = Arc::clone(self);
         thread::spawn(move || {
             let (status, tail) = engine::follow(child, |line| {
-                if kind == JobKind::Setup {
+                if matches!(kind, JobKind::Install | JobKind::Setup) {
                     core.setup_line(line);
                 }
             });
@@ -374,8 +414,22 @@ impl Core {
         }
     }
 
-    fn finish(&self, info: JobInfo, ok: bool, tail: &[String]) {
+    fn finish(&self, info: JobInfo, mut ok: bool, tail: &[String]) {
+        let mut tail = tail.to_vec();
+        // Without the stamp the next start would offer the same update.
+        if ok
+            && info.kind == JobKind::Install
+            && let Some(installer) = &self.installer
+            && let Err(e) = installer.record()
+        {
+            ok = false;
+            tail.push(format!(
+                "floppy: could not record the installed engine: {e}"
+            ));
+        }
+        let install = self.installer.as_ref().and_then(Installer::need);
         let mut inner = self.lock();
+        inner.install = install;
         let cancelled = inner.job.as_ref().is_some_and(|j| j.cancelled);
         inner.job = None;
         let message = engine::last_message(&tail.join("\n"))
@@ -398,10 +452,10 @@ impl Core {
                 message: message.clone(),
             });
         }
-        if info.kind == JobKind::Setup {
+        if matches!(info.kind, JobKind::Install | JobKind::Setup) {
             inner.setup.running = false;
             if ok {
-                inner.setup.step = 3;
+                inner.setup.step = 4;
                 inner.setup.done = true;
             } else {
                 inner.setup.error = Some(SetupError {
@@ -416,7 +470,10 @@ impl Core {
             (self.emit)(Event::Setup(inner.setup.clone()));
         }
         // A user who started the disk is not told it "came back".
-        if matches!(info.kind, JobKind::Start | JobKind::Setup) {
+        if matches!(
+            info.kind,
+            JobKind::Start | JobKind::Setup | JobKind::Install
+        ) {
             inner.shown = None;
         }
         self.publish(&mut inner);
@@ -424,8 +481,8 @@ impl Core {
         self.wake();
     }
 
-    /// Stops a running warmup or free. Start, stop and setup are not
-    /// interrupted: they leave the VM half started.
+    /// Stops a running warmup or free. Install, start, stop and setup are not
+    /// interrupted: they leave the engine or the VM half done.
     pub fn cancel(&self) -> Result<(), CoreError> {
         let mut inner = self.lock();
         let job = inner.job.as_mut().ok_or(CoreError::NothingToCancel)?;
@@ -448,11 +505,11 @@ impl Core {
 /// Maps a line of `floppy setup` to the step it starts.
 fn setup_step(line: &str) -> Option<u8> {
     if line.starts_with("Creating the VM") {
-        Some(0)
-    } else if line.starts_with("Starting the VM") {
         Some(1)
-    } else if line.starts_with("Installing the drive") {
+    } else if line.starts_with("Starting the VM") {
         Some(2)
+    } else if line.starts_with("Installing the drive") {
+        Some(3)
     } else {
         None
     }
@@ -491,6 +548,7 @@ pub fn list_folders(dir: &Path, timeout: Duration) -> Result<Vec<Folder>, CoreEr
 mod tests {
     use super::*;
     use crate::engine::tests::fake;
+    use crate::installer::tests::{fake_bundle, installs};
     use std::sync::Mutex as StdMutex;
     use std::time::Instant;
 
@@ -499,7 +557,7 @@ mod tests {
     fn core_with(bin: PathBuf) -> (Arc<Core>, Arc<StdMutex<Vec<Event>>>) {
         let events = Arc::new(StdMutex::new(Vec::new()));
         let sink = Arc::clone(&events);
-        let core = Core::new(bin, move |e| sink.lock().unwrap().push(e));
+        let core = Core::new(bin, None, move |e| sink.lock().unwrap().push(e));
         (core, events)
     }
 
@@ -608,7 +666,7 @@ echo "Ready: /Volumes/Floppy" >&2"#,
         core.run_job(JobKind::Setup, None).unwrap();
         wait_idle(&core);
         let setup = core.setup();
-        assert!(setup.done && !setup.running && setup.step == 3);
+        assert!(setup.done && !setup.running && setup.step == 4);
         let steps: Vec<u8> = events
             .lock()
             .unwrap()
@@ -618,7 +676,7 @@ echo "Ready: /Volumes/Floppy" >&2"#,
                 _ => None,
             })
             .collect();
-        assert_eq!(steps, [0, 1, 2]);
+        assert_eq!(steps, [1, 2, 3]);
     }
 
     #[test]
@@ -694,5 +752,99 @@ echo "Ready: /Volumes/Floppy" >&2"#,
         let (core, _) = core_with(bin);
         core.refresh();
         assert!(core.status().wrong_mount_point);
+    }
+
+    fn core_installing(
+        dir: &Path,
+        build: &str,
+        script: &str,
+    ) -> (Arc<Core>, Arc<StdMutex<Vec<Event>>>, Installer) {
+        let bundle = fake_bundle(dir, build, script);
+        let home = dir.join("home");
+        let installer = Installer {
+            bundle,
+            home: home.clone(),
+        };
+        let events = Arc::new(StdMutex::new(Vec::new()));
+        let sink = Arc::clone(&events);
+        let core = Core::new(home.join("bin/floppy"), Some(installer.clone()), move |e| {
+            sink.lock().unwrap().push(e)
+        });
+        (core, events, installer)
+    }
+
+    #[test]
+    fn a_fresh_install_copies_then_sets_up() {
+        let dir = tempfile::tempdir().unwrap();
+        let script = format!(
+            r#"{}
+echo "New Floppy install."
+"$FLOPPY_HOME/bin/floppy" setup"#,
+            installs(&format!(
+                r#"case "$1" in
+  status) echo '{CONNECTED}' ;;
+  setup) echo "Creating the VM (first time, a few minutes)..." >&2
+         echo "Starting the VM..." >&2
+         echo "Installing the drive in the VM (cache up to 90 GB)..." >&2 ;;
+esac"#
+            ))
+        );
+        let (core, events, installer) = core_installing(dir.path(), "b1", &script);
+        core.refresh();
+        let s = core.status();
+        assert_eq!(s.state, DiskState::NotInstalled);
+        assert_eq!(s.install, Some(InstallNeed::Fresh));
+        core.run_job(JobKind::Install, None).unwrap();
+        wait_idle(&core);
+        let setup = core.setup();
+        assert!(setup.done && setup.error.is_none() && setup.step == 4);
+        let steps: Vec<u8> = events
+            .lock()
+            .unwrap()
+            .iter()
+            .filter_map(|e| match e {
+                Event::Setup(s) if s.running => Some(s.step),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(steps, [0, 1, 2, 3]);
+        assert_eq!(installer.need(), None);
+        core.refresh();
+        let s = core.status();
+        assert_eq!((s.state, s.install), (DiskState::Connected, None));
+    }
+
+    #[test]
+    fn a_failed_install_keeps_offering_the_update() {
+        let dir = tempfile::tempdir().unwrap();
+        let script = format!(
+            "{}\necho 'floppy: not enough free space on this Mac: 3 GB free' >&2; exit 1",
+            installs(&format!("echo '{CONNECTED}'"))
+        );
+        let (core, _, _) = core_installing(dir.path(), "b2", &script);
+        // An engine from the zip: installed, with no stamp.
+        std::fs::create_dir_all(dir.path().join("home/bin")).unwrap();
+        fake(&dir.path().join("home/bin"), &format!("echo '{CONNECTED}'"));
+        core.refresh();
+        assert_eq!(core.status().install, Some(InstallNeed::Update));
+        core.run_job(JobKind::Install, None).unwrap();
+        assert_eq!(core.status().state, DiskState::Starting);
+        wait_idle(&core);
+        let err = core.setup().error.unwrap();
+        assert_eq!(err.kind, "space");
+        let s = core.status();
+        assert_eq!(s.install, Some(InstallNeed::Update));
+        assert_eq!(s.last_error.unwrap().kind, JobKind::Install);
+    }
+
+    #[test]
+    fn install_without_a_bundle_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let (core, _) = core_with(dir.path().join("floppy"));
+        assert_eq!(
+            core.run_job(JobKind::Install, None),
+            Err(CoreError::NoBundle)
+        );
+        assert_eq!(core.status().install, None);
     }
 }

@@ -32,6 +32,8 @@ const base: DiskStatus = {
   next_check_s: 30,
   checked_ms: Date.now(),
   engine_path: "/Users/giulia/.floppy/bin/floppy",
+  install: null,
+  bundled: true,
 };
 
 const FOLDERS: Folder[] = [
@@ -59,7 +61,10 @@ const SCENARIOS: Record<string, Partial<DiskStatus>> = {
     engine_error: "the floppy command did not answer within 25 s",
   },
   off: { state: "off", ...unmounted },
-  not_installed: { state: "not_installed", ...unmounted, space: null },
+  not_installed: { state: "not_installed", ...unmounted, space: null, install: "fresh" },
+  not_configured: { state: "not_installed", ...unmounted, space: null },
+  no_bundle: { state: "not_installed", ...unmounted, space: null, bundled: false },
+  update: { install: "update" },
   needs_setup: { state: "needs_setup", ...unmounted },
   low_space: { space: { ...base.space!, mac_free_mb: 12 * GB, low: true } },
   wrong_mount: { mount_point: "/Volumes/Floppy-1", wrong_mount_point: true },
@@ -76,7 +81,7 @@ const SCENARIOS: Record<string, Partial<DiskStatus>> = {
 let status: DiskStatus = { ...base, ...(SCENARIOS[scenario] ?? {}) };
 let setup: SetupProgress = {
   running: scenario === "setup_running",
-  step: scenario === "setup_running" ? 1 : 0,
+  step: scenario === "setup_running" ? 2 : 0,
   done: false,
   error:
     scenario === "setup_space"
@@ -209,11 +214,22 @@ export const mockBackend: Backend = {
   openInFinder: async () => {},
   getSetup: async () => setup,
   runSetup: async () => {
+    publishSetup({ running: true, step: 1, done: false, error: null });
+    later(1200, () => publishSetup({ step: 2 }));
+    later(2400, () => publishSetup({ step: 3 }));
+    later(3600, () => {
+      publishSetup({ running: false, step: 4, done: true });
+      publish({ ...base });
+    });
+  },
+  installEngine: async () => {
+    publish({ state: "starting", job: { kind: "install", path: null, name: null, started_ms: Date.now() } });
     publishSetup({ running: true, step: 0, done: false, error: null });
     later(1200, () => publishSetup({ step: 1 }));
     later(2400, () => publishSetup({ step: 2 }));
-    later(3600, () => {
-      publishSetup({ running: false, step: 3, done: true });
+    later(3600, () => publishSetup({ step: 3 }));
+    later(4800, () => {
+      publishSetup({ running: false, step: 4, done: true });
       publish({ ...base });
     });
   },
