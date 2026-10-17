@@ -36,7 +36,7 @@ function DiskCard({ disk }: { disk: Disk }) {
   const f = useFormat()
   const online = disk.status === 'online'
   return (
-    <Well className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-[18px] max-sm:grid-cols-1">
+    <div className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-[18px] rounded-xl bg-sunken px-4 py-4 max-sm:grid-cols-1">
       <div className="grid justify-items-center gap-1.5 max-sm:justify-items-start">
         <Faceplate state={disk.state === 'creating' ? 'dl' : online ? 'ok' : 'err'} fill={usedFill(disk.usedBytes)} label={fmt(t.overview.faceLabel, { name: disk.name, used: f.bytes(disk.usedBytes) })} />
         <Readout className="whitespace-nowrap">{fmt(t.overview.usedReadout, { used: f.bytes(disk.usedBytes) })}</Readout>
@@ -59,7 +59,7 @@ function DiskCard({ disk }: { disk: Disk }) {
           ))}
         </dl>
       </div>
-    </Well>
+    </div>
   )
 }
 
@@ -89,14 +89,13 @@ function Disks() {
       }
     >
       {(list) => (
-        <section className="mb-3.5" aria-labelledby="overview-disks">
-          <h2 id="overview-disks" className="eyebrow px-1">{t.overview.disksTitle}</h2>
+        <Well title={t.overview.disksTitle} className="mb-3.5">
           <div className="grid gap-3.5 md:grid-cols-2">
             {list.map((d) => (
               <DiskCard key={d.id} disk={d} />
             ))}
           </div>
-        </section>
+        </Well>
       )}
     </QueryView>
   )
