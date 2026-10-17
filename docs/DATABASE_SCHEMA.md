@@ -1,6 +1,6 @@
 # Database schema
 
-The control plane's data model, in PostgreSQL. **Status: proposal, not built.** It is the design on paper of ROADMAP 3, written from the team architecture ([architecture.html](architecture.html), sections 06 to 11), the concepts ([concept-d-onboarding](concepts/concept-d-onboarding.html), [concept-e-admin](concepts/concept-e-admin.html)) and the admin web's API contract (`web/src/lib/api/types.ts`, `http.ts`, and the rules the fake in `web/src/lib/api/fake/` keeps). Once the first migration exists, this file changes in the same commit as every migration.
+The control plane's data model, in PostgreSQL. **Status: designed and reviewed by Simone (17/10/2026), not built.** It is the design on paper of ROADMAP 3, written from the team architecture ([architecture.html](architecture.html), sections 06 to 11), the concepts ([concept-d-onboarding](concepts/concept-d-onboarding.html), [concept-e-admin](concepts/concept-e-admin.html)) and the admin web's API contract (`web/src/lib/api/types.ts`, `http.ts`, and the rules the fake in `web/src/lib/api/fake/` keeps). Once the first migration exists, this file changes in the same commit as every migration.
 
 The control plane is AGPL-3.0 (DECISIONS #3), FastAPI with SQLAlchemy 2.0 async and Alembic, and stays off the data path (DECISIONS #2): nothing in these tables is read when a Mac lists a folder or reads a clip.
 
@@ -50,7 +50,7 @@ Every row except `users` and `sign_in_requests` carries `organization_id uuid NO
 
 `users` is global because a person is an email address, not a tenant row; `sign_in_requests` is global because it exists before anyone is known. Neither holds organization data: what a user can see comes only through `memberships`.
 
-**Hosted service**: one PostgreSQL database for all organizations, isolated by the scoping above. The files are isolated by infrastructure, not by filters: each organization has its own Valkey instance and its own bucket (DECISIONS #2), enforced here by partial unique indexes on `organizations.valkey_url` and `(s3_endpoint, s3_bucket)`. Row-level security as a second wall is an [open question](#open-questions).
+**Hosted service**: one PostgreSQL database for all organizations, isolated by the scoping above. The files are isolated by infrastructure, not by filters: each organization has its own Valkey instance and its own bucket (DECISIONS #2), enforced here by partial unique indexes on `organizations.valkey_url` and `(s3_endpoint, s3_bucket)`. Row-level security on `organization_id` is added as a second wall before the hosted service opens, not in the first migration: sign-in reads across organizations and would need a bypass role from day one ([decision 6](#decisions-taken)).
 
 **Self-hosted**: the same schema with one row in `organizations`, created at first start by a bootstrap command from the environment (organization name, first admin's email, S3 endpoint, bucket and key, Valkey address). A configuration flag refuses a second organization; nothing in the schema differs, so a self-hosted organization can later be moved to the hosted service row for row.
 
@@ -145,7 +145,7 @@ A person, identified by an email address. Global, not per organization.
 
 Indexes: `UNIQUE (email) WHERE deleted_at IS NULL`.
 
-A user is created by the first invitation to their address. Users are never hard deleted, so foreign keys from the audit log stay valid; erasing a person's data on request is an [open question](#open-questions).
+A user is created by the first invitation to their address. Users are never hard deleted, so foreign keys from the audit log stay valid; erasing a person's data on request replaces their address and name with a placeholder instead ([decision 14](#decisions-taken)).
 
 ### memberships
 
@@ -200,7 +200,7 @@ A pending sign-in: the magic link and the 6-digit code sent by mail, for the adm
 | `kind` | `text` | | | `CHECK IN ('web', 'app')` |
 | `email` | `text` | | | Lowercased, as typed |
 | `user_id` | `uuid` | yes | | Null when the address has no eligible membership. The row exists anyway, so the answer is the same for everyone and the page never reveals who is a member; the mail says "ask your admin" instead |
-| `organization_id` | `uuid` | yes | | The organization the session will act in, resolved when the request is created (see open questions on several organizations) |
+| `organization_id` | `uuid` | yes | | The organization the session will act in, resolved when the request is created: the only one the person belongs to ([decision 1](#decisions-taken)) |
 | `state` | `text` | | `'pending'` | `CHECK IN ('pending', 'completed', 'locked', 'superseded')`. Expired is derived: `pending` past `expires_at` |
 | `link_token_hash` | `bytea` | | | SHA-256 of the link's 256-bit token. `UNIQUE` |
 | `code_hmac` | `bytea` | | | HMAC-SHA256 of the 6-digit code (see [Secrets](#secrets)) |
@@ -243,7 +243,7 @@ A signed-in browser of the admin web, behind an HttpOnly cookie.
 | `token_hash` | `bytea` | | | SHA-256 of the cookie's 256-bit value. `UNIQUE` |
 | `created_at` | `timestamptz` | | `now()` | |
 | `last_seen_at` | `timestamptz` | | `now()` | Written at most every 5 minutes, not on every request |
-| `expires_at` | `timestamptz` | | | Absolute limit; the idle limit is `last_seen_at` plus a configured window |
+| `expires_at` | `timestamptz` | | | Creation plus 30 days; the idle limit is `last_seen_at` plus 14 days |
 | `revoked_at` | `timestamptz` | yes | | |
 | `revoke_reason` | `text` | yes | | `CHECK IN ('signed_out', 'membership_removed')`; `CHECK ((revoked_at IS NULL) = (revoke_reason IS NULL))` |
 | `user_agent` | `text` | yes | | For a future "your sessions" list; truncated to 300 characters |
@@ -271,7 +271,7 @@ A Mac: the app's device token and the Mac's own Valkey user (DECISIONS #7). The 
 | `activated_at` | `timestamptz` | yes | | |
 | `revoked_at` | `timestamptz` | yes | | |
 | `revoked_by_user_id` | `uuid` | yes | | |
-| `revoke_reason` | `text` | yes | | `CHECK IN ('admin', 'owner', 'member_removed', 'signed_out')` |
+| `revoke_reason` | `text` | yes | | `CHECK IN ('admin', 'owner', 'member_removed', 'signed_out', 'never_registered')`. The last one is the reconciler's, for a `pending` Mac that did not register within 24 hours |
 | `created_at`, `updated_at` | `timestamptz` | | `now()` | |
 | `deleted_at` | `timestamptz` | yes | | Hides a revoked Mac from the list; no endpoint does it yet |
 
@@ -296,7 +296,7 @@ What each Mac last reported in its heartbeat. One row per device, overwritten.
 | `replica_mode` | `text` | yes | | `CHECK IN ('replica', 'master', 'offline')`, from the mount's `.stats` |
 | `replica_lag_ms` | `integer` | yes | | |
 | `s3_access_key_tail` | `text` | yes | | The key its mounts use, read from the format on its replica: counts the Macs that picked up a rotation |
-| `mounted_volume_ids` | `uuid[]` | | `'{}'` | For `Disk.mountedBy`. No foreign key: an observation, replaced at every heartbeat |
+| `mounted_volume_ids` | `uuid[]` | | `'{}'` | The disks whose JuiceFS mount is up inside the VM, each a folder of the one share (see [Disks on a Mac](#disks-on-a-mac)). For `Disk.mountedBy`. No foreign key: an observation, replaced at every heartbeat |
 | `outdated_logged_version` | `text` | yes | | The version for which `mac_seen_outdated` was logged, so it is logged once |
 | `updated_at` | `timestamptz` | | `now()` | |
 
@@ -310,8 +310,8 @@ A disk: a JuiceFS volume, a prefix in the organization's bucket and a database o
 |---|---|---|---|---|
 | `id` | `uuid` | | `uuidv7()` | Primary key |
 | `organization_id` | `uuid` | | | |
-| `name` | `text` | | | The name people see, e.g. "Archivio 2025". `CHECK (length(btrim(name)) BETWEEN 1 AND 60)`. Never renamed: CapCut keeps full paths |
-| `volume_name` | `text` | | | JuiceFS's name, which is also the object prefix inside the bucket (JuiceFS writes under `<bucket>/<name>/`). JuiceFS accepts only `CHECK (volume_name ~ '^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$')`, which is why it is not the display name |
+| `name` | `text` | | | The name people see and the disk's folder in the share: `/Volumes/Floppy/Archivio 2025`. `CHECK (name ~ '^[A-Za-z0-9]([A-Za-z0-9 ._-]{0,58}[A-Za-z0-9])?$')`, see [Disks on a Mac](#disks-on-a-mac). Never renamed: CapCut keeps full paths |
+| `volume_name` | `text` | | | JuiceFS's name, which is also the object prefix inside the bucket (JuiceFS writes under `<bucket>/<name>/`). JuiceFS accepts only `CHECK (volume_name ~ '^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$')`, which is why it is not the display name. Derived once from `name` (lowercased, every other character a hyphen, a short suffix if the result is taken), never shown, never changed |
 | `s3_endpoint`, `s3_region`, `s3_bucket` | `text` | | | Copied from the organization at creation: the format holds them, and they do not follow later settings |
 | `meta_db` | `integer` | | | The Valkey database number. `CHECK (meta_db >= 1)`: database 0 stays empty, the one tools hit by accident |
 | `juicefs_uuid` | `uuid` | yes | | Read back from the format after `juicefs format`; null while creating |
@@ -330,7 +330,15 @@ Indexes:
 - `UNIQUE (organization_id, volume_name)` over every row: the objects of a deleted disk stay under that prefix, and a new volume there would collide with them (the gotcha of a reinstall with the same `VOLUME_NAME`).
 - `UNIQUE (organization_id, meta_db)` over every row: a deleted disk's tree stays in its database; reusing the number would hand a new disk an old tree.
 
-Creating a disk: under the organization's lock, allocate the lowest `meta_db` never used (at most `valkey_databases - 1`), insert as `creating`, run `juicefs format`, then set `ready`, `juicefs_uuid` and `s3_key_id`. If the format fails the row becomes `failed` and soft deleted, and its number and prefix stay burned: a half-written format must never be reused.
+Creating a disk: under the organization's lock, allocate the lowest `meta_db` never used (at most `valkey_databases - 1`, otherwise `disk_limit_reached`), insert as `creating`, run `juicefs format`, then set `ready`, `juicefs_uuid` and `s3_key_id`. If the format fails the row becomes `failed` and soft deleted, and its number and prefix stay burned: a half-written format must never be reused.
+
+### Disks on a Mac
+
+Every Mac mounts every disk of its organization (permissions are all or nothing, and its replica holds every disk's tree anyway). Inside the VM each disk is its own JuiceFS mount at `/mnt/drive/<name>`; Samba exports `/mnt/drive` as the one `Floppy` share, so the Mac keeps one SMB mount at the fixed `/Volumes/Floppy` and sees each disk as a folder: `/Volumes/Floppy/Progetti`, `/Volumes/Floppy/Archivio 2025` (DECISIONS #20). A new disk appears as a new folder at the next configuration poll, without remounting the share. `/mnt/drive` itself belongs to root with mode `0555`: nothing can be written at the top level, where it would land on the VM's disk instead of S3.
+
+**The folder is the display name, not the slug.** It is what people see in the Finder and what CapCut's "media missing" dialog shows; a slug would put `archivio-2025` in front of someone who typed "Archivio 2025". Since the folder is part of every path CapCut keeps, the name is never changed, and it is unique case-insensitively because macOS compares names that way. It is limited to ASCII letters, digits, spaces, dots, hyphens and underscores, starting and ending with a letter or digit: an accented name could reach the Mac in another Unicode normalization (Linux keeps bytes, the macOS SMB client and Samba may compose or decompose), and a path that changes form breaks exactly the links the fixed name protects. Accents can be allowed once a spike shows the round trip through Samba and CapCut holds.
+
+`device_status.mounted_volume_ids` lists the disks whose mount is up inside the VM; the SMB mount, one for all of them, is the app's own state.
 
 ### volume_status
 
@@ -467,7 +475,7 @@ Append only, twice: the application role has only `INSERT` and `SELECT` on this 
 
 **Encryption**: AES-256-GCM with a random 96-bit nonce, stored as one `bytea`: a format byte, a key id, the nonce, the ciphertext with its tag. The additional authenticated data is `table.column:row id`, so a ciphertext copied into another row or column fails to decrypt. The key comes from `FLOPPY_SECRET_KEY` (32 random bytes, base64), from the environment or a Docker secret, never from the database. A key ring (`FLOPPY_SECRET_KEYS`, id to key) allows rotating it: new writes use the newest key, a command re-encrypts old rows, then the old key is dropped. The HMAC key for codes is derived from the same secret with HKDF and its own label, so a self-hoster manages one secret.
 
-**Losing `FLOPPY_SECRET_KEY` is recoverable**: the S3 secret is still in every volume's format (the admin rotates to a new key, or an operator reads it back with `juicefs config`), the SMTP password is typed again, and pending codes expire in 15 minutes. Nothing about the files depends on it. Key management for the hosted service is an [open question](#open-questions).
+**Losing `FLOPPY_SECRET_KEY` is recoverable**: the S3 secret is still in every volume's format (the admin rotates to a new key, or an operator reads it back with `juicefs config`), the SMTP password is typed again, and pending codes expire in 15 minutes. Nothing about the files depends on it. The hosted service starts with the same environment key, from the operator's secret store, and moves to envelope encryption with a KMS before it hosts paying customers ([decision 4](#decisions-taken)).
 
 **Never in the audit log, a log line or an API answer**: secrets, tokens, codes, passwords or hashes of them. The audit's `detail` is built from an allowlist of keys per action; keys appear only as `access_key_tail`.
 
@@ -496,7 +504,7 @@ What it records, the contract's `AuditAction` plus the ones this design needs (m
 
 Sign-in attempts on unknown addresses are not recorded: they belong to no organization, and logging them would store addresses of people who are not users.
 
-**Retention**: kept for the life of the organization in this proposal; the contract's filter reaches 90 days, but the log is the only record of who had access when. See [open questions](#open-questions).
+**Retention**: self-hosted, for the life of the organization (thousands of rows a year); the contract's filter reaches 90 days, but the log is the only record of who had access when. Hosted: 13 months, purged by a scheduled job running as the owner role, the one deletion this schema allows ([decision 3](#decisions-taken)).
 
 ## State machines
 
@@ -532,7 +540,7 @@ Expired is `pending` past `expires_at` (the API's `expired`; `superseded` is als
 | (none) | `pending` | The app exchanges code and verifier: a device row and its token |
 | `pending` | `active` | The app registers: the ACL user is created and its password returned once |
 | `active` | `active` | Credentials reissued (Keychain lost): new password, `ACL SETUSER ... resetpass`, new hash |
-| `pending`, `active` | `revoked` | By an admin (`admin`), by its owner from the web (`owner`, a lost Mac), by a person's removal (`member_removed`), or from the app ("Esci", `signed_out`) |
+| `pending`, `active` | `revoked` | By an admin (`admin`), by its owner from the web (`owner`, a lost Mac), by a person's removal (`member_removed`), from the app ("Esci", `signed_out`), or by the reconciler for a `pending` Mac older than 24 hours (`never_registered`) |
 
 `revoked` is terminal: the same Mac signing in again is a new device. Every revocation of an `active` Mac opens a key exposure except `signed_out`: the Mac is in its owner's hands, wiped by the app, and its owner still has access.
 
@@ -572,7 +580,7 @@ The admin web's contract (`web/src/lib/api/http.ts`, under `/api/v1`):
 | `GET /macs` | `devices`, `device_status`, `users`; members only `user_id = me` | |
 | `POST /macs/{id}/revoke` | `devices` (a member only their own) | `devices`, `key_exposures`, `audit_events`; Valkey |
 | `GET /disks` (admin) | `volumes`, `volume_status`, count of `device_status` with the disk mounted and connected | |
-| `POST /disks` (admin) | `organizations` under lock, `volumes`, active `s3_keys` | `volumes`, `volume_status`, `audit_events`; Valkey `juicefs format` |
+| `POST /disks` (admin) | `organizations` under lock, `volumes` (`disk_limit_reached` past `valkey_databases - 1`), active `s3_keys` | `volumes`, `volume_status`, `audit_events`; Valkey `juicefs format` |
 | `PATCH /disks/{id}` (admin) | `volumes` | `juicefs config --trash-days` first, then `volumes`; `audit_events` |
 | `GET /key` (admin) | `s3_keys`, `key_rotations` not closed, open `key_exposures` | |
 | `POST /key/rotations` (admin) | `key_rotations` under the organization lock | `s3_keys`, `key_rotations`, `key_rotation_volumes`, `audit_events`; the worker then writes the probe, Valkey (`juicefs config`), `volumes.s3_key_id`, `organization_status` |
@@ -580,7 +588,7 @@ The admin web's contract (`web/src/lib/api/http.ts`, under `/api/v1`):
 | `POST /key/rotations/{id}/close` (admin) | `key_rotations` | `key_rotations`, `s3_keys`, `key_exposures`, `audit_events` |
 | `GET /audit` (admin) | `audit_events` | |
 | `GET /health` (admin) | `organization_status` | |
-| `GET /settings`, `PATCH /settings` (admin) | `organizations` | `organizations`, `audit_events` |
+| `GET /settings`, `PATCH /settings` (admin) | `organizations`, live `volumes` (storage is frozen once one exists: `storage_in_use`) | `organizations`, `audit_events` |
 | `POST /settings/mail/test` (admin) | `organizations` | `organization_status.mail_*` |
 | `POST /settings/storage/probe` (admin) | active `s3_keys` | `organization_status.storage_*` |
 
@@ -610,22 +618,22 @@ One Alembic revision, `0001_initial`, written from autogenerate and then edited 
 
 `downgrade()` drops everything in reverse order and exists for development only. Nothing migrates from the test package: its volumes live in SQLite inside each tester's VM, and the first instance creates its volumes fresh (architecture.html, Deployments).
 
-## Open questions
+## Decisions taken
 
-Choices the sources do not settle, each with a proposal.
+The questions the sources left open, decided by Simone on 17/10/2026. The ones that bind beyond this file are also in DECISIONS.md.
 
-1. **One person in several organizations (hosted).** The schema allows it (`users` global, `memberships` per organization), but the contract's `Session` has one organization and sign-in does not ask which. Proposal: allow it in the schema now; the first sign-in resolves the only organization, and an organization picker plus `POST /session/organization` come when the hosted service opens. Until then, a second membership for the same address is refused.
-2. **Valkey users per organization or per disk.** Replication settles it today: a Mac's replica copies the whole instance, every disk included, so a disk-level user would restrict writes but not what the Mac can read, the S3 key included. Proposal: one user per Mac per organization, as designed. Per-disk access would need one Valkey instance per disk, a decision with its own cost.
-3. **Audit retention**, and with it the one exception to "never delete". Proposal: keep everything in self-hosted (thousands of rows a year); for the hosted service, 13 months, purged by a job running as the owner role, documented as the only deletion. Alternatively keep forever and archive.
-4. **Encryption key management.** Self-hosted: one `FLOPPY_SECRET_KEY` in the environment, with the recovery path above; acceptable? Hosted: the same from the operator's secret store, or envelope encryption with a KMS and a data key per organization. Proposal: the environment key for both at first, a KMS before hosting paying customers.
-5. **No `deleted_at` on record tables** (invitations, sign-in requests, sessions, keys, rotations, exposures, audit). Proposal as written: records end in a terminal state, and soft delete is for entities. Confirm, or add the column everywhere for uniformity.
-6. **Row-level security for the hosted service.** Composite foreign keys and scoped repositories are in from the start. Proposal: add RLS policies on `organization_id` before the hosted service opens, not in `0001` (sign-in reads across organizations and would need a bypass role from day one).
-7. **Signing out from the app.** Proposed: a `signed_out` revocation opens no key window, because the owner keeps access anyway. A member revoking their own lost Mac from the web does open one.
-8. **Several disks on one Mac.** The mount point is fixed at `/Volumes/Floppy` (CLAUDE.md), yet an organization has several disks and `Disk.mountedBy` counts Macs per disk. How they appear in the Finder (one share each, `/Volumes/<name>`, or folders inside one) decides whether a disk's display name is part of CapCut's paths and how `mounted_volume_ids` is reported.
-9. **Changing the storage settings after the first disk.** A volume's bucket and endpoint are in its format and do not follow the settings. Proposal: refuse `PATCH /settings` storage changes while any live disk exists (`storage_in_use`), since a second bucket breaks "one bucket per organization" and the key's scope.
-10. **Disk limit.** With Valkey's default `databases 16` and database 0 left empty, an organization has at most 15 disks. Proposal: keep the default, raise `valkey_databases` per instance when a team needs more, and return `disk_limit_reached`.
-11. **Invitation expiry.** Proposed: an invited person who never accepted cannot complete a first sign-in after 7 days; the admin resends. The alternative is that the invitation link expires but sign-in by address keeps working.
-12. **Lifetimes.** Proposed: web sessions 14 days idle and 30 days absolute; device tokens without expiry, ended only by revocation (the app cannot ask a non-technical person to sign in again at random). Pending devices that never register in 24 hours are revoked by the reconciler.
-13. **Stale Macs.** A Mac not seen for months keeps a working Valkey user. Proposal: show it in the list ("last seen 94 days ago") and leave revocation to the admin; no automatic revocation, since a Mac on holiday is not a lost Mac.
-14. **Erasing a person** (GDPR request, hosted). Proposal: soft delete the user and replace `email` and `name` with a placeholder, and the person's labels in the audit log with the same, through the owner role; the audit rows stay.
-15. **Operators of the hosted service**: who creates organizations and how (a CLI with the owner role, or operator accounts). Out of scope for `0001`; the audit log already has `actor_kind = 'operator'`.
+1. **One person, one organization, for now.** The schema allows several (`users` is global, `memberships` per organization), but the contract's `Session` has one organization and sign-in does not ask which: until the hosted service opens, a second live membership for the same address is refused. An organization picker and `POST /session/organization` come with the hosted service.
+2. **Valkey users per Mac and per organization, not per disk** (DECISIONS #19). A Mac's replica copies the whole instance, every disk and its S3 key included, so a per-disk user would restrict writes but not reads. Per-disk access would need one Valkey instance per disk.
+3. **Audit retention**: forever in self-hosted; 13 months in the hosted service, purged by a job running as the owner role, documented as the only deletion.
+4. **Encryption key**: one `FLOPPY_SECRET_KEY` from the environment for self-hosters, with the recovery path in [Secrets](#secrets); the hosted service uses the same from the operator's secret store, and a KMS with a data key per organization before it hosts paying customers (DECISIONS #17).
+5. **No `deleted_at` on record tables** (invitations, sign-in requests, sessions, keys, rotations, exposures, audit): records end in a terminal state, and soft delete is for entities (DECISIONS #16).
+6. **Row-level security** before the hosted service opens, not in `0001`: composite foreign keys and scoped repositories hold from the start, and sign-in reads across organizations.
+7. **Signing out from the app opens no key window**: the owner keeps access anyway, and the app wipes cache and replica. A member revoking their own lost Mac from the web does open one (DECISIONS #18).
+8. **Several disks are folders of the one share**, `/Volumes/Floppy/<name>`, the display name as folder name (see [Disks on a Mac](#disks-on-a-mac), DECISIONS #20).
+9. **Storage settings are frozen once a disk exists**: a volume's bucket and endpoint are in its format, and a second bucket would break "one bucket per organization" and the key's scope. `PATCH /settings` answers `storage_in_use`.
+10. **At most 15 disks per organization** with Valkey's default `databases 16` and database 0 left empty; `valkey_databases` is raised per instance when a team needs more, otherwise `disk_limit_reached`.
+11. **An expired invitation blocks the first sign-in**: an invited person who never accepted cannot sign in after 7 days, and the admin resends.
+12. **Lifetimes**: web sessions 14 days idle and 30 days absolute; device tokens without expiry, ended only by revocation, since a non-technical person cannot be asked to sign in again at random. A `pending` Mac that does not register within 24 hours is revoked by the reconciler (`never_registered`).
+13. **Stale Macs stay until an admin revokes them**: the list shows the last contact; a Mac on holiday is not a lost Mac, so nothing is revoked automatically.
+14. **Erasing a person** (a GDPR request, hosted): the user is soft deleted and their address, name and labels in the audit log are replaced with a placeholder, through the owner role; the audit rows stay.
+15. **Operators of the hosted service** create organizations with a command running as the owner role; operator accounts come later if needed. The audit log already has `actor_kind = 'operator'`.
