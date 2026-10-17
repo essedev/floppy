@@ -29,16 +29,7 @@ cp macos/bin/floppy ~/.floppy/bin/ && cp macos/vm/guest/* ~/.floppy/vm/guest/ \
 export LIMA_HOME=~/.floppy/vms
 ~/.floppy/lima/bin/limactl shell --workdir / floppy <cmd>   # e.g. sudo journalctl -u floppy-mount
 
-# Local spike
-spike/setup.sh                 # Garage, PostgreSQL, Toxiproxy, drive; secrets in spike/.env
-spike/bench.sh                 # upload, cold/warm reads, seeks, warmup
-LINE_MBPS=100 docker compose -f spike/docker-compose.yml --profile shaped up -d shaper   # one real link queue
-DOWNLOAD_LIMIT_MBPS=0 spike/data-bench.sh  # cold reads inside the box and from the Mac, seeks, scrubbing
-spike/meta-bench.sh            # metadata over SMB: SQLite vs PostgreSQL
-spike/juicefs-replica/build.sh # patched juicefs into dist/
-spike/juicefs-replica/test.sh  # the patches' Go tests
-JUICEFS_SOURCE=replica docker compose -f spike/docker-compose.yml --profile replica build drive drive-b
-spike/acceptance.py [--baseline] [t01 ...]   # two clients, central Valkey + replicas, 17 checks
+# Local spike (Garage, PostgreSQL, Valkey, two clients): commands in .claude/rules/spike.md
 
 # Site (Astro + Starlight; the product name lives in site/src/brand.ts)
 cd site && pnpm dev            # pnpm build, pnpm check
@@ -82,23 +73,15 @@ cd web && pnpm dev             # http://localhost:4508; pnpm typecheck, lint, bu
 
 **macOS gives up on an SMB read after 30 s** and the Finder gets an I/O error. The command raises `max_resp_timeout` only for the VM's address, in a `# floppy begin/end` block of `~/Library/Preferences/nsmb.conf`: never rewrite that file whole, it holds the user's configuration.
 
-**Simulate bandwidth with the shaped link, not Toxiproxy nor JuiceFS's limits.** Toxiproxy's `bandwidth` is per connection and JuiceFS opens many: 2.7 GB "went through" at 150 MB/s with a 37 MB/s limit. JuiceFS's `--download-limit` lets the first megabyte through at once and then stalls, which hid how readahead competes with a new read. Toxiproxy is for latency; bandwidth is the `shaped` profile (`LINE_MBPS`, with `DOWNLOAD_LIMIT_MBPS=0`), one queue for everything Toxiproxy sends.
-
-**Measure reads from the Mac through its cache too.** With `F_NOCACHE` the macOS SMB client sends one read at a time; through its cache it sends 128 KB pieces out of order, up to 40 MB ahead, and a test that stops reading halfway counts those as waste. Compare whole-file reads, and count GETs in Garage's log, not only JuiceFS's metrics: cancelled downloads are missing there.
-
 **The site describes the finished product**: no status or "not published yet", no dates on measures, competitors by linkable facts only. The current state lives in README and ROADMAP.
 
-**Docker ran out of default subnets** on the development Mac (many compose projects): the spike pins an explicit subnet in `spike/docker-compose.yml`. Never `docker network prune`, the networks belong to other projects.
+**Never `docker network prune`**: the development Mac's networks belong to other projects too, and Docker ran out of default subnets there, so every compose file here pins its subnet.
 
 **A UI is verified in a real browser.** The mockup passed checks in node and in the browser drew one variant out of three because of a JavaScript error. Load it in headless Chrome (Playwright with Chrome's `executablePath`) and look at the screenshot.
 
 **Samba multiplies metadata operations.** Listing 300 files from the Finder costs about 2,700 file system operations (lookups of `._` names, extended attributes); with the metadata across a network each is a round trip (117 s at 15 ms). Do not tune Samba or caches around it: reads must come from the local replica (DECISIONS #5).
 
-**macOS mounts a server and share only once.** A second mount of `localhost/Floppy`, even on another port, fails with "File exists": the spike reaches the second client by address (`127.0.0.1`).
-
 **Unmount SMB with `-f` in scripts.** A gentle unmount can leave a stale session, and the next mount of the same share answers I/O errors.
-
-**The spike needs the SMB timeout too.** The real install raises `max_resp_timeout` for the VM's address; the spike talks to `localhost` and `127.0.0.1`, so the same block (`# floppy-spike begin/end` in `~/Library/Preferences/nsmb.conf`) has to be there, or cold reads fail after 30 s.
 
 **The per-Mac Valkey user needs more than reads and writes**: INFO, HINCRBY and DEL on `ryw*` on the master and HGET on the replica, EVAL and EVALSHA for the optimistic writes, and PSYNC, REPLCONF, PING for its replica. A missing HINCRBY aborts every write transaction.
 
@@ -140,4 +123,5 @@ These are default rules for this repo: the global instructions sit below, and wh
 - [docs/ROADMAP.md](docs/ROADMAP.md): next steps.
 - [docs/CYCLES.md](docs/CYCLES.md): what was done and when.
 - [docs/architecture.html](docs/architecture.html): the team architecture (control plane, central Valkey with a replica per VM, login) as diagrams and flows; a proposal until it lands in ARCHITECTURE.md.
+- [.claude/rules/spike.md](.claude/rules/spike.md): the spike's commands and the measuring gotchas, loaded when a file in `spike/` is touched.
 - [docs/concepts/](docs/concepts/): HTML concepts with variants side by side, one file per design decision.
