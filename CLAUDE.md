@@ -57,7 +57,7 @@ cd web && pnpm dev             # http://localhost:4508; pnpm typecheck, lint, bu
 
 **macOS `/bin/bash` is 3.2**: with `set -u` an empty array expanded as `"${a[@]}"` is an error. Write `${a[@]+"${a[@]}"}`.
 
-**No external network during install.** An office DNS did not resolve `cloud.debian.org`: the Debian image, JuiceFS and the Samba and FUSE `.deb` files are in the zip (`scripts/package.sh`). The `.deb` files are the whole dependency closure, taken in a `debian:trixie` container with an empty dpkg status: a plain `--download-only` would miss the libraries the container already has and the image may have in an older version. The list is `PACKAGES` in `guest-install.sh`, which `package.sh` reads; `deb.debian.org` stays as a fallback if the local repository fails.
+**No external network during install.** An office DNS did not resolve `cloud.debian.org`: the Debian image, the patched JuiceFS (built by `package.sh` from `spike/juicefs-replica`) and the Samba and FUSE `.deb` files are in the zip (`scripts/package.sh`). The `.deb` files are the whole dependency closure, taken in a `debian:trixie` container with an empty dpkg status: a plain `--download-only` would miss the libraries the container already has and the image may have in an older version. The list is `PACKAGES` in `guest-install.sh`, which `package.sh` reads; `deb.debian.org` stays as a fallback if the local repository fails.
 
 **`systemctl is-active` with several units says yes if at least one is active.** A check on `floppy-mount smbd` together missed a stopped Samba. One unit per call.
 
@@ -97,6 +97,7 @@ A change to how the disk behaves almost always goes through several files:
 - `macos/vm/lima.yaml` if the VM changes, and then the `setup` gotcha above.
 - `macos/config.env.example` if `config.env` gets a new option.
 - `macos/install.sh` and `scripts/package.sh` if what goes into the zip changes.
+- `spike/juicefs-replica/` (Dockerfile tag, patches) and `JUICEFS_VERSION` in `guest-install.sh` together if JuiceFS changes: `package.sh` refuses a mismatch.
 - `docs/ARCHITECTURE.md`: the "Configuration" and "macOS package" sections, and "Measured performance" if a number changes.
 - `README.md` and `README.it.md` together.
 - A zip already handed out does not update itself: it has to be rebuilt and sent again.

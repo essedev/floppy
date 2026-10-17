@@ -62,7 +62,7 @@ Measured in the spike at a simulated 15 ms, from the Mac over SMB (DECISIONS #5,
 
 - **0001**: metadata reads from the local replica, writes in one round trip, read-your-writes (above).
 - **0002**: whole-block reads inside a sequential stream (DECISIONS #15).
-- **0003**, being written: `juicefs config` and `juicefs format` take `ACCESS_KEY` and `SECRET_KEY` from the environment for an existing volume. Upstream they change only the flags passed on the command line (`ctx.LocalFlagNames()` in `cmd/config.go` and `cmd/format.go`, verified against Garage), so a team key rotation would put the secret in argv, visible in `ps`.
+- **0003**: `juicefs config` and `juicefs format` take `ACCESS_KEY` and `SECRET_KEY` from the environment for an existing volume. Upstream they change only the flags passed on the command line (`ctx.LocalFlagNames()` in `cmd/config.go` and `cmd/format.go`, verified against Garage), so a team key rotation would put the secret in argv, visible in `ps`.
 - **Possibly 0004**: `juicefs mount` taking the S3 key from the environment, for per-person and per-Mac keys (DECISIONS #22), if a format with no stored key does not already mount with the AWS SDK's chain against Garage and OVH.
 
 **Why Valkey and not PostgreSQL**: one round trip per write through server-side scripts, and native replication simple enough to run a replica in each VM. Valkey and not Redis: Redis moved to source-available licenses in 2024 and to AGPL as an option in 2025; Valkey is BSD and in Debian 13 (8.1.1). The price is durability, which has to be configured: every write on disk before the answer (`appendfsync always`), a replica in the datacenter, a daily `juicefs dump` (see Backup).

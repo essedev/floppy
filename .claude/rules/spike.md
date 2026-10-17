@@ -12,7 +12,7 @@ spike/bench.sh                 # upload, cold/warm reads, seeks, warmup
 LINE_MBPS=100 docker compose -f spike/docker-compose.yml --profile shaped up -d shaper   # one real link queue
 DOWNLOAD_LIMIT_MBPS=0 spike/data-bench.sh  # cold reads inside the box and from the Mac, seeks, scrubbing
 spike/meta-bench.sh            # metadata over SMB: SQLite vs PostgreSQL
-spike/juicefs-replica/build.sh # patched juicefs into dist/
+spike/juicefs-replica/build.sh # patched juicefs into dist/ (skipped while dist/BUILD matches)
 spike/juicefs-replica/test.sh  # the patches' Go tests
 JUICEFS_SOURCE=replica docker compose -f spike/docker-compose.yml --profile replica build drive drive-b
 spike/acceptance.py [--baseline] [t01 ...]   # two clients, central Valkey + replicas, 17 checks
