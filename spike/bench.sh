@@ -4,7 +4,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-MNT="${MNT:-$HOME/FluixSpike}"
+MNT="${MNT:-$HOME/FloppySpike}"
 DIR="$MNT/bench"
 CDIR=/mnt/drive/bench
 drive() { docker compose exec -T drive "$@"; }
@@ -13,7 +13,7 @@ secs() { python3 -c "print(f'{$2 - $1:.1f}')"; }
 remount() {
   # Right after heavy I/O the share can be briefly busy.
   for _ in 1 2 3 4 5; do /sbin/umount "$MNT" 2>/dev/null && break; sleep 2; done
-  /sbin/mount_smbfs "//drive:$(grep '^SMB_PASSWORD=' .env | cut -d= -f2)@localhost:4503/Fluix" "$MNT"
+  /sbin/mount_smbfs "//drive:$(grep '^SMB_PASSWORD=' .env | cut -d= -f2)@localhost:4503/Floppy" "$MNT"
 }
 evict() { drive juicefs warmup --evict "$CDIR" >/dev/null 2>&1; remount; }
 read_file() { dd if="$1" of=/dev/null bs=4m 2>/dev/null; }

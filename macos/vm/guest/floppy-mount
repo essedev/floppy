@@ -2,7 +2,7 @@
 # Formats the volume on first run, then mounts it in the foreground for systemd.
 set -euo pipefail
 # shellcheck disable=SC1091
-. /etc/fluix/config.env
+. /etc/floppy/config.env
 export ACCESS_KEY SECRET_KEY
 
 if ! juicefs status "$META_URL" >/dev/null 2>&1; then
@@ -16,7 +16,7 @@ mkdir -p /mnt/drive
 # 256 MB measured as fast as 1024 MB.
 exec juicefs mount "$META_URL" /mnt/drive \
   --bucket "$BUCKET_URL" \
-  --cache-dir /var/cache/fluix --cache-size "${CACHE_SIZE_MB:-102400}" \
+  --cache-dir /var/cache/floppy --cache-size "${CACHE_SIZE_MB:-102400}" \
   --cache-expire "${CACHE_EXPIRE:-720h}" \
   --cache-large-write \
   --prefetch "${PREFETCH:-8}" --buffer-size "${BUFFER_SIZE_MB:-256}" \

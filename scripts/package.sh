@@ -1,5 +1,5 @@
 #!/bin/bash
-# Builds the zip handed to a tester: Lima, the fluix command, the VM
+# Builds the zip handed to a tester: Lima, the floppy command, the VM
 # files and a filled-in config. The zip holds secrets: share it privately.
 # Usage: scripts/package.sh <config.env> [output dir, default dist/]
 set -euo pipefail
@@ -15,7 +15,7 @@ done
 
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
-pkg="$work/fluix"
+pkg="$work/floppy"
 mkdir -p "$pkg/lima"
 
 tarball="lima-${LIMA_VERSION}-Darwin-arm64.tar.gz"
@@ -64,7 +64,7 @@ docker run --rm --platform linux/arm64 -e PACKAGES="$packages" \
 install -m 600 "$config" "$pkg/config.env"
 
 mkdir -p "$out"
-zip="$(cd "$out" && pwd)/fluix.zip"
+zip="$(cd "$out" && pwd)/floppy.zip"
 rm -f "$zip"
-(cd "$work" && zip -qry "$zip" fluix)
+(cd "$work" && zip -qry "$zip" floppy)
 echo "$zip"

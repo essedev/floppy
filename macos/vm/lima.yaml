@@ -1,4 +1,4 @@
-# Fluix VM: Debian with JuiceFS and Samba. macOS mounts the share over
+# Floppy VM: Debian with JuiceFS and Samba. macOS mounts the share over
 # SMB, so no FUSE kernel extension is needed on the Mac.
 minimumLimaVersion: 2.0.0
 base:

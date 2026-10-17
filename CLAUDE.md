@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Fluix is a shared remote disk for video teams on macOS: it shows up in the Finder as **Fluix**, and the files live on S3 object storage (OVH) through JuiceFS. On macOS JuiceFS runs in a Lima VM (Debian) and reaches the Mac over SMB, because mounting it directly would need macFUSE's kernel extension. The engine is a bash command (`macos/bin/fluix`) shipped in a private zip. The team architecture (a central Valkey with a metadata replica in each VM, a patched JuiceFS, a control plane, a Tauri app) is drawn in `docs/architecture.html` and the concepts in `docs/concepts/`, proven in `spike/`, not built yet.
+Floppy is a shared remote disk for video teams on macOS: it shows up in the Finder as **Floppy**, and the files live on S3 object storage (OVH) through JuiceFS. On macOS JuiceFS runs in a Lima VM (Debian) and reaches the Mac over SMB, because mounting it directly would need macFUSE's kernel extension. The engine is a bash command (`macos/bin/floppy`) shipped in a private zip. The team architecture (a central Valkey with a metadata replica in each VM, a patched JuiceFS, a control plane, a Tauri app) is drawn in `docs/architecture.html` and the concepts in `docs/concepts/`, proven in `spike/`, not built yet.
 
 Public repository: code, comments, docs and commits in English; README.md is mirrored in README.it.md in the same commit.
 
@@ -8,9 +8,9 @@ Public repository: code, comments, docs and commits in English; README.md is mir
 
 The full glossary is in [docs/CONVENTIONS.md](docs/CONVENTIONS.md#glossary). The terms that matter most when changing code:
 
-- **Disk / Fluix**: what the user sees in the Finder. **Volume**: the JuiceFS filesystem behind it, with a name (`VOLUME_NAME`) and its metadata.
-- **Metadata**: in the test they live in SQLite **inside the VM** (`/var/lib/fluix/meta.db`): losing the VM makes the data in the bucket unreadable.
-- **Cache**: blocks already downloaded, on the VM's disk. **Warmup** is "Make available" (`fluix warmup`), **evict** is "Free up space" (`fluix free`).
+- **Disk / Floppy**: what the user sees in the Finder. **Volume**: the JuiceFS filesystem behind it, with a name (`VOLUME_NAME`) and its metadata.
+- **Metadata**: in the test they live in SQLite **inside the VM** (`/var/lib/floppy/meta.db`): losing the VM makes the data in the bucket unreadable.
+- **Cache**: blocks already downloaded, on the VM's disk. **Warmup** is "Make available" (`floppy warmup`), **evict** is "Free up space" (`floppy free`).
 - **The user**: someone editing with CapCut, not technical. **Simone**: who develops and decides.
 
 ## Commands
@@ -18,16 +18,16 @@ The full glossary is in [docs/CONVENTIONS.md](docs/CONVENTIONS.md#glossary). The
 ```bash
 make check                               # bash -n, shellcheck, prose language
 scripts/package.sh my-test.env [dist]    # zip for a tester: Lima + command + VM + config (holds the keys); needs Docker running
-bash fluix/install.sh                    # from the unpacked package: installs into ~/.fluix and mounts
-~/.fluix/bin/fluix status                # setup|start|stop|status|warmup <path>|free <path>|uninstall
+bash floppy/install.sh                    # from the unpacked package: installs into ~/.floppy and mounts
+~/.floppy/bin/floppy status                # setup|start|stop|status|warmup <path>|free <path>|uninstall
 
 # Apply repo changes to this Mac's install (keeps VM and volume)
-cp macos/bin/fluix ~/.fluix/bin/ && cp macos/vm/guest/* ~/.fluix/vm/guest/ \
-  && ~/.fluix/bin/fluix setup
+cp macos/bin/floppy ~/.floppy/bin/ && cp macos/vm/guest/* ~/.floppy/vm/guest/ \
+  && ~/.floppy/bin/floppy setup
 
 # Inside the VM
-export LIMA_HOME=~/.fluix/vms
-~/.fluix/lima/bin/limactl shell --workdir / fluix <cmd>   # e.g. sudo journalctl -u fluix-mount
+export LIMA_HOME=~/.floppy/vms
+~/.floppy/lima/bin/limactl shell --workdir / floppy <cmd>   # e.g. sudo journalctl -u floppy-mount
 
 # Local spike
 spike/setup.sh                 # Garage, PostgreSQL, Toxiproxy, drive container; secrets in spike/.env
@@ -46,9 +46,9 @@ cd site && pnpm dev            # pnpm build, pnpm check
 
 **Never `juicefs mount` directly on macOS.** With FUSE-T it fails (`no FUSE mount utility found`), with macFUSE's FSKit backend it hangs, and the only working path is the kernel extension, which makes every Mac go through recovery mode. JuiceFS runs in Linux (the VM), the Mac mounts SMB.
 
-**The mount point must stay `/Volumes/Fluix`, but it is never assumed.** CapCut references videos by full path: with `Fluix-1` projects lose their files. macOS picks `-1` when the folder of a previous mount is still there, and it happened after the Mac slept. Mount only on a free name (`mount_share`), and read the mount point from `/sbin/mount` (`mount_point`), never `VOLUME=/Volumes/Fluix`.
+**The mount point must stay `/Volumes/Floppy`, but it is never assumed.** CapCut references videos by full path: with `Floppy-1` projects lose their files. macOS picks `-1` when the folder of a previous mount is still there, and it happened after the Mac slept. Mount only on a free name (`mount_share`), and read the mount point from `/sbin/mount` (`mount_point`), never `VOLUME=/Volumes/Floppy`.
 
-**Never unmount or remount a mounted disk automatically.** A disk busy with a large copy answers slowly and looks dead: the agent force-unmounted it halfway through a `cp` and the copy failed. `tick` mounts only if the disk is missing (`mount_share keep`); remounting is only in `fluix start`, asked for by the user, and never with `force`.
+**Never unmount or remount a mounted disk automatically.** A disk busy with a large copy answers slowly and looks dead: the agent force-unmounted it halfway through a `cp` and the copy failed. `tick` mounts only if the disk is missing (`mount_share keep`); remounting is only in `floppy start`, asked for by the user, and never with `force`.
 
 **The VM does not see the Mac's disk.** JuiceFS's space check (`--free-space-ratio`) looks at the VM's disk, which believes it is large; on a tester's Mac the cache filled the disk and the VM's filesystem failed. Space limits are computed on the Mac side (`cache_limit_mb`, `RESERVE_MB`, the check in `tick`), and a VM that Lima calls "Running" can be broken inside (`vm_healthy`).
 
@@ -58,19 +58,19 @@ cd site && pnpm dev            # pnpm build, pnpm check
 
 **No external network during install.** An office DNS did not resolve `cloud.debian.org`: the Debian image, JuiceFS and the Samba and FUSE `.deb` files are in the zip (`scripts/package.sh`). The `.deb` files are the whole dependency closure, taken in a `debian:trixie` container with an empty dpkg status: a plain `--download-only` would miss the libraries the container already has and the image may have in an older version. The list is `PACKAGES` in `guest-install.sh`, which `package.sh` reads; `deb.debian.org` stays as a fallback if the local repository fails.
 
-**`systemctl is-active` with several units says yes if at least one is active.** A check on `fluix-mount smbd` together missed a stopped Samba. One unit per call.
+**`systemctl is-active` with several units says yes if at least one is active.** A check on `floppy-mount smbd` together missed a stopped Samba. One unit per call.
 
 **Absolute paths for system tools.** In some shells and under launchd `/usr/sbin` is not in the PATH: `diskutil` "not found" made a benchmark's remounts fail silently. Write `/usr/sbin/diskutil`, `/usr/bin/osascript`, `/sbin/mount`.
 
-**Do not uninstall or delete the VM to "start clean".** `fluix uninstall` and `limactl delete` throw away the metadata: the data in the bucket stays but can no longer be read, and a reinstall with the same `VOLUME_NAME` on the same bucket collides with the old one. To apply changes, rerun `setup`.
+**Do not uninstall or delete the VM to "start clean".** `floppy uninstall` and `limactl delete` throw away the metadata: the data in the bucket stays but can no longer be read, and a reinstall with the same `VOLUME_NAME` on the same bucket collides with the old one. To apply changes, rerun `setup`.
 
-**`setup` does not change the RAM of an existing VM.** `memory` in `lima.yaml` applies only at creation; an existing VM needs `limactl edit --memory <GiB> fluix` while stopped. The rest (`vm/guest/`, config) `setup` reapplies.
+**`setup` does not change the RAM of an existing VM.** `memory` in `lima.yaml` applies only at creation; an existing VM needs `limactl edit --memory <GiB> floppy` while stopped. The rest (`vm/guest/`, config) `setup` reapplies.
 
 **JuiceFS behind Samba needs `--enable-xattr`.** Without it, Samba (`fruit` module, which needs the `samba-vfs-modules` package) cannot store the Finder's metadata and deleting a file from the Mac gives `Operation not supported`.
 
 **JuiceFS does not cache uploaded blocks** unless `--cache-large-write` is on (off by default). The docs assumed it and it was false.
 
-**macOS gives up on an SMB read after 30 s** and the Finder gets an I/O error. The command raises `max_resp_timeout` only for the VM's address, in a `# fluix begin/end` block of `~/Library/Preferences/nsmb.conf`: never rewrite that file whole, it holds the user's configuration.
+**macOS gives up on an SMB read after 30 s** and the Finder gets an I/O error. The command raises `max_resp_timeout` only for the VM's address, in a `# floppy begin/end` block of `~/Library/Preferences/nsmb.conf`: never rewrite that file whole, it holds the user's configuration.
 
 **Simulate bandwidth with JuiceFS's limits, not Toxiproxy.** Toxiproxy's `bandwidth` is per connection and JuiceFS opens many: 2.7 GB "went through" at 150 MB/s with a 37 MB/s limit. Toxiproxy is only for latency; bandwidth is `--download-limit`/`--upload-limit` (`DOWNLOAD_LIMIT_MBPS`, `UPLOAD_LIMIT_MBPS`).
 
@@ -80,23 +80,23 @@ cd site && pnpm dev            # pnpm build, pnpm check
 
 **Samba multiplies metadata operations.** Listing 300 files from the Finder costs about 2,700 file system operations (lookups of `._` names, extended attributes); with the metadata across a network each is a round trip (117 s at 15 ms). Do not tune Samba or caches around it: reads must come from the local replica (DECISIONS #5).
 
-**macOS mounts a server and share only once.** A second mount of `localhost/Fluix`, even on another port, fails with "File exists": the spike reaches the second client by address (`127.0.0.1`).
+**macOS mounts a server and share only once.** A second mount of `localhost/Floppy`, even on another port, fails with "File exists": the spike reaches the second client by address (`127.0.0.1`).
 
 **Unmount SMB with `-f` in scripts.** A gentle unmount can leave a stale session, and the next mount of the same share answers I/O errors.
 
-**The spike needs the SMB timeout too.** The real install raises `max_resp_timeout` for the VM's address; the spike talks to `localhost` and `127.0.0.1`, so the same block (`# fluix-spike begin/end` in `~/Library/Preferences/nsmb.conf`) has to be there, or cold reads fail after 30 s.
+**The spike needs the SMB timeout too.** The real install raises `max_resp_timeout` for the VM's address; the spike talks to `localhost` and `127.0.0.1`, so the same block (`# floppy-spike begin/end` in `~/Library/Preferences/nsmb.conf`) has to be there, or cold reads fail after 30 s.
 
 **The per-Mac Valkey user needs more than reads and writes**: INFO, HINCRBY and DEL on `ryw*` on the master and HGET on the replica, EVAL and EVALSHA for the optimistic writes, and PSYNC, REPLCONF, PING for its replica. A missing HINCRBY aborts every write transaction.
 
 ## Secrets
 
-`spike/.env` (with the PostgreSQL and Valkey passwords), `my-test.env`, `~/.fluix/config.env` and every `dist/*.zip` hold S3 keys and the SMB password: they are outside git (`*.env`, `dist/`) and are never printed, not even in a debug log. To check a file, show the key names, not the values. `package.sh` builds the zip with `umask 077`. OVH S3 keys open every bucket in the project: a tester needs a dedicated user.
+`spike/.env` (with the PostgreSQL and Valkey passwords), `my-test.env`, `~/.floppy/config.env` and every `dist/*.zip` hold S3 keys and the SMB password: they are outside git (`*.env`, `dist/`) and are never printed, not even in a debug log. To check a file, show the key names, not the values. `package.sh` builds the zip with `umask 077`. OVH S3 keys open every bucket in the project: a tester needs a dedicated user.
 
 ## Touch every surface
 
 A change to how the disk behaves almost always goes through several files:
 
-- `macos/bin/fluix` (Mac side) and `macos/vm/guest/` (VM side: `fluix-mount`, `guest-install.sh`, `smb.conf`, the systemd service).
+- `macos/bin/floppy` (Mac side) and `macos/vm/guest/` (VM side: `floppy-mount`, `guest-install.sh`, `smb.conf`, the systemd service).
 - `macos/vm/lima.yaml` if the VM changes, and then the `setup` gotcha above.
 - `macos/config.env.example` if `config.env` gets a new option.
 - `macos/install.sh` and `scripts/package.sh` if what goes into the zip changes.

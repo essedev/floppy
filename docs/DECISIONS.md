@@ -45,7 +45,7 @@ A Valkey replica copies its whole instance, so the hosted service gives each org
 
 ## 9. Menu bar app in Tauri, macOS only
 
-**Active, 17/10/2026.** Tauri from the Portsage skeleton, React in the webview, the `fluix` command as the engine; one design system shared with the control plane's web. Finder badges, if ever needed, come as a small Swift extension next to the app.
+**Active, 17/10/2026.** Tauri from the Portsage skeleton, React in the webview, the `floppy` command as the engine; one design system shared with the control plane's web. Finder badges, if ever needed, come as a small Swift extension next to the app.
 **Ruled out:** a SwiftUI app (two design systems), File Provider (downloads whole files, breaks scrubbing).
 
 ## 10. Distribution through a Homebrew cask

@@ -1,5 +1,5 @@
-SCRIPTS := macos/bin/fluix macos/install.sh macos/vm/guest/guest-install.sh \
-	macos/vm/guest/fluix-mount scripts/package.sh spike/setup.sh spike/bench.sh spike/meta-bench.sh spike/meta-access.sh \
+SCRIPTS := macos/bin/floppy macos/install.sh macos/vm/guest/guest-install.sh \
+	macos/vm/guest/floppy-mount scripts/package.sh spike/setup.sh spike/bench.sh spike/meta-bench.sh spike/meta-access.sh \
 	spike/juicefs-replica/build.sh spike/juicefs-replica/test.sh \
 	spike/drive/entrypoint.sh
 

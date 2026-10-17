@@ -8,12 +8,12 @@ The metadata spike is closed (16 of 17 checks, CYCLES 6). What is left is the da
 
 ## 2. Name
 
-Pick the new name (DECISIONS #14), check it directly on EUIPO and UIBM in classes 9 and 42, take the domains, then rename everything in one pass: command, disk and mount point (`/Volumes/<Name>`), VM, services, data folder, repository, docs. It has to happen before anyone uses the disk with CapCut projects.
+Floppy is chosen and the repository is renamed (DECISIONS #14). Left: check it directly on EUIPO and UIBM in classes 9 and 42, rename the GitHub repository and the URL that points to it (`site/src/brand.ts`, `docs/concepts/concept-d-onboarding.html`), and hand the tester a new zip before anyone uses the disk with CapCut projects. Domains are set aside for now.
 
 ## 3. Build
 
 - **Design on paper**: the team architecture from [architecture.html](architecture.html) into ARCHITECTURE.md, and `docs/DATABASE_SCHEMA.md` for the control plane.
-- **Engine**: the patched JuiceFS and a Valkey replica in the VM's offline package set, `fluix status --json`, the metadata URL from the app instead of a config file, the SMB password in the Keychain.
+- **Engine**: the patched JuiceFS and a Valkey replica in the VM's offline package set, `floppy status --json`, the metadata URL from the app instead of a config file, the SMB password in the Keychain.
 - **Control plane**: FastAPI and React, accounts with magic link sign-in, organizations, disks, one Valkey user per Mac, key rotation, audit log, Docker Compose for self-hosting.
 - **App**: Tauri from the Portsage skeleton, built from the concepts (panel, settings, first run).
 - **Distribution and first instance**: the Homebrew cask, then the first self-hosted instance on Dokploy with a central Valkey and S3 in Milan.
@@ -25,6 +25,6 @@ One shared disk, one or two weeks of real work in CapCut, on the first instance.
 ## 5. Alongside
 
 - **The JuiceFS patch upstream**: propose the read replica and the optimistic transactions to JuiceFS, so the fork does not have to live forever.
-- **Site**: Astro and Starlight in `site/` (DECISIONS #13), with the final name and domain.
+- **Site**: Astro and Starlight in `site/` (DECISIONS #13), with the domain once there is one.
 - **Comparison with SpaceFS**: their 7-day trial on the same project as the pilot.
 - **At the end of the tests**: revoke the test S3 key and empty the test bucket.

@@ -1,23 +1,23 @@
 #!/bin/bash
-# Fluix for macOS: runs JuiceFS in a small Lima VM and mounts it in the
-# Finder over SMB. Everything lives in ~/.fluix; no admin rights needed.
+# Floppy for macOS: runs JuiceFS in a small Lima VM and mounts it in the
+# Finder over SMB. Everything lives in ~/.floppy; no admin rights needed.
 set -eEuo pipefail
 
-FLUIX_HOME="${FLUIX_HOME:-$HOME/.fluix}"
-export LIMA_HOME="$FLUIX_HOME/vms"
-LIMACTL="$FLUIX_HOME/lima/bin/limactl"
-VM=fluix
-SHARE=Fluix
-AGENT_LABEL=dev.esse.fluix
+FLOPPY_HOME="${FLOPPY_HOME:-$HOME/.floppy}"
+export LIMA_HOME="$FLOPPY_HOME/vms"
+LIMACTL="$FLOPPY_HOME/lima/bin/limactl"
+VM=floppy
+SHARE=Floppy
+AGENT_LABEL=dev.esse.floppy
 AGENT_PLIST="$HOME/Library/LaunchAgents/$AGENT_LABEL.plist"
 NSMB_CONF="$HOME/Library/Preferences/nsmb.conf"
-LIMA_LOG="$FLUIX_HOME/lima.log"
+LIMA_LOG="$FLOPPY_HOME/lima.log"
 # Written once setup has completed; a VM without it is a leftover of a failed
 # install and holds no data.
-INSTALLED_MARK="$FLUIX_HOME/installed"
-IMAGE="$FLUIX_HOME/vm/debian.qcow2"
-STOPPED_FLAG="$FLUIX_HOME/stopped"
-RESTART_STAMP="$FLUIX_HOME/last-vm-restart"
+INSTALLED_MARK="$FLOPPY_HOME/installed"
+IMAGE="$FLOPPY_HOME/vm/debian.qcow2"
+STOPPED_FLAG="$FLOPPY_HOME/stopped"
+RESTART_STAMP="$FLOPPY_HOME/last-vm-restart"
 # How often the agent checks the VM, the share and the Mac's free space.
 TICK_SECONDS=120
 
@@ -28,12 +28,12 @@ TICK_SECONDS=120
 # growing. It filled a tester's disk with 50 GB of log.
 exec 3>&2
 log() { printf '%s\n' "$*" >&3; }
-die() { log "fluix: $*"; exit 1; }
+die() { log "floppy: $*"; exit 1; }
 # Any unexpected failure says where it happened and shows the end of the log,
 # instead of dropping back to the prompt in silence.
 on_error() {
   trap - ERR
-  log "fluix: failed (exit $1, line $2). Last lines of $LIMA_LOG:"
+  log "floppy: failed (exit $1, line $2). Last lines of $LIMA_LOG:"
   if [ -f "$LIMA_LOG" ]; then tail -15 "$LIMA_LOG" >&3; fi
 }
 trap 'on_error $? $LINENO' ERR
@@ -50,12 +50,12 @@ trim_log() {
 lima() { trim_log; "$LIMACTL" "$@" 3>&-; }
 vm_status() { lima list --format '{{.Status}}' "$VM" 2>/dev/null || true; }
 in_vm() { lima shell --workdir / "$VM" "$@"; }
-config() { grep "^$1=" "$FLUIX_HOME/config.env" | cut -d= -f2- || true; }
+config() { grep "^$1=" "$FLOPPY_HOME/config.env" | cut -d= -f2- || true; }
 notify() {
-  /usr/bin/osascript -e "display notification \"$1\" with title \"Fluix\"" >/dev/null 2>&1 || true
+  /usr/bin/osascript -e "display notification \"$1\" with title \"Floppy\"" >/dev/null 2>&1 || true
 }
-# Where macOS mounted the share. Usually /Volumes/Fluix, but macOS picks
-# Fluix-1 and so on when the name is taken, so it is never assumed.
+# Where macOS mounted the share. Usually /Volumes/Floppy, but macOS picks
+# Floppy-1 and so on when the name is taken, so it is never assumed.
 mount_point() {
   /sbin/mount | sed -n "s|^//drive@[0-9.]*/$SHARE on \(.*\) (smbfs.*|\1|p" | head -1
 }
@@ -102,7 +102,7 @@ vm_path() {
 # When the Mac fills up the file cannot grow and the VM's disk breaks.
 mac_free_mb() { df -m "$HOME" | awk 'NR == 2 {print $4}'; }
 reserve_mb() { local r; r=$(config RESERVE_MB); echo "${r:-20480}"; }
-cache_used_mb() { in_vm sudo du -sm /var/cache/fluix 2>/dev/null | cut -f1 || echo 0; }
+cache_used_mb() { in_vm sudo du -sm /var/cache/floppy 2>/dev/null | cut -f1 || echo 0; }
 
 # The cache limit: half of what the Mac can spare above the reserve, capped by
 # CACHE_SIZE_MB. Space the cache already holds counts as spare.
@@ -118,7 +118,7 @@ cache_limit_mb() {
 start_vm() {
   case "$(vm_status)" in
     Running) ;;
-    "") die "VM not set up, run: fluix setup" ;;
+    "") die "VM not set up, run: floppy setup" ;;
     *) log "Starting the VM..."
        # A start that cannot finish (a download that never resolves) gives up
        # instead of hanging the install.
@@ -131,7 +131,7 @@ start_vm() {
 # I/O error. Raise the limit for the VM's address only, in the user's
 # nsmb.conf, inside a block this script owns.
 set_smb_timeout() {
-  local ip="$1" begin="# fluix begin" end="# fluix end" rest=""
+  local ip="$1" begin="# floppy begin" end="# floppy end" rest=""
   [ -f "$NSMB_CONF" ] && rest=$(sed "/^$begin\$/,/^$end\$/d" "$NSMB_CONF")
   {
     [ -n "$rest" ] && printf '%s\n' "$rest"
@@ -153,7 +153,7 @@ unmount_share() {
 # in progress) answers slowly and looks dead, and replacing it aborts the copy.
 # It happened: the agent force-unmounted the disk in the middle of a cp. After
 # a wake from sleep macOS reconnects SMB by itself. Only an explicit
-# `fluix start` replaces a mount that stays unresponsive, and never by
+# `floppy start` replaces a mount that stays unresponsive, and never by
 # force.
 mount_share() {
   if is_mounted; then
@@ -164,7 +164,7 @@ mount_share() {
     done
     log "$(date '+%F %T') The disk is not responding, mounting it again..."
     /usr/sbin/diskutil unmount "$(mount_point)" >/dev/null 2>&1 \
-      || die "the disk is busy and not responding: close the apps using it and run fluix start again"
+      || die "the disk is busy and not responding: close the apps using it and run floppy start again"
   fi
   local ip
   ip=$(vm_ip)
@@ -175,7 +175,7 @@ mount_share() {
     sleep 1
   done
   # CapCut projects point at media by full path: the disk must come back as
-  # /Volumes/Fluix, never Fluix-1. macOS picks -1 while the folder
+  # /Volumes/Floppy, never Floppy-1. macOS picks -1 while the folder
   # of the previous mount still exists, so wait for it to go.
   for _ in $(seq 30); do
     [ -e "/Volumes/$SHARE" ] || break
@@ -206,11 +206,11 @@ install_agent() {
 <dict>
   <key>Label</key><string>$AGENT_LABEL</string>
   <key>ProgramArguments</key>
-  <array><string>$FLUIX_HOME/bin/fluix</string><string>tick</string></array>
+  <array><string>$FLOPPY_HOME/bin/floppy</string><string>tick</string></array>
   <key>RunAtLoad</key><true/>
   <key>StartInterval</key><integer>$TICK_SECONDS</integer>
-  <key>StandardOutPath</key><string>$FLUIX_HOME/agent.log</string>
-  <key>StandardErrorPath</key><string>$FLUIX_HOME/agent.log</string>
+  <key>StandardOutPath</key><string>$FLOPPY_HOME/agent.log</string>
+  <key>StandardErrorPath</key><string>$FLOPPY_HOME/agent.log</string>
 </dict>
 </plist>
 EOF
@@ -224,7 +224,7 @@ EOF
 discard_failed_vm() {
   [ -n "$(vm_status)" ] || return 0
   [ -f "$INSTALLED_MARK" ] && return 0
-  if [ "$(vm_status)" = Running ] && vm_healthy && in_vm test -f /etc/fluix/config.env; then
+  if [ "$(vm_status)" = Running ] && vm_healthy && in_vm test -f /etc/floppy/config.env; then
     touch "$INSTALLED_MARK"
     return 0
   fi
@@ -233,8 +233,8 @@ discard_failed_vm() {
   lima delete --force "$VM" >>"$LIMA_LOG" 2>&1 || true
   # The failed attempt may have formatted its volume in the bucket: start
   # from a new name so the new metadata does not meet the old data.
-  if grep -qE '^VOLUME_NAME=fluix-.+-[0-9a-f]{6}$' "$FLUIX_HOME/config.env"; then
-    sed -i '' -E "s/^(VOLUME_NAME=fluix-.+-)[0-9a-f]{6}\$/\1$(openssl rand -hex 3)/" "$FLUIX_HOME/config.env"
+  if grep -qE '^VOLUME_NAME=floppy-.+-[0-9a-f]{6}$' "$FLOPPY_HOME/config.env"; then
+    sed -i '' -E "s/^(VOLUME_NAME=floppy-.+-)[0-9a-f]{6}\$/\1$(openssl rand -hex 3)/" "$FLOPPY_HOME/config.env"
   fi
 }
 
@@ -246,11 +246,11 @@ create_vm() {
     set_image=(--set ".images = [{\"location\": \"$IMAGE\", \"arch\": \"aarch64\", \"digest\": \"$(cat "$IMAGE.digest")\"}]")
   fi
   log "Creating the VM (first time, a few minutes)..."
-  lima create --name="$VM" --tty=false --disk="$disk_gib" ${set_image[@]+"${set_image[@]}"} "$FLUIX_HOME/vm/lima.yaml" >>"$LIMA_LOG" 2>&1
+  lima create --name="$VM" --tty=false --disk="$disk_gib" ${set_image[@]+"${set_image[@]}"} "$FLOPPY_HOME/vm/lima.yaml" >>"$LIMA_LOG" 2>&1
 }
 
 cmd_setup() {
-  [ -f "$FLUIX_HOME/config.env" ] || die "missing $FLUIX_HOME/config.env"
+  [ -f "$FLOPPY_HOME/config.env" ] || die "missing $FLOPPY_HOME/config.env"
   local used=0 limit disk_gib conf
   discard_failed_vm
   if [ -n "$(vm_status)" ]; then
@@ -270,14 +270,14 @@ cmd_setup() {
   fi
   log "Installing the drive in the VM (cache up to $(( limit / 1024 )) GB)..."
   conf=$(mktemp)
-  sed '/^CACHE_SIZE_MB=/d' "$FLUIX_HOME/config.env" > "$conf"
+  sed '/^CACHE_SIZE_MB=/d' "$FLOPPY_HOME/config.env" > "$conf"
   echo "CACHE_SIZE_MB=$limit" >> "$conf"
-  in_vm rm -rf /tmp/fluix-guest
-  lima copy -r "$FLUIX_HOME/vm/guest" "$VM:/tmp/fluix-guest"
-  lima copy "$conf" "$VM:/tmp/fluix-guest/config.env"
+  in_vm rm -rf /tmp/floppy-guest
+  lima copy -r "$FLOPPY_HOME/vm/guest" "$VM:/tmp/floppy-guest"
+  lima copy "$conf" "$VM:/tmp/floppy-guest/config.env"
   rm -f "$conf"
-  in_vm sudo bash /tmp/fluix-guest/guest-install.sh >>"$LIMA_LOG" 2>&1
-  in_vm rm -rf /tmp/fluix-guest
+  in_vm sudo bash /tmp/floppy-guest/guest-install.sh >>"$LIMA_LOG" 2>&1
+  in_vm rm -rf /tmp/floppy-guest
   rm -f "$STOPPED_FLAG"
   install_agent
   mount_share
@@ -288,7 +288,7 @@ cmd_setup() {
 cmd_start() {
   rm -f "$STOPPED_FLAG"
   start_vm
-  vm_healthy || die "the VM is not responding, run: fluix status"
+  vm_healthy || die "the VM is not responding, run: floppy status"
   mount_share
 }
 
@@ -310,14 +310,14 @@ cmd_tick() {
     unmount_share
     lima stop --force "$VM" >>"$LIMA_LOG" 2>&1 || true
     start_vm
-    vm_healthy || { notify "Il disco non riparte. Scrivi a chi ti ha installato Fluix."; return 0; }
+    vm_healthy || { notify "Il disco non riparte. Scrivi a chi ti ha installato Floppy."; return 0; }
   fi
   # JuiceFS can restart on its own; Samba then serves a dead path until it is
   # restarted as well.
   # One unit per call: with several units is-active succeeds if any is active.
-  if ! in_vm systemctl is-active --quiet fluix-mount || ! in_vm systemctl is-active --quiet smbd; then
+  if ! in_vm systemctl is-active --quiet floppy-mount || ! in_vm systemctl is-active --quiet smbd; then
     log "$(date '+%F %T') drive services down, restarting them"
-    in_vm sudo systemctl restart fluix-mount smbd >>"$LIMA_LOG" 2>&1 || true
+    in_vm sudo systemctl restart floppy-mount smbd >>"$LIMA_LOG" 2>&1 || true
   fi
   local free
   free=$(mac_free_mb)
@@ -348,23 +348,23 @@ cmd_status() {
     printf 'Disk:    not mounted\n'
   fi
   # shellcheck disable=SC2016 # literal backticks around the command name
-  [ -f "$STOPPED_FLAG" ] && printf 'Stopped: by the user, `fluix start` brings it back\n'
+  [ -f "$STOPPED_FLAG" ] && printf 'Stopped: by the user, `floppy start` brings it back\n'
   printf 'Mac:     %s GB free\n' "$(( $(mac_free_mb) / 1024 ))"
   if [ "$st" = Running ]; then
-    printf 'Drive:   %s\n' "$(in_vm systemctl is-active fluix-mount || true)"
+    printf 'Drive:   %s\n' "$(in_vm systemctl is-active floppy-mount || true)"
     # shellcheck disable=SC2016 # $CACHE_SIZE_MB expands inside the VM
     printf 'Cache:   %s MB of %s MB\n' "$(cache_used_mb)" \
-      "$(in_vm sudo sh -c '. /etc/fluix/config.env; echo $CACHE_SIZE_MB' 2>/dev/null || echo '?')"
+      "$(in_vm sudo sh -c '. /etc/floppy/config.env; echo $CACHE_SIZE_MB' 2>/dev/null || echo '?')"
   fi
 }
 
 cmd_warmup() {
-  [ $# -ge 1 ] || die "usage: fluix warmup <file or folder on the disk>"
+  [ $# -ge 1 ] || die "usage: floppy warmup <file or folder on the disk>"
   for p in "$@"; do in_vm sudo juicefs warmup "$(vm_path "$p")"; done
 }
 
 cmd_free() {
-  [ $# -ge 1 ] || die "usage: fluix free <file or folder on the disk>"
+  [ $# -ge 1 ] || die "usage: floppy free <file or folder on the disk>"
   for p in "$@"; do in_vm sudo juicefs warmup --evict "$(vm_path "$p")"; done
   # Gives the freed space back to the Mac now instead of at the weekly trim.
   in_vm sudo fstrim / >/dev/null
@@ -383,16 +383,16 @@ cmd_uninstall() {
     lima delete --force "$VM" >>"$LIMA_LOG" 2>&1
   fi
   if [ -f "$NSMB_CONF" ]; then
-    sed -i '' '/^# fluix begin$/,/^# fluix end$/d' "$NSMB_CONF"
+    sed -i '' '/^# floppy begin$/,/^# floppy end$/d' "$NSMB_CONF"
     [ -s "$NSMB_CONF" ] || rm -f "$NSMB_CONF"
   fi
   # The config names a volume whose metadata died with the VM: a reinstall
   # must start from a new name, so nothing of this install is kept.
-  rm -rf "$FLUIX_HOME"
+  rm -rf "$FLOPPY_HOME"
   log "Removed."
 }
 
 case "${1:-}" in
   setup|start|tick|stop|status|warmup|free|uninstall) cmd="$1"; shift; "cmd_$cmd" "$@" ;;
-  *) log "usage: fluix setup|start|stop|status|warmup <path>|free <path>|uninstall"; exit 2 ;;
+  *) log "usage: floppy setup|start|stop|status|warmup <path>|free <path>|uninstall"; exit 2 ;;
 esac

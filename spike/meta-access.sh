@@ -12,18 +12,18 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-MNT="${MNT:-$HOME/FluixSpike}"
+MNT="${MNT:-$HOME/FloppySpike}"
 DB=access
-ROLE=fluix_d_test
+ROLE=floppy_d_test
 env_val() { grep "^$1=" .env | cut -d= -f2; }
 PG_PASSWORD=$(env_val PG_PASSWORD)
 SMB_PASSWORD=$(env_val SMB_PASSWORD)
 KEY1=$(env_val ACCESS_KEY)
 ROLE_PASSWORD=$(openssl rand -hex 12)
-ADMIN_META="postgres://fluix_admin:$PG_PASSWORD@postgres:5432/$DB?sslmode=disable"
+ADMIN_META="postgres://floppy_admin:$PG_PASSWORD@postgres:5432/$DB?sslmode=disable"
 ROLE_META="postgres://$ROLE:$ROLE_PASSWORD@postgres:5432/$DB?sslmode=disable"
 
-psql_db() { docker compose exec -T postgres psql -q -U fluix_admin -d "$1" -v ON_ERROR_STOP=1 "${@:2}"; }
+psql_db() { docker compose exec -T postgres psql -q -U floppy_admin -d "$1" -v ON_ERROR_STOP=1 "${@:2}"; }
 garage() { docker compose exec -T garage /garage "$@"; }
 admin_juicefs() { docker compose run --rm -T --no-deps -e META_URL="$ADMIN_META" --entrypoint juicefs drive "$@"; }
 say() { printf '\n## %s\n' "$*"; }
@@ -32,7 +32,7 @@ unmount() { /sbin/mount | grep -q " on $MNT " && /sbin/umount "$MNT" 2>/dev/null
 mount_share() {
   mkdir -p "$MNT"
   for _ in $(seq 1 30); do
-    /sbin/mount_smbfs "//drive:$SMB_PASSWORD@localhost:4503/Fluix" "$MNT" 2>/dev/null && return 0
+    /sbin/mount_smbfs "//drive:$SMB_PASSWORD@localhost:4503/Floppy" "$MNT" 2>/dev/null && return 0
     sleep 2
   done
   echo "meta-access: the share did not come up" >&2
@@ -55,7 +55,7 @@ PY
 }
 
 restore() {
-  garage bucket allow --read --write --owner fluix --key "$KEY1" >/dev/null 2>&1 || true
+  garage bucket allow --read --write --owner floppy --key "$KEY1" >/dev/null 2>&1 || true
   [ -n "${KEY2:-}" ] && garage key delete --yes "$KEY2" >/dev/null 2>&1 || true
 }
 trap restore EXIT
@@ -63,8 +63,8 @@ trap restore EXIT
 say "Volume on PostgreSQL, formatted by the admin"
 unmount
 docker compose rm -sf drive >/dev/null
-psql_db fluix -c "DROP DATABASE IF EXISTS $DB" -c "DROP ROLE IF EXISTS $ROLE" -c "CREATE DATABASE $DB" >/dev/null
-admin_juicefs format "$ADMIN_META" access-test --storage s3 --bucket http://toxiproxy:4501/fluix \
+psql_db floppy -c "DROP DATABASE IF EXISTS $DB" -c "DROP ROLE IF EXISTS $ROLE" -c "CREATE DATABASE $DB" >/dev/null
+admin_juicefs format "$ADMIN_META" access-test --storage s3 --bucket http://toxiproxy:4501/floppy \
   --access-key "$KEY1" --secret-key "$(env_val SECRET_KEY)" --trash-days 0 2>&1 | tail -1
 
 say "1. Mount with a role limited to the JuiceFS tables"
@@ -85,12 +85,12 @@ psql_db "$DB" -c "SET ROLE $ROLE" -t -c "SELECT CASE WHEN value LIKE '%SecretKey
 psql_db "$DB" -c "SET ROLE $ROLE" -c "CREATE TABLE should_fail (x int)" 2>&1 | tail -1 | sed 's/^/DDL as the limited role: /'
 
 say "3. Key rotation with the client mounted"
-key_out=$(garage key create fluix-spike-rotated)
+key_out=$(garage key create floppy-spike-rotated)
 KEY2=$(echo "$key_out" | awk '/Key ID/ {print $NF}')
 SECRET2=$(echo "$key_out" | awk '/Secret key/ {print $NF}')
-garage bucket allow --read --write --owner fluix --key "$KEY2" >/dev/null
+garage bucket allow --read --write --owner floppy --key "$KEY2" >/dev/null
 admin_juicefs config "$ADMIN_META" --access-key "$KEY2" --secret-key "$SECRET2" --yes 2>&1 | tail -1
-garage bucket deny --read --write --owner fluix --key "$KEY1" >/dev/null
+garage bucket deny --read --write --owner floppy --key "$KEY1" >/dev/null
 start=$(date +%s)
 while :; do
   r=$(try_write 30)

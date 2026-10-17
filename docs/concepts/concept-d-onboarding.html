@@ -8,7 +8,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <!--
-  Concept D: come una persona del team passa da "non ho Fluix" a "Fluix è nel Finder", e cosa
+  Concept D: come una persona del team passa da "non ho Floppy" a "Floppy è nel Finder", e cosa
   vede quando qualcosa va storto. Storyboard dell'intero flusso nello stile D Drive scelto in
   concept-b-identity, non un file a varianti: le scelte aperte stanno nei blocchi Decisione.
   Tasti: 1-9 e 0 saltano al passo, t tema, p nasconde barra e note.
@@ -19,7 +19,7 @@
 
   Il flusso: 1 installazione con Homebrew, 2 benvenuto, 3 email nel browser, 4 "controlla la
   posta", 5 la mail col link, 6 ritorno all'app, 7 preparazione del disco (e i due errori veri),
-  8 Fluix nel Finder, 9 il percorso dell'invito, 10 i casi limite.
+  8 Floppy nel Finder, 9 il percorso dell'invito, 10 i casi limite.
 
   Mappatura sul codice di oggi (fattibilità, non piano):
   - App Tauri: finestra dedicata per il primo avvio, poi solo l'icona nella barra dei menu.
@@ -28,12 +28,12 @@
     attesa, non a un cookie del browser: funziona anche se la mail si apre in un altro browser.
     Il link vale 15 minuti e si usa una volta. Per non rivelare chi è iscritto, la pagina
     risponde sempre "controlla la posta"; è la mail a dire se l'indirizzo non è in nessun team.
-  - Preparazione: è `fluix setup`. Crea la VM Lima da immagine inclusa nel pacchetto (misurato:
+  - Preparazione: è `floppy setup`. Crea la VM Lima da immagine inclusa nel pacchetto (misurato:
     circa 90 s), monta il disco, scrive l'agente launchd. Rifiuta sotto i 5 GB liberi, come fa
     già il comando. Nessun download durante l'installazione.
   - Homebrew chiede i diritti di amministratore per installarsi: accettato per ora, è scritto
     nella pagina dell'invito.
-  - Il comando del cask (`essedev/tap/fluix`) è plausibile, il tap non esiste ancora.
+  - Il comando del cask (`essedev/tap/floppy`) è plausibile, il tap non esiste ancora.
 
   Dati: persona, team e indirizzi inventati (Giulia, Marco, Studio Esempio, dominio .example);
   progetti da concept-a-panel; tempi dalle misure in docs/ARCHITECTURE.md.
@@ -50,7 +50,7 @@
   Giro 2: "niente pillole, la riga nel lettore non convince, icona e frontale devono essere lo
   stesso oggetto". Tolte tutte le pillole: uno stato si dice col LED e con testo semplice, il
   titolo basta (i due errori del passo 7 hanno ora entrambi il frontale col LED rosso). Tolta la
-  riga sotto "fluix" nel frontale, che sembrava una barra vuota in concorrenza con la fessura, e
+  riga sotto "floppy" nel frontale, che sembrava una barra vuota in concorrenza con la fessura, e
   frontale più basso. Icona e frontale seguono la decisione presa in concept-c-app (Giro 4).
   Giro 3: "i pallini colorati che brillano davanti alle frasi sono slop come le pillole, ma i
   dettagli mi piacciono". Ogni dettaglio generico passa al vocabolario di concept-c-app, CSS
@@ -63,7 +63,7 @@
   Spento, Avvio) e il frontale Grafite, scuro in entrambi i temi con il LED sull'asse della
   fessura. Sostituiti tutti i frontali, l'icona nella notifica e nel Dock (nuovo, passo 1) e le
   icone della barra dei menu. Il marchio accanto al testo è la geometria dell'icona della barra
-  dei menu a colori (fessura in inchiostro, LED arancione nella sua ghiera) seguita da "fluix" in
+  dei menu a colori (fessura in inchiostro, LED arancione nella sua ghiera) seguita da "floppy" in
   Schibsted Grotesk 800, senza il puntino sulla i. Nessun bagliore.
   Scelta (17/10/2026): le consigliate. Primo avvio in una finestra dedicata, link nella mail con il
   codice di 6 cifre come riserva, preparazione in tre passi in parole semplici.
@@ -151,7 +151,7 @@ body[data-chrome="off"] .switch, body[data-chrome="off"] .meta .notes, body[data
 .lights i:nth-child(2) { background: #febc2e; } .lights i:nth-child(3) { background: #28c840; }
 .win.inactive .lights i { background: var(--idle); }
 
-/* Fluix windows */
+/* Floppy windows */
 .fx { width: 440px; }
 .fx .body { padding: 22px 28px 28px; display: flex; flex-direction: column; gap: 18px; }
 .fx h3 { margin: 0; font: 700 22px/1.2 var(--f-ui); letter-spacing: -0.02em; }
@@ -336,7 +336,7 @@ body[data-chrome="off"] .switch, body[data-chrome="off"] .meta .notes, body[data
   <header class="intro">
     <div>
       <span class="word" data-svg="word"></span>
-      <h1>Da "non ho Fluix" a Fluix nel Finder</h1>
+      <h1>Da "non ho Floppy" a Floppy nel Finder</h1>
       <p>Giulia monta video per Studio Esempio. Marco, l'amministratore, l'ha invitata. Ecco cosa vede, passo per passo, e cosa succede quando qualcosa va storto. Circa tre minuti in tutto, uno e mezzo dei quali per preparare il disco.</p>
     </div>
     <div class="legend" aria-label="Significato del LED">
@@ -354,7 +354,7 @@ body[data-chrome="off"] .switch, body[data-chrome="off"] .meta .notes, body[data
       <div class="meta">
         <div class="num">01</div>
         <h2>Installare</h2>
-        <p>Una riga nel Terminale, copiata dalla pagina dell'invito (passo 9). Poi Fluix si apre da Applicazioni.</p>
+        <p>Una riga nel Terminale, copiata dalla pagina dell'invito (passo 9). Poi Floppy si apre da Applicazioni.</p>
         <ul class="notes">
           <li>Il cask toglie la quarantena: nessun avviso di Gatekeeper al primo avvio.</li>
           <li>Homebrew deve esserci già e chiede la password di amministratore per installarsi.</li>
@@ -363,16 +363,16 @@ body[data-chrome="off"] .switch, body[data-chrome="off"] .meta .notes, body[data
       <div class="stage"><div class="scroll"><div class="desk">
         <div class="win term">
           <div class="tb"><span class="lights"><i></i><i></i><i></i></span><span class="t">giulia — zsh</span></div>
-<pre><span class="p">giulia@MacBook-Pro ~ %</span> brew install --cask essedev/tap/fluix
+<pre><span class="p">giulia@MacBook-Pro ~ %</span> brew install --cask essedev/tap/floppy
 <span class="b">==></span> Tapping essedev/tap
-<span class="b">==></span> Downloading https://github.com/essedev/fluix/releases/download/v0.1.0/Fluix_0.1.0_aarch64.dmg
+<span class="b">==></span> Downloading https://github.com/essedev/fluix/releases/download/v0.1.0/Floppy_0.1.0_aarch64.dmg
 <span class="d">######################################################################## 100.0%</span>
-<span class="b">==></span> Installing Cask <b>fluix</b>
-<span class="b">==></span> Moving App 'Fluix.app' to '/Applications/Fluix.app'
-fluix was successfully installed!
-<span class="p">giulia@MacBook-Pro ~ %</span> open -a Fluix</pre>
+<span class="b">==></span> Installing Cask <b>floppy</b>
+<span class="b">==></span> Moving App 'Floppy.app' to '/Applications/Floppy.app'
+floppy was successfully installed!
+<span class="p">giulia@MacBook-Pro ~ %</span> open -a Floppy</pre>
         </div>
-        <div class="dock"><div class="dock-item"><span class="dock-tip">Fluix</span><span data-svg="appicon-64"></span><i></i></div></div>
+        <div class="dock"><div class="dock-item"><span class="dock-tip">Floppy</span><span data-svg="appicon-64"></span><i></i></div></div>
       </div></div>
       <p class="cap">Il pacchetto include la macchina virtuale e i programmi che le servono: dopo questo download non si scarica più niente.</p></div>
     </section>
@@ -395,11 +395,11 @@ fluix was successfully installed!
           <div class="body">
             <div>
               <h3>Il disco del team, nel Finder</h3>
-              <p style="margin-top:6px">Fluix mette sul tuo Mac i progetti di Studio Esempio. Stanno nel cloud: quelli che apri restano anche qui, e scorrono in timeline senza attese.</p>
+              <p style="margin-top:6px">Floppy mette sul tuo Mac i progetti di Studio Esempio. Stanno nel cloud: quelli che apri restano anche qui, e scorrono in timeline senza attese.</p>
             </div>
             <button class="btn btn-primary wide">Accedi</button>
             <p class="small">Si apre il browser: entri con l'email di lavoro, senza password.</p>
-            <div class="foot"><span class="ro">Fluix 0.1.0</span><span>Serve un invito del tuo team</span></div>
+            <div class="foot"><span class="ro">Floppy 0.1.0</span><span>Serve un invito del tuo team</span></div>
           </div>
         </div>
       </div></div></div>
@@ -436,16 +436,16 @@ fluix was successfully installed!
       </div>
       <div class="stage"><div class="scroll"><div class="desk">
         <div class="win br">
-          <div class="tb"><span class="lights"><i></i><i></i><i></i></span><span class="url" data-svg="lock">fluix.example.com</span></div>
+          <div class="tb"><span class="lights"><i></i><i></i><i></i></span><span class="url" data-svg="lock">floppy.example.com</span></div>
           <div class="web">
             <div class="webcard">
               <span class="word" style="font-size:22px" data-svg="word-sm"></span>
-              <div><h3>Entra in Fluix</h3><p style="margin-top:6px">Ti mandiamo un link per entrare. Niente password da ricordare.</p></div>
+              <div><h3>Entra in Floppy</h3><p style="margin-top:6px">Ti mandiamo un link per entrare. Niente password da ricordare.</p></div>
               <label class="field">Email di lavoro<span class="input focus">giulia@studio.example</span></label>
               <button class="btn btn-primary wide">Mandami il link</button>
               <div class="device"><span data-svg="mark-sm"></span><span>Accesso da <b>MacBook Pro di Giulia</b></span></div>
             </div>
-            <p class="webfoot">Studio Esempio · Fluix</p>
+            <p class="webfoot">Studio Esempio · Floppy</p>
           </div>
         </div>
       </div></div></div>
@@ -463,7 +463,7 @@ fluix was successfully installed!
       </div>
       <div class="stage"><div class="scroll"><div class="desk">
         <div class="win br">
-          <div class="tb"><span class="lights"><i></i><i></i><i></i></span><span class="url" data-svg="lock">fluix.example.com</span></div>
+          <div class="tb"><span class="lights"><i></i><i></i><i></i></span><span class="url" data-svg="lock">floppy.example.com</span></div>
           <div class="web">
             <div class="webcard" style="align-items:flex-start">
               <div class="state"><span class="led dl blinking"></span><span class="lettura">In attesa del link</span></div>
@@ -492,16 +492,16 @@ fluix was successfully installed!
           <div class="tb"><span class="lights"><i></i><i></i><i></i></span><span class="t">In arrivo — 1 messaggio</span></div>
           <div class="mail-grid">
             <div class="mail-list">
-              <div class="mail-item sel"><b>Fluix · Studio Esempio</b><span>Il tuo link per entrare in Fluix</span><span>10:43</span></div>
-              <div class="mail-item"><b>Marco</b><span>Ti ho invitata su Fluix</span><span>Ieri</span></div>
+              <div class="mail-item sel"><b>Floppy · Studio Esempio</b><span>Il tuo link per entrare in Floppy</span><span>10:43</span></div>
+              <div class="mail-item"><b>Marco</b><span>Ti ho invitata su Floppy</span><span>Ieri</span></div>
             </div>
             <div class="mail-msg">
-              <div class="mail-head"><b>Il tuo link per entrare in Fluix</b><span>Da: Fluix · Studio Esempio &lt;accesso@fluix.example.com&gt;</span><span>A: giulia@studio.example · oggi 10:43</span></div>
+              <div class="mail-head"><b>Il tuo link per entrare in Floppy</b><span>Da: Floppy · Studio Esempio &lt;accesso@floppy.example.com&gt;</span><span>A: giulia@studio.example · oggi 10:43</span></div>
               <div class="mail-body">
                 <span class="word" style="font-size:20px" data-svg="word-sm"></span>
-                <p>Ciao Giulia, premi il pulsante per entrare in Fluix su <b>MacBook Pro di Giulia</b>. Il link vale 15 minuti e si usa una volta sola.</p>
-                <div><button class="btn btn-primary">Entra in Fluix</button></div>
-                <div class="codebox">Posta aperta su un altro dispositivo? Scrivi in Fluix il codice <span class="ro">482 913</span></div>
+                <p>Ciao Giulia, premi il pulsante per entrare in Floppy su <b>MacBook Pro di Giulia</b>. Il link vale 15 minuti e si usa una volta sola.</p>
+                <div><button class="btn btn-primary">Entra in Floppy</button></div>
+                <div class="codebox">Posta aperta su un altro dispositivo? Scrivi in Floppy il codice <span class="ro">482 913</span></div>
                 <p class="small">Non hai chiesto tu di entrare? Ignora questa mail: senza il link o il codice nessuno entra.</p>
               </div>
             </div>
@@ -516,7 +516,7 @@ fluix was successfully installed!
       <div class="opts">
         <div class="opt">
           <h3><span class="ro">A</span>Link, con il codice come riserva<span class="rec"><span class="led ok"></span><span class="lettura">Consigliata</span></span></h3>
-          <div class="mini" style="display:block"><div class="codebox" style="width:100%;justify-content:space-between;background:var(--surface)"><span>Entra in Fluix</span><span class="ro" style="font-size:15px">+ 482 913</span></div></div>
+          <div class="mini" style="display:block"><div class="codebox" style="width:100%;justify-content:space-between;background:var(--surface)"><span>Entra in Floppy</span><span class="ro" style="font-size:15px">+ 482 913</span></div></div>
           <ul><li>Un clic sul Mac, il caso normale.</li><li>Chi legge la posta sul telefono usa il codice nella stessa mail.</li><li>Due vie da tenere sicure: il codice scade col link e accetta 5 tentativi.</li></ul>
         </div>
         <div class="opt">
@@ -533,21 +533,21 @@ fluix was successfully installed!
       <div class="meta">
         <div class="num">06</div>
         <h2>Ritorno all'app</h2>
-        <p>Il link chiude il cerchio: il browser passa il codice a Fluix su 127.0.0.1, Fluix torna davanti e lo dice con una notifica.</p>
+        <p>Il link chiude il cerchio: il browser passa il codice a Floppy su 127.0.0.1, Floppy torna davanti e lo dice con una notifica.</p>
         <ul class="notes">
           <li>La pagina si può chiudere: il lavoro ora lo fa l'app.</li>
         </ul>
       </div>
       <div class="stage"><div class="scroll"><div class="desk" style="padding-top:96px">
-        <div class="notif"><span data-svg="appicon-36"></span><div><b>Fluix</b>Accesso fatto: Giulia, Studio Esempio.<br><span>Preparo il disco su questo Mac.</span></div></div>
+        <div class="notif"><span data-svg="appicon-36"></span><div><b>Floppy</b>Accesso fatto: Giulia, Studio Esempio.<br><span>Preparo il disco su questo Mac.</span></div></div>
         <div class="win br inactive">
-          <div class="tb"><span class="lights"><i></i><i></i><i></i></span><span class="url" data-svg="lock">fluix.example.com</span></div>
+          <div class="tb"><span class="lights"><i></i><i></i><i></i></span><span class="url" data-svg="lock">floppy.example.com</span></div>
           <div class="web">
             <div class="webcard" style="align-items:center;text-align:center">
               <div class="state"><span class="led ok"></span><span class="lettura">Accesso fatto</span></div>
-              <h3>Fatto. Torna a Fluix</h3>
+              <h3>Fatto. Torna a Floppy</h3>
               <p>Sei dentro come giulia@studio.example. Puoi chiudere questa pagina.</p>
-              <button class="btn btn-soft">Apri Fluix</button>
+              <button class="btn btn-soft">Apri Floppy</button>
             </div>
           </div>
         </div>
@@ -561,7 +561,7 @@ fluix was successfully installed!
         <h2>Preparare il disco</h2>
         <p>Tre passi in parole semplici. Il LED lavora, la fessura si riempie. Nel mock il tempo è accelerato.</p>
         <ul class="notes">
-          <li>È <span class="ro">fluix setup</span>: VM da immagine inclusa, mount, agente al login.</li>
+          <li>È <span class="ro">floppy setup</span>: VM da immagine inclusa, mount, agente al login.</li>
           <li>Sotto 5 GB liberi si ferma prima di cominciare.</li>
           <li>"Invia diagnostica" manda log e stato all'amministratore, mai le chiavi.</li>
         </ul>
@@ -572,7 +572,7 @@ fluix was successfully installed!
             <div class="tb"><span class="lights"><i></i><i></i><i></i></span></div>
             <div class="face" data-face-live></div>
             <div class="body">
-              <div><h3>Preparo Fluix su questo Mac</h3><p style="margin-top:6px">Ci vuole circa un minuto e mezzo. Puoi lasciare la finestra aperta e fare altro.</p></div>
+              <div><h3>Preparo Floppy su questo Mac</h3><p style="margin-top:6px">Ci vuole circa un minuto e mezzo. Puoi lasciare la finestra aperta e fare altro.</p></div>
               <div class="well"><ul class="prog-steps" data-prog>
                 <li><span class="st"></span><span>Preparo il disco virtuale</span><span class="tm"></span></li>
                 <li><span class="st"></span><span>Avvio</span><span class="tm"></span></li>
@@ -586,7 +586,7 @@ fluix was successfully installed!
               <div class="tb"><span class="lights"><i></i><i></i><i></i></span></div>
               <div class="face" data-face='{"led":"err","ro":"ERRORE","fill":0,"right":"3,2 GB LIBERI"}'></div>
               <div class="body">
-                <div><h3>Serve più spazio su questo Mac</h3><p style="margin-top:6px">Fluix ha bisogno di almeno 5 GB liberi. Ora ne hai 3,2. Libera spazio, per esempio svuotando il Cestino, poi riprova.</p></div>
+                <div><h3>Serve più spazio su questo Mac</h3><p style="margin-top:6px">Floppy ha bisogno di almeno 5 GB liberi. Ora ne hai 3,2. Libera spazio, per esempio svuotando il Cestino, poi riprova.</p></div>
                 <div class="btns"><button class="btn btn-primary">Riprova</button><button class="btn btn-ghost">Invia diagnostica</button></div>
               </div>
             </div>
@@ -615,7 +615,7 @@ fluix was successfully installed!
         </div>
         <div class="opt">
           <h3><span class="ro">B</span>Una sola barra</h3>
-          <div class="mini" style="display:block"><div class="well" style="background:var(--surface);padding:16px"><p style="margin:0 0 12px;font-size:14px">Un momento, sto preparando Fluix…</p><div class="bar"><i style="width:46%"></i></div></div></div>
+          <div class="mini" style="display:block"><div class="well" style="background:var(--surface);padding:16px"><p style="margin:0 0 12px;font-size:14px">Un momento, sto preparando Floppy…</p><div class="bar"><i style="width:46%"></i></div></div></div>
           <ul><li>Più calma, niente parole come "disco virtuale".</li><li>Un minuto e mezzo su una barra sola sembra fermo, e un errore non dice dove.</li></ul>
         </div>
       </div>
@@ -626,18 +626,18 @@ fluix was successfully installed!
     <section class="step" id="s8">
       <div class="meta">
         <div class="num">08</div>
-        <h2>Fluix è nel Finder</h2>
-        <p>La finestra si chiude da sola e apre il Finder sul disco. Il LED è verde. Una nuvoletta, una volta sola, mostra dove vive Fluix d'ora in poi.</p>
+        <h2>Floppy è nel Finder</h2>
+        <p>La finestra si chiude da sola e apre il Finder sul disco. Il LED è verde. Una nuvoletta, una volta sola, mostra dove vive Floppy d'ora in poi.</p>
         <ul class="notes">
-          <li>Il disco è sempre <span class="ro">/Volumes/Fluix</span>: CapCut ritrova i file per percorso.</li>
+          <li>Il disco è sempre <span class="ro">/Volumes/Floppy</span>: CapCut ritrova i file per percorso.</li>
           <li>Avvio automatico al login già attivo, si spegne dalle impostazioni.</li>
         </ul>
       </div>
       <div class="stage"><div class="scroll"><div class="desk" style="padding-top:0">
         <div class="mbar" style="margin:0 -36px 0;border-radius:18px 18px 0 0"><b style="margin-right:auto">Finder</b><span class="ic" data-svg="mb-ok"></span><span>ven 16 ott 10:46</span></div>
-        <div class="tip"><b>Fluix sta qui</b>Clic per vedere lo stato e rendere disponibili i progetti prima di montare.</div>
+        <div class="tip"><b>Floppy sta qui</b>Clic per vedere lo stato e rendere disponibili i progetti prima di montare.</div>
         <div class="win finder" style="margin-top:72px">
-          <div class="tb"><span class="lights"><i></i><i></i><i></i></span><span class="t">Fluix</span></div>
+          <div class="tb"><span class="lights"><i></i><i></i><i></i></span><span class="t">Floppy</span></div>
           <div class="fgrid">
             <div class="fside">
               <h5>Preferiti</h5>
@@ -646,7 +646,7 @@ fluix was successfully installed!
               <div><span data-svg="sys-doc"></span>Documenti</div>
               <div><span data-svg="sys-down"></span>Download</div>
               <h5>Posizioni</h5>
-              <div class="sel"><span data-svg="drive-16"></span>Fluix<span class="ej" data-svg="eject"></span></div>
+              <div class="sel"><span data-svg="drive-16"></span>Floppy<span class="ej" data-svg="eject"></span></div>
             </div>
             <div class="fmain" data-folders></div>
           </div>
@@ -671,7 +671,7 @@ fluix was successfully installed!
           <div class="win mail" style="width:100%">
             <div class="tb"><span class="lights"><i></i><i></i><i></i></span><span class="t">In arrivo</span></div>
             <div class="mail-msg">
-              <div class="mail-head"><b>Marco ti ha invitata su Fluix</b><span>Da: Fluix · Studio Esempio</span></div>
+              <div class="mail-head"><b>Marco ti ha invitata su Floppy</b><span>Da: Floppy · Studio Esempio</span></div>
               <div class="mail-body">
                 <p>Ciao Giulia, Marco ti ha aggiunta al disco di <b>Studio Esempio</b>: i progetti video del team, nel Finder del tuo Mac.</p>
                 <div><button class="btn btn-primary">Accetta l'invito</button></div>
@@ -680,13 +680,13 @@ fluix was successfully installed!
             </div>
           </div>
           <div class="win br" style="width:100%">
-            <div class="tb"><span class="lights"><i></i><i></i><i></i></span><span class="url" data-svg="lock">fluix.example.com</span></div>
+            <div class="tb"><span class="lights"><i></i><i></i><i></i></span><span class="url" data-svg="lock">floppy.example.com</span></div>
             <div class="web" style="padding:24px 20px">
               <div class="webcard" style="padding:22px;gap:14px">
-                <div class="state"><span class="led ok"></span><span class="lettura">Invito accettato</span></div><h3 style="font-size:20px">Installa Fluix sul Mac</h3>
+                <div class="state"><span class="led ok"></span><span class="lettura">Invito accettato</span></div><h3 style="font-size:20px">Installa Floppy sul Mac</h3>
                 <ol style="margin:0;padding-left:18px;font-size:14px;color:var(--ink-2);display:grid;gap:8px">
-                  <li>Apri il Terminale e incolla questa riga:<div class="cmd"><span class="ro">brew install --cask essedev/tap/fluix</span><button class="btn btn-soft" style="height:36px;padding:0 14px;background:var(--surface)">Copia</button></div></li>
-                  <li>Apri Fluix e premi Accedi con <b style="color:var(--ink)">giulia@studio.example</b>.</li>
+                  <li>Apri il Terminale e incolla questa riga:<div class="cmd"><span class="ro">brew install --cask essedev/tap/floppy</span><button class="btn btn-soft" style="height:36px;padding:0 14px;background:var(--surface)">Copia</button></div></li>
+                  <li>Apri Floppy e premi Accedi con <b style="color:var(--ink)">giulia@studio.example</b>.</li>
                 </ol>
                 <p class="small">Non hai Homebrew? Chiedi a Marco: si installa una volta, con la password del Mac.</p>
               </div>
@@ -707,13 +707,13 @@ fluix was successfully installed!
         <div class="edges">
           <div class="edge">
             <h4>Link scaduto o già usato</h4>
-            <div class="win br"><div class="tb"><span class="lights"><i></i><i></i><i></i></span><span class="url" data-svg="lock">fluix.example.com</span></div>
-              <div class="web"><div class="webcard"><div class="state"><span class="led err"></span><span class="lettura">Link scaduto</span></div><h3>Questo link non vale più</h3><p>I link durano 15 minuti e si usano una volta. Torna su Fluix e chiedine uno nuovo.</p><button class="btn btn-primary wide">Torna a Fluix</button></div></div></div>
+            <div class="win br"><div class="tb"><span class="lights"><i></i><i></i><i></i></span><span class="url" data-svg="lock">floppy.example.com</span></div>
+              <div class="web"><div class="webcard"><div class="state"><span class="led err"></span><span class="lettura">Link scaduto</span></div><h3>Questo link non vale più</h3><p>I link durano 15 minuti e si usano una volta. Torna su Floppy e chiedine uno nuovo.</p><button class="btn btn-primary wide">Torna a Floppy</button></div></div></div>
           </div>
           <div class="edge">
             <h4>Link aperto sul telefono</h4>
-            <div class="win br"><div class="tb"><span class="lights"><i></i><i></i><i></i></span><span class="url" data-svg="lock">fluix.example.com</span></div>
-              <div class="web"><div class="webcard"><h3>Sei su un altro dispositivo</h3><p>L'accesso è per MacBook Pro di Giulia. Scrivi questo codice nella finestra di Fluix sul Mac:</p><div class="big-ro">482 913</div></div></div></div>
+            <div class="win br"><div class="tb"><span class="lights"><i></i><i></i><i></i></span><span class="url" data-svg="lock">floppy.example.com</span></div>
+              <div class="web"><div class="webcard"><h3>Sei su un altro dispositivo</h3><p>L'accesso è per MacBook Pro di Giulia. Scrivi questo codice nella finestra di Floppy sul Mac:</p><div class="big-ro">482 913</div></div></div></div>
           </div>
           <div class="edge">
             <h4>Già dentro su questo Mac</h4>
@@ -735,7 +735,7 @@ const id = (p) => `${p}${++uid}`;
 function mark(h) {
   return `<svg width="${h * 1.5}" height="${h}" viewBox="0 0 24 16" aria-hidden="true"><rect x="2" y="6.5" width="13" height="3" rx="1.5" fill="var(--ink)"/><circle cx="19.75" cy="8" r="3.4" fill="var(--bezel)"/><circle cx="19.75" cy="8" r="2.25" fill="var(--brand)"/></svg>`;
 }
-const word = (h) => `${mark(h)}<span>fluix</span>`;
+const word = (h) => `${mark(h)}<span>floppy</span>`;
 
 // App icon, copied from concept-c-app "Marchio definitivo" (only the gradient id is made unique)
 function appIcon(size) {
@@ -759,7 +759,7 @@ function mb(s) {
 const FACE_LED = { ok: "#3fdc6c", dl: "#ff6a2e", err: "#ff4b33", idle: "#3a3834" };
 function face({ led = "idle", blink = false, ro = "", fill = 0, right = "" }) {
   const g = id("fx-fd"), w = Math.max(fill > 0 ? 6 : 0, fill * 206);
-  return `<svg viewBox="0 0 336 112" aria-hidden="true"><defs><linearGradient id="${g}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3a3835"/><stop offset="1" stop-color="#1c1b19"/></linearGradient></defs><rect x=".5" y=".5" width="335" height="111" rx="12" fill="url(#${g})" stroke="#0f0f0e"/><rect x="1.5" y="1.5" width="333" height="109" rx="11" fill="none" stroke="#fff" stroke-opacity=".08"/><rect x="24" y="34" width="212" height="12" rx="6" fill="#0b0b0a"/><rect x="27" y="37" width="${w}" height="6" rx="3" fill="#d9d4c8"/><text x="24" y="76" font-family="Schibsted Grotesk" font-weight="800" font-size="15" letter-spacing="-.4" fill="#8f8b83">fluix</text><text x="236" y="76" text-anchor="end" font-family="Departure Mono" font-size="11" fill="#b3aea5">${right}</text><circle cx="290" cy="40" r="10" fill="#0b0b0a"/><g${blink ? ' class="blink"' : ""}><circle cx="290" cy="40" r="5.5" fill="${FACE_LED[led]}"/>${led === "idle" ? "" : '<ellipse cx="290" cy="37.6" rx="2.6" ry="1.4" fill="#fff" opacity=".5"/>'}</g><text x="290" y="76" text-anchor="middle" font-family="Departure Mono" font-size="10" letter-spacing=".5" fill="#b3aea5">${ro}</text></svg>`;
+  return `<svg viewBox="0 0 336 112" aria-hidden="true"><defs><linearGradient id="${g}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3a3835"/><stop offset="1" stop-color="#1c1b19"/></linearGradient></defs><rect x=".5" y=".5" width="335" height="111" rx="12" fill="url(#${g})" stroke="#0f0f0e"/><rect x="1.5" y="1.5" width="333" height="109" rx="11" fill="none" stroke="#fff" stroke-opacity=".08"/><rect x="24" y="34" width="212" height="12" rx="6" fill="#0b0b0a"/><rect x="27" y="37" width="${w}" height="6" rx="3" fill="#d9d4c8"/><text x="24" y="76" font-family="Schibsted Grotesk" font-weight="800" font-size="15" letter-spacing="-.4" fill="#8f8b83">floppy</text><text x="236" y="76" text-anchor="end" font-family="Departure Mono" font-size="11" fill="#b3aea5">${right}</text><circle cx="290" cy="40" r="10" fill="#0b0b0a"/><g${blink ? ' class="blink"' : ""}><circle cx="290" cy="40" r="5.5" fill="${FACE_LED[led]}"/>${led === "idle" ? "" : '<ellipse cx="290" cy="37.6" rx="2.6" ry="1.4" fill="#fff" opacity=".5"/>'}</g><text x="290" y="76" text-anchor="middle" font-family="Departure Mono" font-size="10" letter-spacing=".5" fill="#b3aea5">${ro}</text></svg>`;
 }
 
 const sys = (d, extra = "") => `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3d8fe0" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" ${extra}>${d}</svg>`;
@@ -788,7 +788,7 @@ document.querySelectorAll("[data-face]").forEach((el) => (el.innerHTML = face(JS
 // Finder folders, names from concept-a-panel
 const folder = () => { const a = id("fa"); return `<svg width="64" height="52" viewBox="0 0 64 52" aria-hidden="true"><defs><linearGradient id="${a}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--folder-a)"/><stop offset="1" stop-color="var(--folder-b)"/></linearGradient></defs><path d="M4 8a4 4 0 0 1 4-4h14l5 5h29a4 4 0 0 1 4 4v3H4z" fill="var(--folder-b)"/><rect x="4" y="13" width="56" height="35" rx="4" fill="url(#${a})"/></svg>`; };
 document.querySelector("[data-folders]").innerHTML = ["Pastificio Moretti - Spot Natale", "Cantine Arnaldi - Vendemmia", "Showreel 2026", "Fondazione Lirica - Backstage", "Archivio 2025"]
-  .map((n) => `<div class="folder">${folder()}<span>${n}</span></div>`).join("") + `<div class="fpath">Fluix · 5 elementi</div>`;
+  .map((n) => `<div class="folder">${folder()}<span>${n}</span></div>`).join("") + `<div class="fpath">Floppy · 5 elementi</div>`;
 
 // Step 4: resend countdown
 const cd = document.querySelector("[data-countdown]");

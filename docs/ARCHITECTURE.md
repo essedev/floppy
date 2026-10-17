@@ -1,6 +1,6 @@
 # Architecture
 
-Fluix is a shared remote disk for teams that edit video: on a Mac it shows up as a volume in the Finder, the files live on S3 object storage, and the people working on it need to know nothing else. This document collects the analysis so far and the reasons behind the decisions, which are listed in [DECISIONS.md](DECISIONS.md). The project is between a test package (one disk per Mac, metadata in SQLite inside each VM, tested on an OVH bucket in Milan) and the team architecture: one disk per team, metadata in a central Valkey with a replica in each Mac's VM, a control plane for sign-in and access, a menu bar app. The team architecture is drawn in [architecture.html](architecture.html) and proven in a local spike; it is not built yet.
+Floppy is a shared remote disk for teams that edit video: on a Mac it shows up as a volume in the Finder, the files live on S3 object storage, and the people working on it need to know nothing else. This document collects the analysis so far and the reasons behind the decisions, which are listed in [DECISIONS.md](DECISIONS.md). The project is between a test package (one disk per Mac, metadata in SQLite inside each VM, tested on an OVH bucket in Milan) and the team architecture: one disk per team, metadata in a central Valkey with a replica in each Mac's VM, a control plane for sign-in and access, a menu bar app. The team architecture is drawn in [architecture.html](architecture.html) and proven in a local spike; it is not built yet.
 
 Prices and features of third-party services were checked on 06/10/2026 and must be checked again before deciding.
 
@@ -26,7 +26,7 @@ S3 is also not a filesystem: it is fine for copying whole files, not for reading
 
 ## Solution: JuiceFS on OVH
 
-JuiceFS (Community Edition, open source) splits a file system the way LucidLink does: data as blocks on S3, metadata (names, folders, sizes) in a shared database, a local cache on every Mac. LucidLink also keeps a replica of the metadata on every client; Fluix gets the same effect with a patch on JuiceFS (see [Shared metadata over the WAN](#shared-metadata-over-the-wan)).
+JuiceFS (Community Edition, open source) splits a file system the way LucidLink does: data as blocks on S3, metadata (names, folders, sizes) in a shared database, a local cache on every Mac. LucidLink also keeps a replica of the metadata on every client; Floppy gets the same effect with a patch on JuiceFS (see [Shared metadata over the WAN](#shared-metadata-over-the-wan)).
 
 | Component | Choice | Role |
 |---|---|---|
@@ -132,16 +132,16 @@ Measures from the 06/10/2026 spike (`spike/bench.sh`): an Apple Silicon Mac, Gar
 
 ## Working with CapCut
 
-- **Media live on Fluix, CapCut drafts stay on the Mac**: CapCut saves projects in its local folder and references videos by the path they are at.
+- **Media live on Floppy, CapCut drafts stay on the Mac**: CapCut saves projects in its local folder and references videos by the path they are at.
 - **A draft has a single owner**: two people cannot open the same draft. To hand a project over, use CapCut's cloud space or an export.
 - **One folder per project**, holding the footage and the exports. No further structure until the pilot shows a need for it.
 - **To check in the pilot**: how CapCut reacts to a video that is slow to arrive. If it errors out or loses the link to the file, warming up before editing becomes mandatory.
 
 ## Interface
 
-JuiceFS Community has no end-user interface at all: it is a terminal program. People editing see only a volume in the Finder; everything else comes from Fluix.
+JuiceFS Community has no end-user interface at all: it is a terminal program. People editing see only a volume in the Finder; everything else comes from Floppy.
 
-**A menu bar app in Tauri** (DECISIONS #9), built on the skeleton of [Portsage](https://github.com/essedev/portsage), which already has a menu bar icon and panel, launch at login and an external binary bundled in the app (`externalBin`). The `fluix` command stays the engine the app drives. Swift would only be needed for native Finder badges and menus, which a Swift extension could add next to the app.
+**A menu bar app in Tauri** (DECISIONS #9), built on the skeleton of [Portsage](https://github.com/essedev/portsage), which already has a menu bar icon and panel, launch at login and an external binary bundled in the app (`externalBin`). The `floppy` command stays the engine the app drives. Swift would only be needed for native Finder badges and menus, which a Swift extension could add next to the app.
 
 **Designed surface by surface**, each in a concept with the decisions set (DECISIONS #11, #12):
 
@@ -199,31 +199,31 @@ Hence the Linux machine with SMB: no extension on the Mac. In the spike it was D
 
 ## macOS package
 
-The macOS module, a command today (`macos/bin/fluix`) and the engine of the Tauri app tomorrow. It ships as a zip built by `scripts/package.sh <config.env>`, without Homebrew; whoever receives it runs `bash install.sh` from the Terminal.
+The macOS module, a command today (`macos/bin/floppy`) and the engine of the Tauri app tomorrow. It ships as a zip built by `scripts/package.sh <config.env>`, without Homebrew; whoever receives it runs `bash install.sh` from the Terminal.
 
-- **Lima 2.2.1 VM**, official binary bundled in the zip and verified with the release checksum. `vz` backend (Apple's Virtualization framework), Debian 13, 2 CPUs, 1 GiB of RAM, a sparse disk as large as the cache ceiling plus 10 GiB, fixed at creation. No administrator rights: everything lives in `~/.fluix`, with the VMs in their own `LIMA_HOME` that does not touch other Lima installs.
+- **Lima 2.2.1 VM**, official binary bundled in the zip and verified with the release checksum. `vz` backend (Apple's Virtualization framework), Debian 13, 2 CPUs, 1 GiB of RAM, a sparse disk as large as the cache ceiling plus 10 GiB, fixed at creation. No administrator rights: everything lives in `~/.floppy`, with the VMs in their own `LIMA_HOME` that does not touch other Lima installs.
 - **`vzNAT` network**: the VM has an address on the Mac (e.g. `192.168.64.2`) and SMB goes there directly, without the port forwarding that cost bandwidth in the Docker spike. Lima's automatic forwarding is off (`portForwards` with `ignore`), so the VM exposes no ports on the Mac.
-- **Inside the VM**: `vm/guest/guest-install.sh` installs Samba and JuiceFS and two systemd services, the mount (`fluix-mount`, which formats the volume on first start) and `smbd`, which starts only once the mount is ready. It can be rerun safely to update.
-- **On the Mac**: the volume is mounted with `osascript` (`mount volume`) and shows up in `/Volumes/Fluix` and in the Finder sidebar; Spotlight is off on the volume; a launchd agent (`dev.esse.fluix`) runs `fluix tick` at login and every 2 minutes (see "Agent").
-- **Mount point**: it must stay `/Volumes/Fluix`, because CapCut projects reference videos by full path and with `Fluix-1` the links break. macOS picks `-1` when the folder of a previous mount still exists: the command waits for it to disappear before mounting, and logs a warning if the name changes anyway. Commands still read the mount point from `mount`.
+- **Inside the VM**: `vm/guest/guest-install.sh` installs Samba and JuiceFS and two systemd services, the mount (`floppy-mount`, which formats the volume on first start) and `smbd`, which starts only once the mount is ready. It can be rerun safely to update.
+- **On the Mac**: the volume is mounted with `osascript` (`mount volume`) and shows up in `/Volumes/Floppy` and in the Finder sidebar; Spotlight is off on the volume; a launchd agent (`dev.esse.floppy`) runs `floppy tick` at login and every 2 minutes (see "Agent").
+- **Mount point**: it must stay `/Volumes/Floppy`, because CapCut projects reference videos by full path and with `Floppy-1` the links break. macOS picks `-1` when the folder of a previous mount still exists: the command waits for it to disappear before mounting, and logs a warning if the name changes anyway. Commands still read the mount point from `mount`.
 - **SMB timeout**: macOS fails an SMB read after 30 s without an answer. The command raises the limit to 600 s only for the VM's address, in its own block inside `~/Library/Preferences/nsmb.conf` (per user, no administrator). An I/O error showed up once at a simulated 100 Mbps, with a cold read started right after a 2.7 GB upload; it did not come back in the A/B comparison, and the limit stays as a guard for slow lines.
 - **Space on the Mac** (incident of 06/10, see [CYCLES.md](CYCLES.md)): the VM does not see the Mac's disk, and JuiceFS's space check looks only at the VM's. On a tester's Mac with 10 GB free the cache filled the disk, the VM's file could not grow any more and its filesystem failed. Now `setup` computes the cache ceiling at every run: half of what the Mac can spare above `RESERVE_MB` (20 GB by default), counting the space the cache already takes as spare, at most `CACHE_SIZE_MB`. Below 5 GB `setup` refuses. The agent evicts the whole cache when the Mac drops below half of the reserve, with a notification.
-- **Space given back**: the VM's disk file grows but does not shrink on its own; freed space goes back to the Mac with `fstrim`, which Debian runs weekly. `fluix free` and the emergency eviction run it at once (measured: from 2,152 to 1,482 MB after eviction).
-- **Agent** (`fluix tick`): if the VM is stopped it starts it; if it answers with I/O errors it restarts it, at most once every 10 minutes; if JuiceFS or Samba are stopped it restarts them; it frees the cache if the Mac is nearly full; it mounts the disk if it is missing. It never touches a mounted disk: a disk busy with a large copy answers slowly and looks dead, and a first version force-unmounted it halfway through a copy. After the Mac sleeps, macOS handles the SMB reconnection. `fluix stop` leaves a marker the agent respects; `start` removes it.
+- **Space given back**: the VM's disk file grows but does not shrink on its own; freed space goes back to the Mac with `fstrim`, which Debian runs weekly. `floppy free` and the emergency eviction run it at once (measured: from 2,152 to 1,482 MB after eviction).
+- **Agent** (`floppy tick`): if the VM is stopped it starts it; if it answers with I/O errors it restarts it, at most once every 10 minutes; if JuiceFS or Samba are stopped it restarts them; it frees the cache if the Mac is nearly full; it mounts the disk if it is missing. It never touches a mounted disk: a disk busy with a large copy answers slowly and looks dead, and a first version force-unmounted it halfway through a copy. After the Mac sleeps, macOS handles the SMB reconnection. `floppy stop` leaves a marker the agent respects; `start` removes it.
 - **Samba restarts on its own** (`Restart=on-failure`): measured, a killed `smbd` is back in a few seconds.
 - **`status`**: tells apart a VM that is on but broken (every command inside gives an I/O error, while Lima reports it "Running"), a disk that is mounted but not answering, the Mac's free space and the cache ceiling in use.
 - **Visible errors**: an unexpected error says where it happened and shows the last lines of `lima.log`. Before, the install could return to the prompt without a word, and that happened on a tester's first attempt.
-- **Updating and starting over**: `install.sh` over an existing install updates it (keeps configuration, VM and volume) and says so; starting from scratch is `fluix uninstall` and then `install.sh`. The VM's memory and disk stay as they were at creation.
+- **Updating and starting over**: `install.sh` over an existing install updates it (keeps configuration, VM and volume) and says so; starting from scratch is `floppy uninstall` and then `install.sh`. The VM's memory and disk stay as they were at creation.
 - **No downloads at install time**: the zip holds the Debian image (the same one Lima's template pins, verified with its SHA-512) and the JuiceFS binary (verified with the release checksum), and the VM is created from the local file. An office DNS did not resolve `cloud.debian.org`: it was the cause of both of a tester's failed installs. The zip grows from 38 to 406 MB. The Debian packages for Samba and FUSE are in the zip too, as a local repository (94 `.deb`, 38 MB: the whole dependency closure, of which the VM installs only what the image lacks, 18 today), and the zip reaches 445 MB. `package.sh` takes them from a `debian:trixie` container, so building the zip needs Docker. If the local repository fails, `guest-install.sh` falls back to `deb.debian.org`. Tested on a VM from the zip's image with `deb.debian.org` blocked, and with a corrupted `.deb` for the fallback.
-- **Failed installs**: `setup` writes `~/.fluix/installed` only when the install is complete. A VM without that marker is a leftover with no data: `setup` deletes and recreates it, with a new volume name; a healthy VM from before the marker existed is recognized and kept. `install.sh` says "Updating" only if the marker is there.
+- **Failed installs**: `setup` writes `~/.floppy/installed` only when the install is complete. A VM without that marker is a leftover with no data: `setup` deletes and recreates it, with a new volume name; a healthy VM from before the marker existed is recognized and kept. `install.sh` says "Updating" only if the marker is there.
 - **The log does not grow without limit**: the script's messages go to the terminal it started from (fd 3), never to the log, and error handling fires only once; `lima.log` is trimmed past 50 MB and `install.sh` empties it if it is huge. On a tester's Mac the log reached 50 GB and filled the disk: it was confirmed that the error blocks ended up in the log, once per function level; the growth to 50 GB was not reproduced (on that Mac the VM start hung), so the guards hold for anything that writes. The VM start has a 5-minute timeout.
 - **Configuration**: `config.env` (template in `macos/config.env.example`) with bucket, keys, the SMB password between Mac and VM, cache and simulated bandwidth limits. The zip holds the keys: share it privately, with an OVH key dedicated to the test bucket, to be revoked at the end of the test.
-- **One volume per Mac**: with `VOLUME_NAME` empty, `install.sh` generates `fluix-<user>-<code>`, so the same zip goes to several people on the same bucket, each with their own disk. Reinstalling over an existing install keeps the configuration; `uninstall` deletes everything, because the volume is lost with the VM.
+- **One volume per Mac**: with `VOLUME_NAME` empty, `install.sh` generates `floppy-<user>-<code>`, so the same zip goes to several people on the same bucket, each with their own disk. Reinstalling over an existing install keeps the configuration; `uninstall` deletes everything, because the volume is lost with the VM.
 - **Test metadata**: SQLite inside the VM. Uninstalling the package or losing the VM makes the files in the bucket unreadable; several people need the shared metadata (see [Shared metadata over the WAN](#shared-metadata-over-the-wan)).
 - **Footprint**: on the Mac the VM takes at most 1 GB of RAM (1,035 MB measured, 670 MB right after start), against 2,060 MB for the first version with 2 GiB. The ceiling is the assigned memory, not JuiceFS's buffer: Linux fills free RAM with the page cache, Apple's framework keeps every touched page and Lima does not use the balloon to give it back, so after the first read of a clip the VM weighs its whole `memory`. Inside the VM JuiceFS reaches 420 MB copying 2.7 GB with `--buffer-size` at 256 MB (it was 1 GB), with no processes killed for running out of memory. Performance stays that of 2 GiB: cold read 11.6-13 MB/s, cold seek 0.8-1 s, warmup of a clip 27-33 s, copying 2.7 GB 129 s (133 s with the previous setup, at the same time). Only rereading after an unmount changes, 0.5 s instead of 0.2, because it comes from the disk cache instead of RAM. On disk the VM grows with the cache. `memory` applies to VMs created from now on: `setup` does not change it on an existing VM, which has to be updated by hand or reinstalled.
 - **Measured install**: about 90 s from the zip with image and JuiceFS bundled (84-111 s with the version that downloaded the image). It needs a Mac with Apple Silicon and macOS 13 or later, which `install.sh` checks.
 - **Performance**: like the Docker spike at a simulated 100 Mbps: cold read 5.3-7.2 MB/s, cold seek 0.8 s on average. Warm reads are also served by the macOS SMB client's cache.
-- **To do**: the Finder Quick Actions ("Make available", "Free up space"); for now they are `fluix warmup <path>` and `fluix free <path>`. Sleep was tested (the disk came back, but the first version of the agent remounted it as `Fluix-1`, fixed). A real restart, a network change and macOS 27 are in a tester's ongoing test, not closed yet ([ROADMAP.md](ROADMAP.md)). The SMB password is to move from the mount URL to the Keychain.
+- **To do**: the Finder Quick Actions ("Make available", "Free up space"); for now they are `floppy warmup <path>` and `floppy free <path>`. Sleep was tested (the disk came back, but the first version of the agent remounted it as `Floppy-1`, fixed). A real restart, a network change and macOS 27 are in a tester's ongoing test, not closed yet ([ROADMAP.md](ROADMAP.md)). The SMB password is to move from the mount URL to the Keychain.
 
 ## Alternatives considered
 
@@ -253,13 +253,13 @@ Wasabi is left out: it changed its prices on 01/07/2026 and the new price list w
 
 **Comparison for a team of 3** (estimates):
 
-| Active TB | SpaceFS Teams (30 $/person, 1 TB/person pooled, extra 6-12 $ per 500 GB) | Fluix (OVH storage + database) |
+| Active TB | SpaceFS Teams (30 $/person, 1 TB/person pooled, extra 6-12 $ per 500 GB) | Floppy (OVH storage + database) |
 |---|---|---|
 | 3 TB | 90 $ | about 40-55 EUR |
 | 5 TB | 114-138 $ | about 55-70 EUR |
 | 10 TB | 174-258 $ | about 95-110 EUR |
 
-Doing it yourself costs about half, but the difference (about 500-1,800 EUR a year with 3-5 people and a few TB) has to be weighed against the time for setup, running it and, if needed, building the app. Fluix pays off with more people or more TB, or when the data must stay on infrastructure you control.
+Doing it yourself costs about half, but the difference (about 500-1,800 EUR a year with 3-5 people and a few TB) has to be weighed against the time for setup, running it and, if needed, building the app. Floppy pays off with more people or more TB, or when the data must stay on infrastructure you control.
 
 ## Sources
 

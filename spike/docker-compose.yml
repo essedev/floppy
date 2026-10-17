@@ -19,13 +19,13 @@ services:
   postgres:
     image: postgres:17.6-alpine
     environment:
-      POSTGRES_USER: fluix_admin
+      POSTGRES_USER: floppy_admin
       POSTGRES_PASSWORD: ${PG_PASSWORD:-}
-      POSTGRES_DB: fluix
+      POSTGRES_DB: floppy
     volumes:
       - pg-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD", "pg_isready", "-U", "fluix_admin"]
+      test: ["CMD", "pg_isready", "-U", "floppy_admin"]
       interval: 2s
       retries: 30
 
@@ -80,7 +80,7 @@ services:
       # Production keeps 7 days: an open file deleted elsewhere keeps its blocks
       TRASH_DAYS: ${TRASH_DAYS:-0}
       SMB_DOS_ATTRIBUTES: ${SMB_DOS_ATTRIBUTES:-yes}
-      BUCKET_URL: http://toxiproxy:4501/fluix
+      BUCKET_URL: http://toxiproxy:4501/floppy
       # Read only by the first `juicefs format`, which stores them in the metadata
       ACCESS_KEY: ${ACCESS_KEY:-}
       SECRET_KEY: ${SECRET_KEY:-}
@@ -94,10 +94,10 @@ services:
       UPLOAD_LIMIT_MBPS: ${UPLOAD_LIMIT_MBPS:-300}
       PREFETCH: ${PREFETCH:-8}
     volumes:
-      - ${HOME}/.fluix-spike:/state
+      - ${HOME}/.floppy-spike:/state
       - drive-cache:/cache
     ports:
-      - "127.0.0.1:4503:445" # SMB, mount from Finder: smb://drive@localhost:4503/Fluix
+      - "127.0.0.1:4503:445" # SMB, mount from Finder: smb://drive@localhost:4503/Floppy
     depends_on:
       - toxiproxy
 
@@ -118,7 +118,7 @@ services:
       # Production keeps 7 days: an open file deleted elsewhere keeps its blocks
       TRASH_DAYS: ${TRASH_DAYS:-0}
       SMB_DOS_ATTRIBUTES: ${SMB_DOS_ATTRIBUTES:-yes}
-      BUCKET_URL: http://toxiproxy:4501/fluix
+      BUCKET_URL: http://toxiproxy:4501/floppy
       # Read only by the first `juicefs format`, which stores them in the metadata
       ACCESS_KEY: ${ACCESS_KEY:-}
       SECRET_KEY: ${SECRET_KEY:-}
@@ -132,7 +132,7 @@ services:
       UPLOAD_LIMIT_MBPS: ${UPLOAD_LIMIT_MBPS:-300}
       PREFETCH: ${PREFETCH:-8}
     volumes:
-      - ${HOME}/.fluix-spike-b:/state
+      - ${HOME}/.floppy-spike-b:/state
       - drive-b-cache:/cache
     ports:
       - "127.0.0.1:4506:445" # SMB of the second client

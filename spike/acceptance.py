@@ -27,7 +27,7 @@ from pathlib import Path
 
 SPIKE = Path(__file__).resolve().parent
 HOME = Path.home()
-MNT_A, MNT_B = HOME / "FluixSpikeA", HOME / "FluixSpikeB"
+MNT_A, MNT_B = HOME / "FloppySpikeA", HOME / "FloppySpikeB"
 PORT_A, PORT_B = 4503, 4506
 LATENCY_MS = int(os.environ.get("LATENCY_MS", "15"))
 # A fresh volume name per run: a reformat refuses a bucket prefix that still holds blocks.
@@ -96,7 +96,7 @@ def mount(port, path):
     host = "localhost" if port == PORT_A else "127.0.0.1"
     path.mkdir(exist_ok=True)
     for _ in range(40):
-        if subprocess.run(["/sbin/mount_smbfs", f"//drive:{SMB_PW}@{host}:{port}/Fluix", str(path)],
+        if subprocess.run(["/sbin/mount_smbfs", f"//drive:{SMB_PW}@{host}:{port}/Floppy", str(path)],
                           capture_output=True).returncode == 0:
             return
         time.sleep(2)
@@ -346,9 +346,9 @@ def _t10_body():
 def t11(baseline):
     f = MNT_A / "acc" / "tagged.mov"
     f.write_bytes(b"x")
-    subprocess.run(["xattr", "-w", "com.example.fluix.label", "rosso", str(f)], check=True)
+    subprocess.run(["xattr", "-w", "com.example.floppy.label", "rosso", str(f)], check=True)
     time.sleep(2)
-    r = subprocess.run(["xattr", "-p", "com.example.fluix.label", str(MNT_B / "acc" / "tagged.mov")],
+    r = subprocess.run(["xattr", "-p", "com.example.floppy.label", str(MNT_B / "acc" / "tagged.mov")],
                        capture_output=True, text=True)
     shared = r.stdout.strip() == "rosso"
     record("t11a extended attribute set on A read on B", r.stdout.strip() or r.stderr.strip()[-80:], "rosso", shared)

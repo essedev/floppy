@@ -2,6 +2,12 @@
 
 Log of the work done, most recent first. Plans are in [ROADMAP.md](ROADMAP.md), the reasons behind the choices in [ARCHITECTURE.md](ARCHITECTURE.md).
 
+## 7. The name: Floppy (17/10/2026)
+
+- **Name chosen** (DECISIONS #14): no active "Floppy" in storage, sync or video, and the only relevant US mark (FLOPPY, Hyperfoo, Inc.) is cancelled. EUIPO and UIBM are still to check; domains are set aside.
+- **Renamed from Fluix to Floppy** in one pass: the command (`macos/bin/floppy`), the disk and its mount point `/Volumes/Floppy`, the VM, the `floppy-mount` service, `~/.floppy` and `/var/lib/floppy`, the launchd agent `dev.esse.floppy`, the `# floppy begin/end` block in `nsmb.conf`, the spike (bucket, PostgreSQL user, containers and Docker volumes), the docs, the concepts and the site. The rejected "Floppy" visual direction in the identity concept is now "Diskette". The entries below keep the names of their time.
+- **Existing installs keep the old name**: there is no migration code. An install made from an earlier zip is removed with its own `~/.fluix/bin/fluix uninstall`; a new zip installs Floppy beside it. The spike's state from before the rename (the PostgreSQL user, the bucket, `~/.fluix-spike`) does not carry over either.
+
 ## 6. Shared metadata that stays fast over the WAN (17/10/2026)
 
 - **Step 0 measured** (`spike/meta-bench.sh`, `spike/meta-access.sh`): with the metadata in PostgreSQL behind a simulated 15 ms link, creating 450 files from the Finder took 820 s and listing 300 files 117 s, against 14 s and 0.24 s with SQLite in the VM. Inside the VM, without Samba, the same listing took 0.12 s: Samba asks JuiceFS about 2,700 questions for it (lookups of `._` names, extended attributes), each a round trip.

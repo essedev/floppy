@@ -8,7 +8,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <!--
-  Concept C: l'app di Fluix per macOS nell'identità D Drive (scelta in concept-b-identity),
+  Concept C: l'app di Floppy per macOS nell'identità D Drive (scelta in concept-b-identity),
   superficie per superficie. Non è un file a varianti: è uno storyboard con ogni schermata e
   ogni stato a grandezza vera, e le decisioni aperte affiancate come A e B.
   Tasti: t tema, p nasconde barra e didascalie per guardare pulito. L'indice in alto porta ai gruppi.
@@ -26,15 +26,15 @@
   5. Icona nella barra dei menu: collegato, download, avvio, non raggiungibile, spento.
 
   Mappatura sul codice di oggi (fattibilità, non piano): pannello e finestre sono React nella
-  webview Tauri (scheletro di Portsage). Ogni stato del pannello viene da `fluix status --json`
+  webview Tauri (scheletro di Portsage). Ogni stato del pannello viene da `floppy status --json`
   (da aggiungere: oggi status stampa testo) più il token del control plane per Revocato.
-  Rendi disponibile e Libera spazio sono `fluix warmup` e `fluix free` per cartella; l'ETA usa
+  Rendi disponibile e Libera spazio sono `floppy warmup` e `floppy free` per cartella; l'ETA usa
   la velocità misurata. "Mac quasi pieno" è la soglia che `tick` già usa (metà di RESERVE_MB,
   10 GB): sotto, l'agente libera tutta la cache. Il limite della cache in Impostazioni non
   può superare il disco della VM, fissato alla creazione: oltre serve reinstallare, e lo slider
   si ferma lì. Le notifiche sono quelle di sistema (plugin notification di Tauri). L'icona
   nella barra dei menu è un'immagine template monocromatica: il lampeggio sono due immagini
-  alternate. Invia diagnostica manda al control plane stato, ultimi log di fluix e della VM,
+  alternate. Invia diagnostica manda al control plane stato, ultimi log di floppy e della VM,
   versione di macOS: è un endpoint nuovo.
 
   Dati: progetti, limite di 100 GB e velocità di 14,5 MB/s da concept-a-panel (nomi inventati
@@ -55,7 +55,7 @@
   finestre. Aggiunta in testa "Decisione: il drive" con tre famiglie coerenti (Stucco, Grafite,
   Essenziale), ognuna con icona dell'app, icona della barra dei menu nei quattro stati, frontale
   nel pannello e lo stesso frontale in una finestra. Consigliata Grafite; il resto dello
-  storyboard resta su Stucco finché Simone non sceglie. Tolta la scanalatura sotto "fluix" nel
+  storyboard resta su Stucco finché Simone non sceglie. Tolta la scanalatura sotto "floppy" nel
   frontale (sembrava una barra di avanzamento vuota). Tolte le pillole: "Consigliata" ora è
   LED più testo, le lettere A e B sono testo semplice.
   Giro 3: il pallino colorato che si illumina (davanti a una frase, o su "Consigliata") è un
@@ -90,7 +90,7 @@
   Avvio      due immagini alternate: <svg width="24" height="16" viewBox="0 0 24 16"><rect x="2.5" y="7" width="12" height="2" rx="1" fill="none" stroke="#000"/><circle cx="19.75" cy="8" r="1.65" fill="none" stroke="#000" stroke-width="1.2"/></svg> e la stessa senza il cerchio
   Frontale Grafite in cima al pannello, stato Collegato (stesso corpo scuro in entrambi i temi;
   la fessura si riempie con la cache, il LED sta sull'asse della fessura, y=40):
-  <svg viewBox="0 0 336 112"><defs><linearGradient id="fx-fd" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3a3835"/><stop offset="1" stop-color="#1c1b19"/></linearGradient></defs><rect x=".5" y=".5" width="335" height="111" rx="12" fill="url(#fx-fd)" stroke="#0f0f0e"/><rect x="1.5" y="1.5" width="333" height="109" rx="11" fill="none" stroke="#fff" stroke-opacity=".08"/><rect x="24" y="34" width="212" height="12" rx="6" fill="#0b0b0a"/><rect x="27" y="37" width="99" height="6" rx="3" fill="#d9d4c8"/><text x="24" y="76" font-family="Schibsted Grotesk" font-weight="800" font-size="15" letter-spacing="-.4" fill="#8f8b83">fluix</text><text x="236" y="76" text-anchor="end" font-family="Departure Mono" font-size="11" fill="#b3aea5">48,2 / 100 GB</text><circle cx="290" cy="40" r="10" fill="#0b0b0a"/><circle cx="290" cy="40" r="5.5" fill="#3fdc6c"/><ellipse cx="290" cy="37.6" rx="2.6" ry="1.4" fill="#fff" opacity=".5"/><text x="290" y="76" text-anchor="middle" font-family="Departure Mono" font-size="10" letter-spacing=".5" fill="#b3aea5">COLLEGATO</text></svg>
+  <svg viewBox="0 0 336 112"><defs><linearGradient id="fx-fd" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3a3835"/><stop offset="1" stop-color="#1c1b19"/></linearGradient></defs><rect x=".5" y=".5" width="335" height="111" rx="12" fill="url(#fx-fd)" stroke="#0f0f0e"/><rect x="1.5" y="1.5" width="333" height="109" rx="11" fill="none" stroke="#fff" stroke-opacity=".08"/><rect x="24" y="34" width="212" height="12" rx="6" fill="#0b0b0a"/><rect x="27" y="37" width="99" height="6" rx="3" fill="#d9d4c8"/><text x="24" y="76" font-family="Schibsted Grotesk" font-weight="800" font-size="15" letter-spacing="-.4" fill="#8f8b83">floppy</text><text x="236" y="76" text-anchor="end" font-family="Departure Mono" font-size="11" fill="#b3aea5">48,2 / 100 GB</text><circle cx="290" cy="40" r="10" fill="#0b0b0a"/><circle cx="290" cy="40" r="5.5" fill="#3fdc6c"/><ellipse cx="290" cy="37.6" rx="2.6" ry="1.4" fill="#fff" opacity=".5"/><text x="290" y="76" text-anchor="middle" font-family="Departure Mono" font-size="10" letter-spacing=".5" fill="#b3aea5">COLLEGATO</text></svg>
   Colori del LED nel frontale scuro: Collegato #3fdc6c, attività #ff6a2e, errore #ff4b33, spento
   #3a3834 senza riflesso.
 
@@ -562,7 +562,7 @@ function famFace(fam, state, used, inWindow) {
     <rect x="1.5" y="1.5" width="333" height="93" rx="11" fill="none" stroke="#fff" stroke-opacity="${d ? ".08" : ".45"}"/>
     <rect x="24" y="30" width="212" height="12" rx="6" fill="${c.slot}"/>
     <rect x="27" y="33" width="${w}" height="6" rx="3" fill="${c.fill}"/>
-    <text x="24" y="72" font-family="Schibsted Grotesk" font-weight="800" font-size="15" letter-spacing="-.4" fill="${c.word}">fluix</text>
+    <text x="24" y="72" font-family="Schibsted Grotesk" font-weight="800" font-size="15" letter-spacing="-.4" fill="${c.word}">floppy</text>
     <text x="236" y="72" text-anchor="end" font-family="Departure Mono" font-size="11" fill="${c.ro}">${num(used)} / ${LIMIT} GB</text>
     <circle cx="290" cy="36" r="10" fill="${c.slot}" opacity=".9"/>
     <circle cx="290" cy="36" r="5.5" class="${ledCls}${blink ? " blink" : ""}"${idleFill}/>${hl(290, 36, 5.5)}
@@ -595,7 +595,7 @@ function famMb(fam, s) {
 }
 function famRow(fam, name, bet, recommended) {
   const used = 48.2;
-  const panelTop = `<div class="pop">${famFace(fam, "ok", used)}<section class="status"><div><h3>Fluix è collegato</h3><p>I progetti sono nel Finder, sotto Fluix.</p></div><div class="btns"><button class="btn btn-primary">${icon("open", 16)}Apri nel Finder</button></div></section></div>`;
+  const panelTop = `<div class="pop">${famFace(fam, "ok", used)}<section class="status"><div><h3>Floppy è collegato</h3><p>I progetti sono nel Finder, sotto Floppy.</p></div><div class="btns"><button class="btn btn-primary">${icon("open", 16)}Apri nel Finder</button></div></section></div>`;
   const win = `<div class="miniwin"><div class="win-bar"><span class="lights"><i></i><i></i><i></i></span><b>Impostazioni</b></div><div class="mw-body">${famFace(fam, "dl", used, true)}<p><b>MacBook Pro di Giulia</b> · Studio Esempio</p></div></div>`;
   const states = [["ok", "Collegato"], ["dl", "Download"], ["off", "Non raggiungibile"], ["stop", "Spento"]];
   const mb = states.map(([s, t]) => `<span class="l">${famMb(fam, s)}</span><span class="d">${famMb(fam, s)}</span><small>${t}</small>`).join("");
@@ -634,7 +634,7 @@ function face(o) {
     <rect x="1.5" y="1.5" width="333" height="109" rx="11" fill="none" stroke="#fff" stroke-opacity="${F.rim}"/>`}
     <rect x="24" y="34" width="212" height="12" rx="6" fill="${F.slot}"/>
     ${w ? `<rect x="27" y="37" width="${w}" height="6" rx="3" fill="${F.fill}"${fillOp}/>` : ""}${head}
-    ${bare ? "" : `<text x="24" y="76" font-family="Schibsted Grotesk" font-weight="800" font-size="15" letter-spacing="-.4" fill="${F.word}">fluix</text>`}
+    ${bare ? "" : `<text x="24" y="76" font-family="Schibsted Grotesk" font-weight="800" font-size="15" letter-spacing="-.4" fill="${F.word}">floppy</text>`}
     <text x="${bare ? 24 : 236}" y="76" text-anchor="${bare ? "start" : "end"}" font-family="Departure Mono" font-size="11" fill="${F.ro}">${o.state === "revoked" ? "0" : num(used)} / ${LIMIT} GB</text>
     <circle cx="290" cy="40" r="10" fill="${F.bezel}"/>
     <circle cx="290" cy="40" r="5.5" class="${LED[o.state]}${blink ? " blink" : ""}" style="fill:${F.led(LED[o.state])}"/>${lit ? '<ellipse cx="290" cy="37.6" rx="2.6" ry="1.4" fill="#fff" opacity=".5"/>' : ""}
@@ -661,12 +661,12 @@ function rowMenu(p, o) {
   const missing = p.size - p.avail;
   const items = [];
   if (p.size > LIMIT) {
-    items.push(`<div class="mnote">Con ${gb(p.size)} è più grande dello spazio di Fluix su questo Mac (${LIMIT} GB). Si apre lo stesso dal Finder: ogni salto nel video aspetta circa un secondo.</div><div class="sep"></div>`);
+    items.push(`<div class="mnote">Con ${gb(p.size)} è più grande dello spazio di Floppy su questo Mac (${LIMIT} GB). Si apre lo stesso dal Finder: ogni salto nel video aspetta circa un secondo.</div><div class="sep"></div>`);
   } else if (missing > 0) {
     if (missing > cacheFree && (o.fullMode || (C.cache === "blocca" ? "block" : "evict")) === "block") {
-      items.push(`<button class="mi" disabled style="opacity:.5">Rendi disponibile<span class="aside">${gb(missing)}</span></button><div class="mnote">Serve spazio: su questo Mac restano ${gb(cacheFree)} per Fluix. Libera prima un progetto che non stai montando.</div>`);
+      items.push(`<button class="mi" disabled style="opacity:.5">Rendi disponibile<span class="aside">${gb(missing)}</span></button><div class="mnote">Serve spazio: su questo Mac restano ${gb(cacheFree)} per Floppy. Libera prima un progetto che non stai montando.</div>`);
     } else if (missing > cacheFree) {
-      items.push(`<button class="mi hl">Rendi disponibile<span class="aside">${eta(missing)}</span></button><div class="mnote">Per fare posto Fluix libererà i file aperti meno di recente su questo Mac. Restano su Fluix e si riscaricano quando li apri.</div>`);
+      items.push(`<button class="mi hl">Rendi disponibile<span class="aside">${eta(missing)}</span></button><div class="mnote">Per fare posto Floppy libererà i file aperti meno di recente su questo Mac. Restano su Floppy e si riscaricano quando li apri.</div>`);
     } else {
       items.push(`<button class="mi hl">Rendi disponibile<span class="aside">${eta(missing)}</span></button>`);
     }
@@ -692,10 +692,10 @@ function panel(o) {
       btns = `<div class="btns">${prim("open", "Apri nel Finder")}<button class="btn btn-ghost">Interrompi</button></div>`; break;
     }
     case "starting":
-      h = "Fluix si sta avviando"; p = "Pochi secondi e i progetti tornano nel Finder.";
+      h = "Floppy si sta avviando"; p = "Pochi secondi e i progetti tornano nel Finder.";
       btns = `<div class="btns">${prim("open", "Apri nel Finder", true)}</div>`; break;
     case "off":
-      h = "Fluix non è raggiungibile";
+      h = "Floppy non è raggiungibile";
       if ((o.reconnect || (C.riconn === "pulsante" ? "manual" : "auto")) === "manual") {
         extra = listOf(["Salva il progetto in CapCut.", "Controlla che il Mac sia connesso a internet.", "Premi Riconnetti."]);
         btns = `<div class="btns">${prim("refresh", "Riconnetti")}</div>`;
@@ -706,21 +706,21 @@ function panel(o) {
       }
       break;
     case "stop":
-      h = word === "Espelli" ? "Fluix è espulso" : "Fluix è spento"; p = "Accendilo per ritrovare i progetti nel Finder.";
-      btns = `<div class="btns">${prim("power", "Accendi Fluix")}</div>`; break;
+      h = word === "Espelli" ? "Floppy è espulso" : "Floppy è spento"; p = "Accendilo per ritrovare i progetti nel Finder.";
+      btns = `<div class="btns">${prim("power", "Accendi Floppy")}</div>`; break;
     case "revoked":
       h = "Questo Mac non ha più accesso"; p = "Un amministratore di Studio Esempio lo ha rimosso il 16 ottobre. Il disco è scollegato e i file scaricati su questo Mac sono stati cancellati.";
-      extra = `<div class="notice calm"><span class="ic"><span class="fessura"></span></span><span>I progetti sono al sicuro su Fluix. Se è un errore, scrivi a chi gestisce il team.</span></div>`;
+      extra = `<div class="notice calm"><span class="ic"><span class="fessura"></span></span><span>I progetti sono al sicuro su Floppy. Se è un errore, scrivi a chi gestisce il team.</span></div>`;
       btns = `<div class="btns">${prim("refresh", "Accedi di nuovo")}</div>`; break;
     case "low":
-      h = "Fluix è collegato"; p = "I progetti sono nel Finder, sotto Fluix.";
-      extra = `<div class="notice warn"><span class="ic">${ind("err")}</span><span><b>Il Mac ha quasi finito lo spazio</b>Restano 12 GB liberi. Sotto i 10 GB Fluix libera da solo tutti i file scaricati, per non riempire il disco.<br><button class="btn btn-soft">Libera spazio ora</button></span></div>`;
+      h = "Floppy è collegato"; p = "I progetti sono nel Finder, sotto Floppy.";
+      extra = `<div class="notice warn"><span class="ic">${ind("err")}</span><span><b>Il Mac ha quasi finito lo spazio</b>Restano 12 GB liberi. Sotto i 10 GB Floppy libera da solo tutti i file scaricati, per non riempire il disco.<br><button class="btn btn-soft">Libera spazio ora</button></span></div>`;
       btns = `<div class="btns">${prim("open", "Apri nel Finder")}</div>`; break;
     default:
-      h = "Fluix è collegato"; p = "I progetti sono nel Finder, sotto Fluix.";
+      h = "Floppy è collegato"; p = "I progetti sono nel Finder, sotto Floppy.";
       btns = `<div class="btns">${prim("open", "Apri nel Finder")}</div>`;
   }
-  const banner = o.update ? `<div class="banner"><span class="t"><b>Fluix 0.2.0 è pronto.</b> Si installa quando riavvii l'app.</span><button class="btn btn-soft btn-small" style="background:var(--raised)">Riavvia</button></div>` : "";
+  const banner = o.update ? `<div class="banner"><span class="t"><b>Floppy 0.2.0 è pronto.</b> Si installa quando riavvii l'app.</span><button class="btn btn-soft btn-small" style="background:var(--raised)">Riavvia</button></div>` : "";
   const faceState = o.state === "ok" && o.update ? "ok" : o.state;
 
   const showSpace = ["ok", "dl", "low"].includes(o.state) && !o.hideSpace;
@@ -731,17 +731,17 @@ function panel(o) {
   const showList = ["ok", "dl", "low", "off"].includes(o.state);
   const rows = P.map((x) => {
     const open = o.menu === x.id;
-    const conf = o.confirm === x.id ? `<div class="confirm"><b>Liberare ${gb(x.avail)} di ${esc(x.name)}?</b><p>I file restano nel Finder e su Fluix: si riscaricano quando li apri, e fino ad allora ogni salto nel video aspetta circa un secondo.</p><div class="btns"><button class="btn btn-primary">Libera spazio</button><button class="btn btn-soft">Annulla</button></div></div>` : "";
+    const conf = o.confirm === x.id ? `<div class="confirm"><b>Liberare ${gb(x.avail)} di ${esc(x.name)}?</b><p>I file restano nel Finder e su Floppy: si riscaricano quando li apri, e fino ad allora ogni salto nel video aspetta circa un secondo.</p><div class="btns"><button class="btn btn-primary">Libera spazio</button><button class="btn btn-soft">Annulla</button></div></div>` : "";
     return `<div class="prow${open || o.confirm === x.id ? " open" : ""}">${marker(x, o)}<span class="n">${esc(x.name)}</span>${chip(x, o)}<button class="icon-btn" aria-label="Azioni per ${esc(x.name)}" aria-expanded="${open}">${icon("dots", 16)}</button></div>${open ? rowMenu(x, o) : ""}${conf}`;
   }).join("");
   const list = showList ? `<section class="projects${o.state === "off" ? " dim" : ""}"><div class="sec-h"><span>Progetti</span><b>${P.length}</b></div>${rows}</section>` : "";
 
-  const stopConfirm = o.stopConfirm ? `<div class="confirm" style="margin:8px 8px 0"><b>${word === "Espelli" ? "Espellere Fluix?" : "Spegnere Fluix?"}</b><p>${word === "Espelli" ? "Il disco sparisce dal Finder. La macchina virtuale resta accesa." : "Il disco sparisce dal Finder e CapCut non vede più i file finché non lo riaccendi. Si libera anche la memoria che Fluix usa."}</p><div class="btns"><button class="btn btn-primary">${word}</button><button class="btn btn-soft">Annulla</button></div></div>` : "";
+  const stopConfirm = o.stopConfirm ? `<div class="confirm" style="margin:8px 8px 0"><b>${word === "Espelli" ? "Espellere Floppy?" : "Spegnere Floppy?"}</b><p>${word === "Espelli" ? "Il disco sparisce dal Finder. La macchina virtuale resta accesa." : "Il disco sparisce dal Finder e CapCut non vede più i file finché non lo riaccendi. Si libera anche la memoria che Floppy usa."}</p><div class="btns"><button class="btn btn-primary">${word}</button><button class="btn btn-soft">Annulla</button></div></div>` : "";
   const offIcon = word === "Espelli" ? "eject" : "power";
   const footAction = ["stop", "revoked"].includes(o.state) ? "" : `<button class="btn">${icon(offIcon, 14)}${word}</button>`;
-  const foot = `<footer class="foot"><span class="ver">Fluix 0.1.0</span><button class="icon-btn" aria-label="Impostazioni">${icon("gear", 16)}</button>${footAction}</footer>`;
+  const foot = `<footer class="foot"><span class="ver">Floppy 0.1.0</span><button class="icon-btn" aria-label="Impostazioni">${icon("gear", 16)}</button>${footAction}</footer>`;
 
-  return `<div class="pop" role="dialog" aria-label="Pannello di Fluix">${banner}${face({ state: faceState, used: o.used, pct: o.pct })}<section class="status"><div><h3>${esc(h)}</h3>${p ? `<p>${p}</p>` : ""}</div>${extra}${btns}</section>${space}${list}${stopConfirm}${foot}</div>`;
+  return `<div class="pop" role="dialog" aria-label="Pannello di Floppy">${banner}${face({ state: faceState, used: o.used, pct: o.pct })}<section class="status"><div><h3>${esc(h)}</h3>${p ? `<p>${p}</p>` : ""}</div>${extra}${btns}</section>${space}${list}${stopConfirm}${foot}</div>`;
 }
 
 function settingsPage(sent) {
@@ -760,7 +760,7 @@ function settingsPage(sent) {
 }
 
 function settingsWindow(sent) {
-  return `<div class="win" role="dialog" aria-label="Impostazioni di Fluix">
+  return `<div class="win" role="dialog" aria-label="Impostazioni di Floppy">
     <div class="win-bar"><span class="lights"><i></i><i></i><i></i></span><b>Impostazioni</b></div>
     <div class="win-body">
       <section><p class="grp-t">Account</p><div class="well">
@@ -771,22 +771,22 @@ function settingsWindow(sent) {
       </div></section>
       <section><p class="grp-t">Spazio</p><div class="well">
         <div class="row slider-row">
-          <div class="slider-top"><span class="lbl"><b>Spazio massimo per Fluix</b><span>I file scaricati restano qui finché non serve posto.</span></span><span class="ro" data-cap>100 GB</span></div>
-          <input type="range" min="20" max="100" step="5" value="100" aria-label="Spazio massimo per Fluix" data-cap-range>
+          <div class="slider-top"><span class="lbl"><b>Spazio massimo per Floppy</b><span>I file scaricati restano qui finché non serve posto.</span></span><span class="ro" data-cap>100 GB</span></div>
+          <input type="range" min="20" max="100" step="5" value="100" aria-label="Spazio massimo per Floppy" data-cap-range>
           <div class="scale"><span>20 GB</span><span>100 GB, il massimo di questa installazione</span></div>
         </div>
         <div class="row slider-row">
-          <div class="slider-top"><span class="lbl"><b>In uso</b><span>Fluix lascia sempre almeno 20 GB liberi sul Mac.</span></span><span class="ro">48,2 di 100 GB</span></div>
+          <div class="slider-top"><span class="lbl"><b>In uso</b><span>Floppy lascia sempre almeno 20 GB liberi sul Mac.</span></span><span class="ro">48,2 di 100 GB</span></div>
           <div class="usebar"><i style="width:48.2%;background:var(--ink)"></i></div>
           <div class="scale"><span>Liberi sul Mac: 214 GB</span><span>Riserva: 20 GB</span></div>
         </div>
       </div></section>
       <section><p class="grp-t">Generale</p><div class="well">
-        <div class="row"><span class="lbl"><b>Avvia Fluix al login</b><span>Il disco torna nel Finder ogni volta che accendi il Mac.</span></span><button class="toggle" role="switch" aria-checked="true" aria-label="Avvia Fluix al login" data-toggle></button></div>
-        <div class="row"><span class="lbl"><b>Versione</b><span>Fluix 0.1.0, aggiornato</span></span><button class="btn btn-soft">Cerca aggiornamenti</button></div>
+        <div class="row"><span class="lbl"><b>Avvia Floppy al login</b><span>Il disco torna nel Finder ogni volta che accendi il Mac.</span></span><button class="toggle" role="switch" aria-checked="true" aria-label="Avvia Floppy al login" data-toggle></button></div>
+        <div class="row"><span class="lbl"><b>Versione</b><span>Floppy 0.1.0, aggiornato</span></span><button class="btn btn-soft">Cerca aggiornamenti</button></div>
       </div></section>
       <section><p class="grp-t">Assistenza</p><div class="well">
-        <div class="row"><span class="lbl"><b>Invia diagnostica</b><span>Manda a chi gestisce Fluix:</span>${listOf(["lo stato del disco", "gli ultimi log di Fluix e della macchina virtuale", "la versione di macOS"])}<span style="margin-top:6px">Nessun file dei progetti, nessuna password.</span></span>${sent ? "" : `<button class="btn btn-soft" data-send>Invia</button>`}</div>
+        <div class="row"><span class="lbl"><b>Invia diagnostica</b><span>Manda a chi gestisce Floppy:</span>${listOf(["lo stato del disco", "gli ultimi log di Floppy e della macchina virtuale", "la versione di macOS"])}<span style="margin-top:6px">Nessun file dei progetti, nessuna password.</span></span>${sent ? "" : `<button class="btn btn-soft" data-send>Invia</button>`}</div>
         ${sent ? `<div class="row"><div class="sent" style="flex:1">${ind("ok")}<span>Inviata alle 10:42. Comunica il codice a chi ti aiuta:</span><span class="code">FX-7Q2K</span></div></div>` : ""}
       </div></section>
     </div>
@@ -797,8 +797,8 @@ function notifs() {
   const n = (t, b, w) => `<div class="ntf">${appIcon(38)}<div class="tx"><div class="top"><b>${t}</b><span class="when">${w}</span></div><p>${b}</p></div></div>`;
   return `<div class="notifs">
     ${n("Cantine Arnaldi - Vendemmia è pronto", "24,6 GB su questo Mac: scorre in timeline senza attese.", "ora")}
-    ${n("Fluix è di nuovo collegato", "I progetti sono tornati nel Finder.", "2 min fa")}
-    ${n("Fluix ha liberato 48,2 GB", "Il Mac aveva meno di 10 GB liberi. I progetti restano nel Finder e si riscaricano quando li apri.", "10:12")}
+    ${n("Floppy è di nuovo collegato", "I progetti sono tornati nel Finder.", "2 min fa")}
+    ${n("Floppy ha liberato 48,2 GB", "Il Mac aveva meno di 10 GB liberi. I progetti restano nel Finder e si riscaricano quando li apri.", "10:12")}
   </div>`;
 }
 
@@ -853,7 +853,7 @@ function build() {
     ${famRow("a", "Stucco", "Il frontale di oggi senza scanalatura: corpo chiaro, fessura scura, LED a destra. L'icona dell'app è lo stesso drive chiaro su fondo grafite. In tema chiaro il frontale si confonde col pannello: è un riquadro chiaro dentro un riquadro chiaro.", false)}
     ${famRow("b", "Grafite", "Un oggetto scuro in entrambi i temi, come l'icona di oggi: nel pannello è un apparecchio vero appoggiato sulla carta. Nella barra dei menu la sagoma piena, con fessura e LED ritagliati, si legge meglio di un contorno a 16 px.", true)}
     ${famRow("c", "Essenziale", "Niente corpo: il segno è solo fessura più LED, e nel pannello stanno direttamente sulla superficie, senza un riquadro dentro il riquadro. Onestamente a 16 px non si legge più come un drive: sembra un segno meno con un punto, o un interruttore. Diventa riconoscibile solo dopo averlo imparato.", false)}
-    <div class="chosen" id="scelta-drive"><p class="lettura"><span class="led ok"></span> Scelta: Grafite con le icone di Essenziale</p><div class="chosen-row"><div>${appIcon(128, "essenziale")}</div><div>${appIcon(32, "essenziale")}</div><div>${appIcon(16, "essenziale")}</div><div class="mbcol">${[["ok", "Collegato"], ["dl", "Download"], ["off", "Non raggiungibile"], ["stop", "Spento"]].map(([x, t]) => `<span class="l">${mbIcon(x, "essenziale")}</span><span class="d">${mbIcon(x, "essenziale")}</span><small>${t}</small>`).join("")}</div><div class="pop">${face({ state: "ok", used: 48.2, fam: "grafite" })}<section class="status"><div><h3>Fluix è collegato</h3><p>I progetti sono nel Finder, sotto Fluix.</p></div></section></div></div><p class="why">Il corpo scuro di Grafite resta nel frontale, nel pannello e nelle finestre; le icone perdono il contorno e tengono solo fessura e LED sullo stesso asse, come nel frontale. Le righe A, B e C restano qui sotto come storia della decisione.</p></div>
+    <div class="chosen" id="scelta-drive"><p class="lettura"><span class="led ok"></span> Scelta: Grafite con le icone di Essenziale</p><div class="chosen-row"><div>${appIcon(128, "essenziale")}</div><div>${appIcon(32, "essenziale")}</div><div>${appIcon(16, "essenziale")}</div><div class="mbcol">${[["ok", "Collegato"], ["dl", "Download"], ["off", "Non raggiungibile"], ["stop", "Spento"]].map(([x, t]) => `<span class="l">${mbIcon(x, "essenziale")}</span><span class="d">${mbIcon(x, "essenziale")}</span><small>${t}</small>`).join("")}</div><div class="pop">${face({ state: "ok", used: 48.2, fam: "grafite" })}<section class="status"><div><h3>Floppy è collegato</h3><p>I progetti sono nel Finder, sotto Floppy.</p></div></section></div></div><p class="why">Il corpo scuro di Grafite resta nel frontale, nel pannello e nelle finestre; le icone perdono il contorno e tengono solo fessura e LED sullo stesso asse, come nel frontale. Le righe A, B e C restano qui sotto come storia della decisione.</p></div>
     <p class="why">Consiglio del giro 2: B, Grafite. È l'unica in cui icona dell'app, icona della barra dei menu e frontale sono letteralmente lo stesso oggetto in ogni tema, e la sagoma piena regge a 16 px meglio del contorno di A. In tema chiaro dà al pannello un punto fermo scuro in alto; il costo è un blocco scuro anche dentro finestre chiare. A resta valida se quel blocco pesa troppo; C è la più pulita ma perde il drive proprio dove serve, nella barra dei menu.</p>
   </article>`),
   group("dettagli", "00", "Decisione: i dettagli", "Al posto dei dettagli da kit (pallini che si illuminano, pillole, testo colorato) i dettagli dell'oggetto drive. A è consigliata ed è già applicata in tutto lo storyboard. Ogni campione in chiaro e in scuro, a grandezza vera e ingrandito tre volte.", `<article class="decision">${detailsRows()}</article>`),

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Pannello Fluix</title>
+<title>Pannello Floppy</title>
 <style>
 :root {
   color-scheme: light dark;
@@ -400,8 +400,8 @@ h1, h2, h3 { text-wrap: balance; }
 </head>
 <body>
 <header class="page-head">
-  <h1 class="page-title">Fluix nella barra dei menu</h1>
-  <p class="page-lede">Tre proposte per il pannello che si apre cliccando l'icona di Fluix in alto a destra. Stessi progetti di esempio in tutte e tre: spazio riservato su questo Mac 100 GB, download a circa 14,5 MB/s (434 MB in 30 secondi su una linea da 170 Mbps). I pulsanti dentro i pannelli rispondono davvero.</p>
+  <h1 class="page-title">Floppy nella barra dei menu</h1>
+  <p class="page-lede">Tre proposte per il pannello che si apre cliccando l'icona di Floppy in alto a destra. Stessi progetti di esempio in tutte e tre: spazio riservato su questo Mac 100 GB, download a circa 14,5 MB/s (434 MB in 30 secondi su una linea da 170 Mbps). I pulsanti dentro i pannelli rispondono davvero.</p>
   <div class="page-controls">
     <div class="control">
       <span class="control-label">Stato di tutte</span>
@@ -580,7 +580,7 @@ function stopConfirm(v, title, body, yes) {
 function freeConfirm(v) {
   const p = find(v, v.confirm.free);
   return `<div class="confirm" role="alertdialog" aria-label="Libera spazio">
-    <p><strong>Liberare ${gb(p.avail)} su questo Mac?</strong> I file restano su Fluix. Finché non lo rendi di nuovo disponibile, scorrere la timeline sarà più lento.</p>
+    <p><strong>Liberare ${gb(p.avail)} su questo Mac?</strong> I file restano su Floppy. Finché non lo rendi di nuovo disponibile, scorrere la timeline sarà più lento.</p>
     <div class="confirm-act">
       <button type="button" class="btn btn-ghost" data-act="cancel">Annulla</button>
       <button type="button" class="btn btn-soft" data-act="free-yes">Libera spazio</button>
@@ -662,7 +662,7 @@ function renderA(v) {
   const dot = `<i class="dot${v.mode === "starting" ? " pulse" : ""}"></i>`;
   const stopBtn = v.mode === "stopped"
     ? ""
-    : `<button type="button" class="btn btn-icon" data-act="stop" title="Spegni Fluix" aria-label="Spegni Fluix">${icon("power", 14)}</button>`;
+    : `<button type="button" class="btn btn-icon" data-act="stop" title="Spegni Floppy" aria-label="Spegni Floppy">${icon("power", 14)}</button>`;
 
   let body = "";
   const list = (dim) => `<div class="pa-sec"><span class="pa-sec-title">Progetti</span><span>su questo Mac</span></div>
@@ -674,7 +674,7 @@ function renderA(v) {
     body = `<div class="notice" role="alert">
         <span class="notice-ic">${icon("wifiOff", 18)}</span>
         <div>
-          <p class="notice-title">Fluix non è raggiungibile</p>
+          <p class="notice-title">Floppy non è raggiungibile</p>
           <p>Controlla che il Mac sia connesso a internet, poi premi Riconnetti. Finché non torna, CapCut non riesce ad aprire i file del disco: salva il progetto e aspetta.</p>
           <div class="notice-act">
             <button type="button" class="btn btn-primary" data-act="reconnect">${icon("refresh", 13)} Riconnetti</button>
@@ -684,27 +684,27 @@ function renderA(v) {
       </div>${list(true)}`;
   } else if (v.mode === "starting") {
     body = `<div class="block">
-        <h3><span class="spin"></span>Fluix si sta avviando</h3>
+        <h3><span class="spin"></span>Floppy si sta avviando</h3>
         <p>Di solito bastano pochi secondi. I progetti compaiono qui appena è pronto.</p>
       </div>`;
   } else {
     body = `<div class="block">
-        <h3>Fluix è spento</h3>
+        <h3>Floppy è spento</h3>
         <p>Il disco non compare nel Finder. Accendilo per tornare ai progetti.</p>
-        <button type="button" class="btn btn-primary" data-act="start">${icon("power", 13)} Accendi Fluix</button>
+        <button type="button" class="btn btn-primary" data-act="start">${icon("power", 13)} Accendi Floppy</button>
       </div>`;
   }
 
   const canOpen = v.mode === "ok";
   return `<header class="hd">
-      <span class="wordmark">fluix</span>
+      <span class="wordmark">floppy</span>
       <div class="hd-r"><span class="pill ${s.cls}">${dot}${s.label}</span>${stopBtn}</div>
     </header>
-    ${v.confirm === "stop" ? stopConfirm(v, "Spegnere Fluix?", "Il disco sparisce dal Finder e CapCut non vede più i file finché non lo riaccendi.", "Spegni") : ""}
+    ${v.confirm === "stop" ? stopConfirm(v, "Spegnere Floppy?", "Il disco sparisce dal Finder e CapCut non vede più i file finché non lo riaccendi.", "Spegni") : ""}
     <div class="scroll">${body}</div>
     ${spaceA(v)}
     <footer class="ft">
-      <span class="ver">Fluix ${VERSION}</span>
+      <span class="ver">Floppy ${VERSION}</span>
       <button type="button" class="btn btn-primary" data-act="finder"${canOpen ? "" : " disabled"}>${icon("open", 13)} Apri nel Finder</button>
     </footer>`;
 }
@@ -795,11 +795,11 @@ function heroB(v) {
     const doneP = v.done ? find(v, v.done) : null;
     const sub = doneP
       ? `${doneP.name} è pronto: scorre in timeline senza attese.`
-      : "I progetti sono nel Finder, sotto Fluix.";
+      : "I progetti sono nel Finder, sotto Floppy.";
     return `<section class="pb-hero">
       <div class="pb-top">
         <div class="pb-glyph st-ok">${icon("drive", 20)}</div>
-        <div><h2>Fluix è collegato</h2><p>${sub}</p></div>
+        <div><h2>Floppy è collegato</h2><p>${sub}</p></div>
       </div>
       <button type="button" class="btn btn-primary btn-big" data-act="finder">${icon("open", 15)} Apri nel Finder</button>
     </section>`;
@@ -808,7 +808,7 @@ function heroB(v) {
     return `<section class="pb-hero" role="alert">
       <div class="pb-top">
         <div class="pb-glyph st-offline">${icon("wifiOff", 20)}</div>
-        <div><h2>Fluix non è raggiungibile</h2>
+        <div><h2>Floppy non è raggiungibile</h2>
           <ol class="pb-steps">
             <li>Salva il progetto in CapCut.</li>
             <li>Controlla che il Mac sia connesso a internet.</li>
@@ -823,7 +823,7 @@ function heroB(v) {
     return `<section class="pb-hero">
       <div class="pb-top">
         <div class="pb-glyph st-starting"><span class="spin"></span></div>
-        <div><h2>Fluix si sta avviando</h2><p>Pochi secondi e i progetti tornano nel Finder.</p></div>
+        <div><h2>Floppy si sta avviando</h2><p>Pochi secondi e i progetti tornano nel Finder.</p></div>
       </div>
       <button type="button" class="btn btn-primary btn-big" disabled>${icon("open", 15)} Apri nel Finder</button>
     </section>`;
@@ -831,9 +831,9 @@ function heroB(v) {
   return `<section class="pb-hero">
     <div class="pb-top">
       <div class="pb-glyph st-stopped">${icon("power", 20)}</div>
-      <div><h2>Fluix è spento</h2><p>Accendilo per ritrovare i progetti nel Finder.</p></div>
+      <div><h2>Floppy è spento</h2><p>Accendilo per ritrovare i progetti nel Finder.</p></div>
     </div>
-    <button type="button" class="btn btn-primary btn-big" data-act="start">${icon("power", 15)} Accendi Fluix</button>
+    <button type="button" class="btn btn-primary btn-big" data-act="start">${icon("power", 15)} Accendi Floppy</button>
   </section>`;
 }
 
@@ -856,8 +856,8 @@ function renderB(v) {
       ${list}
     </div>
     <p class="pb-hint">Un progetto pronto su questo Mac scorre in timeline senza attese. Gli altri si aprono lo stesso, ma ogni salto nel video aspetta circa un secondo.</p>
-    ${v.confirm === "stop" ? stopConfirm(v, "Spegnere Fluix?", "Il disco sparisce dal Finder e CapCut non vede più i file finché non lo riaccendi.", "Spegni") : ""}
-    <footer class="ft"><span class="ver">Fluix ${VERSION}</span>${stopBtn}</footer>`;
+    ${v.confirm === "stop" ? stopConfirm(v, "Spegnere Floppy?", "Il disco sparisce dal Finder e CapCut non vede più i file finché non lo riaccendi.", "Spegni") : ""}
+    <footer class="ft"><span class="ver">Floppy ${VERSION}</span>${stopBtn}</footer>`;
 }
 
 /* Variant C */
@@ -926,14 +926,14 @@ function renderC(v) {
   const stateTxt = { ok: "collegato", starting: "in avvio", offline: "non raggiungibile", stopped: "espulso" }[v.mode];
   const dot = v.mode === "starting" ? `<span class="spin" style="width:9px;height:9px"></span>` : `<i class="dot"></i>`;
   let side = "";
-  if (v.mode === "ok") side = `<button type="button" class="btn btn-icon" data-act="stop" title="Espelli Fluix" aria-label="Espelli Fluix">${icon("eject", 14)}</button>`;
+  if (v.mode === "ok") side = `<button type="button" class="btn btn-icon" data-act="stop" title="Espelli Floppy" aria-label="Espelli Floppy">${icon("eject", 14)}</button>`;
   if (v.mode === "offline") side = `<button type="button" class="btn btn-primary" data-act="reconnect">Riconnetti</button>`;
   if (v.mode === "stopped") side = `<button type="button" class="btn btn-primary" data-act="start">Collega</button>`;
 
   const disk = `<div class="pc-disk">
-      <button type="button" class="pc-disk-main" data-act="finder" title="Apri Fluix nel Finder"${v.mode === "ok" ? "" : " disabled"}>
+      <button type="button" class="pc-disk-main" data-act="finder" title="Apri Floppy nel Finder"${v.mode === "ok" ? "" : " disabled"}>
         <span class="pc-disk-ic">${icon("drive", 20, 1.5)}</span>
-        <span class="pc-disk-txt"><span class="pc-disk-name">Fluix</span><span class="pc-disk-state ${s.cls}">${dot}${stateTxt}</span></span>
+        <span class="pc-disk-txt"><span class="pc-disk-name">Floppy</span><span class="pc-disk-state ${s.cls}">${dot}${stateTxt}</span></span>
         ${v.mode === "ok" ? `<span class="pc-open">${icon("open", 13)}</span>` : ""}
       </button>
       ${side}
@@ -956,12 +956,12 @@ function renderC(v) {
     body = `<div class="pc-cols"><span>Nome</span><span>Su questo Mac</span></div>
       <div class="pc-list" aria-hidden="true">${widths.map((w) => `<div class="pc-skel"><i style="width:15px"></i><i style="width:${w}%"></i></div>`).join("")}</div>`;
   } else {
-    body = `<div class="block"><h3>Fluix è espulso</h3><p>Premi Collega per ritrovarlo nel Finder con tutti i progetti.</p></div>`;
+    body = `<div class="block"><h3>Floppy è espulso</h3><p>Premi Collega per ritrovarlo nel Finder con tutti i progetti.</p></div>`;
   }
 
   const u = used(v);
   return `${disk}
-    ${v.confirm === "stop" ? stopConfirm(v, "Espellere Fluix?", "Sparisce dal Finder e CapCut non vede più i file finché non lo ricolleghi.", "Espelli") : ""}
+    ${v.confirm === "stop" ? stopConfirm(v, "Espellere Floppy?", "Sparisce dal Finder e CapCut non vede più i file finché non lo ricolleghi.", "Espelli") : ""}
     <div class="scroll">${body}</div>
     <div class="pc-status">
       <div class="bar neutral"><i data-live="used-w" style="width:${Math.min(100, (u / LIMIT_GB) * 100)}%"></i></div>
@@ -994,7 +994,7 @@ function deskShell(meta) {
       <div class="menubar">
         <div class="mb-left"><span><b>Finder</b></span><span>File</span><span>Modifica</span><span>Vista</span><span>Vai</span></div>
         <div class="mb-right">
-          <button type="button" class="mb-yd" aria-label="Fluix" tabindex="-1"></button>
+          <button type="button" class="mb-yd" aria-label="Floppy" tabindex="-1"></button>
           <svg width="16" height="12" viewBox="0 0 24 18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M2 6.5a15 15 0 0 1 20 0"/><path d="M5.5 10.2a10 10 0 0 1 13 0"/><path d="M9 13.8a5 5 0 0 1 6 0"/><circle cx="12" cy="16.6" r=".6" fill="currentColor"/></svg>
           <svg width="24" height="12" viewBox="0 0 26 12" fill="none" aria-hidden="true"><rect x=".7" y=".7" width="21.6" height="10.6" rx="3" stroke="currentColor" stroke-opacity=".5" stroke-width="1.2"/><rect x="2.4" y="2.4" width="14" height="7.2" rx="1.6" fill="currentColor"/><path d="M24 4.2v3.6" stroke="currentColor" stroke-opacity=".5" stroke-width="1.4" stroke-linecap="round"/></svg>
           <span>mar 6 ott 10:42</span>
@@ -1002,9 +1002,9 @@ function deskShell(meta) {
       </div>
       <div class="desk-icon" aria-hidden="true">
         <svg width="46" height="40" viewBox="0 0 46 40"><rect x="3" y="9" width="40" height="24" rx="5" fill="#dcdce1" stroke="#a9a9b2"/><rect x="3" y="24" width="40" height="9" rx="4" fill="#c4c4cb"/><circle cx="36" cy="28.5" r="1.8" fill="#d4a044"/></svg>
-        <span>Fluix</span>
+        <span>Floppy</span>
       </div>
-      <div class="popover" role="dialog" aria-label="Pannello di Fluix, variante ${meta.key}"></div>
+      <div class="popover" role="dialog" aria-label="Pannello di Floppy, variante ${meta.key}"></div>
       <div class="flash" aria-live="polite"></div>
     </div>
     <p class="variant-note">${meta.note}</p>
@@ -1026,7 +1026,7 @@ function render(key) {
   root.querySelector(".popover").innerHTML = RENDER[key](v);
   const mb = root.querySelector(".mb-yd");
   mb.innerHTML = menubarIcon(v);
-  mb.setAttribute("aria-label", `Fluix, ${STATUS[v.mode].label.toLowerCase()}`);
+  mb.setAttribute("aria-label", `Floppy, ${STATUS[v.mode].label.toLowerCase()}`);
   root.querySelector(".desk-icon").classList.toggle("gone", v.mode === "starting" || v.mode === "stopped");
   root.querySelectorAll(".seg [data-mode]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.mode === modeKey(v))));
   const firstConfirm = root.querySelector(".confirm .btn");
@@ -1104,7 +1104,7 @@ function act(key, a, id) {
       find(v, v.confirm.free).avail = 0;
       v.confirm = null;
       render(key);
-      flash(key, "Spazio liberato. I file restano su Fluix.");
+      flash(key, "Spazio liberato. I file restano su Floppy.");
       return;
     case "cancel":
       v.confirm = null;
@@ -1128,11 +1128,11 @@ function act(key, a, id) {
         if (state[key] !== v || v.mode !== "starting") return;
         v.mode = "ok";
         render(key);
-        flash(key, a === "reconnect" ? "Fluix è di nuovo collegato." : "Fluix è acceso.");
+        flash(key, a === "reconnect" ? "Floppy è di nuovo collegato." : "Floppy è acceso.");
       }, 2600);
       break;
     case "finder":
-      flash(key, "Si apre il Finder su Fluix.");
+      flash(key, "Si apre il Finder su Floppy.");
       return;
     case "menu":
       v.menu = v.menu === id ? null : id;

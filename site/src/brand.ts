@@ -1,9 +1,9 @@
-// The product's identity in one place. The name is under review (trademark conflict):
-// a rename changes `name` here, plus `repo` and `domain` if those move too. Everything else
+// The product's identity in one place (name chosen in DECISIONS #14). A rename changes
+// `name` here, plus `repo` and `domain` if those move too. Everything else
 // on the site (title, header, landing, install line, doc pages through the %tokens%) reads
 // from this file.
 
-const name = 'Fluix';
+const name = 'Floppy';
 const slug = name.toLowerCase();
 
 /** Name, derived forms, links and tagline of the product. */
@@ -18,7 +18,7 @@ export const brand = {
   cask: slug,
   repo: 'https://github.com/essedev/fluix',
   /** TODO: the domain depends on the final name. `.example` is reserved and resolves nowhere. */
-  domain: 'fluix.example',
+  domain: 'floppy.example',
   tagline: {
     en: 'A shared disk for video teams, right in the Finder.',
     it: 'Un disco condiviso per chi monta video, direttamente nel Finder.',

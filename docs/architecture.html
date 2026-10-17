@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Fluix Architecture</title>
+<title>Floppy Architecture</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -332,7 +332,7 @@ details.data table { margin-top: 8px; font-size: 12.5px; }
 <nav class="side" aria-label="Sections">
   <div class="brand">
     <svg class="brand-mark" width="36" height="24" viewBox="0 0 24 16" aria-hidden="true"><rect x="2" y="6.5" width="13" height="3" rx="1.5" fill="var(--text)"/><circle cx="19.75" cy="8" r="3.1" fill="var(--text)"/><circle cx="19.75" cy="8" r="2" fill="var(--brand)"/><ellipse cx="19.75" cy="7.1" rx=".95" ry=".5" fill="#fff" opacity=".5"/></svg>
-    <div><b>fluix</b><span>Architecture proposal</span></div>
+    <div><b>floppy</b><span>Architecture proposal</span></div>
   </div>
   <ul class="toc">
     <li><a href="#overview"><span class="n">01</span>Overview</a></li>
@@ -379,8 +379,8 @@ details.data table { margin-top: 8px; font-size: 12.5px; }
         <tr><td class="k">Browsing</td><td class="then">Local, the tree is in the VM</td><td>Still local: every Mac reads a replica in its own VM; a write costs one round trip to the center</td></tr>
         <tr><td class="k">Access</td><td class="then">S3 keys and SMB password inside the zip</td><td>Login in the browser, a personal Valkey user per Mac</td></tr>
         <tr><td class="k">Someone leaves</td><td class="then">Rotate the keys on every Mac by hand</td><td>One click deletes their user, then one key rotation that reaches every Mac on its own</td></tr>
-        <tr><td class="k">Install</td><td class="then">Zip plus <code>bash install.sh</code> in the Terminal</td><td><code>brew install --cask fluix</code>, then the app does the rest</td></tr>
-        <tr><td class="k">Interface</td><td class="then">The <code>fluix</code> command</td><td>Menu bar app from the concepts, driving the same command</td></tr>
+        <tr><td class="k">Install</td><td class="then">Zip plus <code>bash install.sh</code> in the Terminal</td><td><code>brew install --cask floppy</code>, then the app does the rest</td></tr>
+        <tr><td class="k">Interface</td><td class="then">The <code>floppy</code> command</td><td>Menu bar app from the concepts, driving the same command</td></tr>
         <tr><td class="k">Without network</td><td class="then">Cached files probably readable (not tested)</td><td>Read only: the whole tree browsable, cached clips play, saving fails at once</td></tr>
       </tbody>
     </table>
@@ -396,7 +396,7 @@ details.data table { margin-top: 8px; font-size: 12.5px; }
 <section id="architecture">
   <p class="eyebrow">02 · Architecture</p>
   <h2>Three places, and the file tree on both ends</h2>
-  <p>Each Mac runs the app, the <code>fluix</code> command and a small Linux VM with JuiceFS. The file tree lives in a central Valkey, and the VM keeps a replica of it that the master updates as it changes: JuiceFS reads the tree from that replica, sends its writes to the center, and fetches file contents from S3. The control plane only talks to the app and, as administrator, to Valkey.</p>
+  <p>Each Mac runs the app, the <code>floppy</code> command and a small Linux VM with JuiceFS. The file tree lives in a central Valkey, and the VM keeps a replica of it that the master updates as it changes: JuiceFS reads the tree from that replica, sends its writes to the center, and fetches file contents from S3. The control plane only talks to the app and, as administrator, to Valkey.</p>
   <figure>
     <div class="fig wide">
       <div class="legend">
@@ -455,12 +455,12 @@ details.data table { margin-top: 8px; font-size: 12.5px; }
         <!-- Mac nodes -->
         <rect class="node" x="50" y="62" width="170" height="56" rx="9"/>
         <text class="nt" x="64" y="86">Finder · CapCut</text>
-        <text class="ns" x="64" y="104">/Volumes/Fluix</text>
+        <text class="ns" x="64" y="104">/Volumes/Floppy</text>
         <rect class="node hl" x="260" y="62" width="172" height="56" rx="9"/>
-        <text class="nt" x="274" y="86">Fluix.app</text>
+        <text class="nt" x="274" y="86">Floppy.app</text>
         <text class="ns" x="274" y="104">menu bar panel · Tauri</text>
         <rect class="node" x="260" y="160" width="172" height="56" rx="9"/>
-        <text class="nt" x="274" y="184">fluix command</text>
+        <text class="nt" x="274" y="184">floppy command</text>
         <text class="ns" x="274" y="202">+ launchd agent, every 2 min</text>
 
         <rect class="node" x="60" y="302" width="162" height="58" rx="9"/>
@@ -518,7 +518,7 @@ details.data table { margin-top: 8px; font-size: 12.5px; }
   <h2>What gets built, and where it lives</h2>
   <div class="grid g4" style="margin-top:16px">
     <div class="card comp">
-      <h3>Fluix.app<span class="lic">MIT</span></h3>
+      <h3>Floppy.app<span class="lic">MIT</span></h3>
       <div class="where">app/ · Tauri, React · from the Portsage skeleton</div>
       <ul>
         <li>Menu bar panel, settings, first run, as in the concepts</li>
@@ -529,7 +529,7 @@ details.data table { margin-top: 8px; font-size: 12.5px; }
       </ul>
     </div>
     <div class="card comp">
-      <h3>fluix command<span class="lic">MIT</span></h3>
+      <h3>floppy command<span class="lic">MIT</span></h3>
       <div class="where">macos/ · bash · bundled as externalBin</div>
       <ul>
         <li>Stays the engine: setup, start, stop, warmup, free</li>
@@ -691,7 +691,7 @@ details.data table { margin-top: 8px; font-size: 12.5px; }
       <li>name, macos_version, app_version<em>text</em></li><li>token_hash<em>text</em></li>
       <li>last_seen_at<em>timestamp</em></li><li>revoked_at<em>timestamp</em></li></ul></div>
     <div class="ent where-db"><h4>device user <span>Valkey ACL</span></h4><ul>
-      <li><span class="pk">fluix_d_&lt;id&gt;</span><em>ACL user</em></li><li>metadata commands<em>JuiceFS keys</em></li>
+      <li><span class="pk">floppy_d_&lt;id&gt;</span><em>ACL user</em></li><li>metadata commands<em>JuiceFS keys</em></li>
       <li>PSYNC, REPLCONF<em>its replica</em></li><li>password<em>shown once</em></li></ul></div>
     <div class="ent where-cp"><h4>sign_in_requests <span>PKCE</span></h4><ul>
       <li><span class="pk">id</span><em>uuid</em></li><li>code_challenge, redirect_uri<em>text</em></li>
@@ -843,13 +843,13 @@ details.data table { margin-top: 8px; font-size: 12.5px; }
   <figure>
     <div class="fig">
       <div class="legend">
-        <span><i class="sw" style="background:var(--meta)"></i>Fluix (OVH storage + metadata server), EUR</span>
+        <span><i class="sw" style="background:var(--meta)"></i>Floppy (OVH storage + metadata server), EUR</span>
         <span><i class="sw" style="background:var(--data)"></i>SpaceFS Teams, USD</span>
       </div>
       <svg class="chart" id="ch-cost" viewBox="0 0 760 250" role="img" aria-label="Monthly cost ranges by active terabytes"></svg>
     </div>
-    <figcaption>Estimates from docs/ARCHITECTURE.md, prices checked on 06/10/2026; each bar is a low to high range. Currencies differ as in the sources. Priced when the metadata was a managed PostgreSQL, not re-estimated for a Valkey server. Not counted: the time to run Fluix, and the control plane server (an existing Dokploy server in the first instance).</figcaption>
-    <details class="data"><summary>Data</summary><table><tr><th>Active TB</th><th>Fluix, EUR/month</th><th>SpaceFS Teams, USD/month</th></tr><tr><td>3</td><td>40-55</td><td>90</td></tr><tr><td>5</td><td>55-70</td><td>114-138</td></tr><tr><td>10</td><td>95-110</td><td>174-258</td></tr></table></details>
+    <figcaption>Estimates from docs/ARCHITECTURE.md, prices checked on 06/10/2026; each bar is a low to high range. Currencies differ as in the sources. Priced when the metadata was a managed PostgreSQL, not re-estimated for a Valkey server. Not counted: the time to run Floppy, and the control plane server (an existing Dokploy server in the first instance).</figcaption>
+    <details class="data"><summary>Data</summary><table><tr><th>Active TB</th><th>Floppy, EUR/month</th><th>SpaceFS Teams, USD/month</th></tr><tr><td>3</td><td>40-55</td><td>90</td></tr><tr><td>5</td><td>55-70</td><td>114-138</td></tr><tr><td>10</td><td>95-110</td><td>174-258</td></tr></table></details>
   </figure>
 </section>
 
@@ -912,13 +912,13 @@ details.data table { margin-top: 8px; font-size: 12.5px; }
 
   // Theme toggle
   var root = document.documentElement;
-  try { var saved = localStorage.getItem("fluix-arch-theme"); if (saved) root.setAttribute("data-theme", saved); } catch (e) { /* storage unavailable */ }
+  try { var saved = localStorage.getItem("floppy-arch-theme"); if (saved) root.setAttribute("data-theme", saved); } catch (e) { /* storage unavailable */ }
   document.getElementById("themeBtn").addEventListener("click", function () {
     var dark = root.getAttribute("data-theme") === "dark" ||
       (!root.getAttribute("data-theme") && matchMedia("(prefers-color-scheme: dark)").matches);
     var next = dark ? "light" : "dark";
     root.setAttribute("data-theme", next);
-    try { localStorage.setItem("fluix-arch-theme", next); } catch (e) { /* storage unavailable */ }
+    try { localStorage.setItem("floppy-arch-theme", next); } catch (e) { /* storage unavailable */ }
   });
 
   // Tooltip
@@ -1009,11 +1009,11 @@ details.data table { margin-top: 8px; font-size: 12.5px; }
   }
 
   seq("seq-login",
-    [{ id: "u", label: "Person", sub: "edits video" }, { id: "app", label: "Fluix.app", sub: "menu bar" },
+    [{ id: "u", label: "Person", sub: "edits video" }, { id: "app", label: "Floppy.app", sub: "menu bar" },
      { id: "br", label: "Browser", sub: "same Mac" }, { id: "cp", label: "Control plane", sub: "API + web" },
      { id: "vk", label: "Valkey", sub: "central master" }, { id: "vm", label: "VM", sub: "JuiceFS + replica" }],
     [
-      { f: "u", t: "app", l: "brew install --cask fluix, opens the app", c: "ink" },
+      { f: "u", t: "app", l: "brew install --cask floppy, opens the app", c: "ink" },
       { f: "app", t: "br", l: "open sign-in page (PKCE, loopback port)", c: "ctl" },
       { f: "br", t: "cp", l: "email address", c: "ctl" },
       { f: "cp", t: "u", l: "magic link by email", c: "ctl" },
@@ -1024,10 +1024,10 @@ details.data table { margin-top: 8px; font-size: 12.5px; }
       { f: "app", t: "cp", l: "register this Mac", c: "ctl" },
       { f: "cp", t: "vk", l: "ACL user for this Mac", c: "meta" },
       { f: "cp", t: "app", l: "Valkey user and URLs, shown once", c: "ctl" },
-      { f: "app", t: "vm", l: "fluix setup: create VM, set up the replica", c: "ink" },
+      { f: "app", t: "vm", l: "floppy setup: create VM, set up the replica", c: "ink" },
       { f: "vk", t: "vm", l: "full sync, then live", c: "repl" },
       { k: "note", f: "vk", t: "vm", l: "mount: S3 key read from the replica" },
-      { k: "note", f: "u", t: "vm", l: "Fluix appears in the Finder at /Volumes/Fluix" }
+      { k: "note", f: "u", t: "vm", l: "Floppy appears in the Finder at /Volumes/Floppy" }
     ]);
 
   seq("seq-read",
@@ -1259,7 +1259,7 @@ details.data table { margin-top: 8px; font-size: 12.5px; }
     data.forEach(function (d, i) {
       var gy = top + i * groupH;
       el("text", { x: left - 12, y: gy + groupH / 2 + 4, "text-anchor": "end", "class": "row-t" }, svg, d.tb);
-      [["f", "s1", "EUR", "Fluix"], ["s", "s2", "USD", "SpaceFS"]].forEach(function (k, j) {
+      [["f", "s1", "EUR", "Floppy"], ["s", "s2", "USD", "SpaceFS"]].forEach(function (k, j) {
         var r = d[k[0]], y = gy + 14 + j * (barH + 8);
         var x1 = sx(0), x2 = sx(r[1]), xlo = sx(r[0]);
         el("rect", { x: x1, y: y, width: Math.max(xlo - x1, 1), height: barH, rx: 3, "class": k[1], opacity: 0.35 }, svg);

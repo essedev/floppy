@@ -8,7 +8,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700;800&family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&family=Instrument+Sans:wght@400;500;600&family=Martian+Mono:wght@400;500&family=Archivo:wdth,wght@62..125,400..800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <!--
-  Concept B: che identità visiva ha Fluix, la stessa per il pannello nella barra dei menu,
+  Concept B: che identità visiva ha Floppy, la stessa per il pannello nella barra dei menu,
   i concept e la documentazione.
   Tasti: x d e f per la variante, s per cambiare lo stato del pannello, t tema, p nasconde la barra.
 
@@ -19,7 +19,7 @@
   qui cambiano marchio, palette, tipografia, materiale e spaziatura.
 
   X  oggi: lo stile di Portsage, valori copiati da concept-a-panel.html.
-  D  Drive: Fluix è un oggetto, il frontale di un lettore. Plastica color stucco, la fessura che
+  D  Drive: Floppy è un oggetto, il frontale di un lettore. Plastica color stucco, la fessura che
      si riempie con la cache, un LED che è lo stato. Arancione solo per l'attività.
   E  Diskette: il dischetto, giocoso. Ogni progetto è un dischetto colorato, l'etichetta parla,
      lo sportellino scorre quando scarica.
@@ -401,7 +401,7 @@ body[data-base="f"] .mini { border: 1px solid var(--line); border-radius: 8px; }
         <div class="l"><b>CapCut</b><span>File</span><span>Modifica</span><span>Vista</span><span>Finestra</span></div>
         <div class="r"><span class="mb-icon" id="mbIcon"></span><span>ven 16 ott 10:42</span></div>
       </div>
-      <div class="pop" id="pop" role="dialog" aria-label="Pannello di Fluix"></div>
+      <div class="pop" id="pop" role="dialog" aria-label="Pannello di Floppy"></div>
     </div>
 
     <article class="doc" lang="en">
@@ -496,10 +496,11 @@ function markF(size, ledCls = "led-dl") {
   return `<svg width="${size}" height="${size}" viewBox="0 0 40 40" aria-hidden="true"><rect x="8" y="5" width="7" height="30" rx="2" fill="currentColor"/><rect x="8" y="5" width="25" height="7" rx="2" fill="currentColor"/><rect x="8" y="18" width="16" height="5.5" rx="2.75" fill="currentColor"/><circle cx="30" cy="20.75" r="3.2" class="${ledCls}"/></svg>`;
 }
 function word(v) {
-  if (v === "d") return `${markD(46, "led-dl")}<span>flu<span style="position:relative">ı<i style="position:absolute;left:50%;top:.26em;width:.16em;height:.16em;border-radius:50%;transform:translateX(-50%);background:var(--brand);box-shadow:0 0 10px var(--brand)"></i></span>x</span>`;
-  if (v === "e") return `${markE(54)}<span style="font-family:var(--f-head)">Fluix</span>`;
-  if (v === "f") return `<span style="color:var(--ink)">${markF(54)}</span><span style="font:700 46px var(--f-ui);font-stretch:125%;letter-spacing:.2em">FLUIX</span>`;
-  return `<span style="width:52px;height:52px;border-radius:12px;background:#d4a044;color:#1f1a12;display:grid;place-items:center;font:700 26px var(--sans)">F</span><span style="font:400 46px var(--mono);letter-spacing:-.02em">Fluix</span>`;
+  // The old name carried the LED as the dot of its i; "floppy" has no i, so the wordmark is plain for now.
+  if (v === "d") return `${markD(46, "led-dl")}<span>floppy</span>`;
+  if (v === "e") return `${markE(54)}<span style="font-family:var(--f-head)">Floppy</span>`;
+  if (v === "f") return `<span style="color:var(--ink)">${markF(54)}</span><span style="font:700 46px var(--f-ui);font-stretch:125%;letter-spacing:.2em">FLOPPY</span>`;
+  return `<span style="width:52px;height:52px;border-radius:12px;background:#d4a044;color:#1f1a12;display:grid;place-items:center;font:700 26px var(--sans)">F</span><span style="font:400 46px var(--mono);letter-spacing:-.02em">Floppy</span>`;
 }
 
 // App icons (macOS squircle approximated with a rounded square, 824/1024 of the canvas)
@@ -545,7 +546,7 @@ function faceD() {
     <rect x="1.5" y="1.5" width="333" height="109" rx="11" fill="none" stroke="#fff" stroke-opacity=".5"/>
     <rect x="24" y="34" width="212" height="12" rx="6" fill="var(--slot)"/>
     <rect x="27" y="37" width="${w}" height="6" rx="3" fill="var(--slot-fill)" style="transition:width .5s"/>${head}
-    <text x="24" y="76" font-family="Schibsted Grotesk" font-weight="800" font-size="15" letter-spacing="-.4" fill="var(--ink-3)">fluix</text>
+    <text x="24" y="76" font-family="Schibsted Grotesk" font-weight="800" font-size="15" letter-spacing="-.4" fill="var(--ink-3)">floppy</text>
     <text x="236" y="76" text-anchor="end" font-family="Departure Mono" font-size="11" fill="var(--ink-2)">${num(u)} / ${LIMIT} GB</text>
     <circle cx="290" cy="40" r="10" fill="var(--slot)" opacity=".9"/>
     <circle cx="290" cy="40" r="5.5" class="${LED[st]}${dl ? " blink" : ""}" style="${st === "stop" ? "" : "filter:drop-shadow(0 0 6px currentColor);color:var(--" + LED[st] + ")"}"/>
@@ -597,14 +598,14 @@ function marker(p, v) {
 function statusText() {
   const a = arn();
   if (st === "dl") return { h: `Download di ${a.name}`, p: "Puoi già montare: i file arrivano mentre lavori." };
-  if (st === "off") return { h: "Fluix non è raggiungibile", p: "", steps: true };
-  if (st === "stop") return { h: "Fluix è spento", p: "Accendilo per ritrovare i progetti nel Finder." };
-  return { h: "Fluix è collegato", p: "I progetti sono nel Finder, sotto Fluix." };
+  if (st === "off") return { h: "Floppy non è raggiungibile", p: "", steps: true };
+  if (st === "stop") return { h: "Floppy è spento", p: "Accendilo per ritrovare i progetti nel Finder." };
+  return { h: "Floppy è collegato", p: "I progetti sono nel Finder, sotto Floppy." };
 }
 function buttons(v) {
   const prim = (ic, t) => `<button class="btn btn-primary">${v === "f" ? "" : icon(ic, 16)}${t}</button>`;
   if (st === "off") return `<div class="btns">${prim("refresh", "Riconnetti")}</div>`;
-  if (st === "stop") return `<div class="btns">${prim("power", "Accendi Fluix")}</div>`;
+  if (st === "stop") return `<div class="btns">${prim("power", "Accendi Floppy")}</div>`;
   return `<div class="btns">${prim("open", "Apri nel Finder")}${st === "dl" ? `<button class="btn btn-ghost">Interrompi</button>` : ""}</div>`;
 }
 
@@ -634,7 +635,7 @@ function panel(v) {
   const rows = P.map((p) => { const c = chipFor(p, v); return `<div class="prow">${marker(p, v)}<span class="n">${p.name}</span><span class="chip ${c.cls}">${c.t}</span></div>`; }).join("");
   const showList = st !== "stop";
   const projects = showList ? `<section class="projects"${st === "off" ? ' style="opacity:.5"' : ""}><div class="sec-h"><span>Progetti</span><b>${P.length}</b></div><div class="rows">${rows}</div></section>` : "";
-  const foot = `<footer class="foot"><span class="ro">Fluix 0.1.0</span>${st === "stop" ? "" : `<button class="btn">${icon("power", 13)} Spegni</button>`}</footer>`;
+  const foot = `<footer class="foot"><span class="ro">Floppy 0.1.0</span>${st === "stop" ? "" : `<button class="btn">${icon("power", 13)} Spegni</button>`}</footer>`;
   return `${face}<section class="status">${top}${prog}${buttons(v)}</section>${space}${projects}${foot}`;
 }
 
@@ -666,7 +667,7 @@ function render() {
   document.getElementById("states").innerHTML = states(v);
   document.getElementById("mbIcon").innerHTML = mb(v, st);
   document.getElementById("pop").innerHTML = panel(v);
-  const dm = { x: `<span style="width:20px;height:20px;border-radius:5px;background:#d4a044;color:#1f1a12;display:grid;place-items:center;font:700 11px var(--sans)">F</span>Fluix`, d: `${markD(20)}fluix`, e: `${markE(24)}Fluix`, f: `<span style="color:var(--ink)">${markF(22)}</span>FLUIX` }[v];
+  const dm = { x: `<span style="width:20px;height:20px;border-radius:5px;background:#d4a044;color:#1f1a12;display:grid;place-items:center;font:700 11px var(--sans)">F</span>Floppy`, d: `${markD(20)}floppy`, e: `${markE(24)}Floppy`, f: `<span style="color:var(--ink)">${markF(22)}</span>FLOPPY` }[v];
   document.getElementById("docMark").innerHTML = dm;
   document.getElementById("note").textContent = NOTES[v];
 }

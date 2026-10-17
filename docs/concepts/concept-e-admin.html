@@ -32,7 +32,7 @@
 
   Mappatura sul codice (fattibilità, non piano): FastAPI + React + PostgreSQL, il modello dati di
   docs/architecture.html. Persone = users + memberships (admin | member, invited | active | revoked);
-  Mac = devices, un ruolo PostgreSQL fluix_d_<id> per Mac; Dischi = volumes, uno per database dei
+  Mac = devices, un ruolo PostgreSQL floppy_d_<id> per Mac; Dischi = volumes, uno per database dei
   metadata; Registro = audit_events; Accesso = sign_in_requests con magic link. Revocare un Mac è
   REVOKE + pg_terminate_backend + DROP ROLE; rimuovere una persona lo fa per tutti i suoi Mac.
   Il cambio della chiave: il control plane prova una scrittura con la chiave nuova, poi esegue
@@ -71,7 +71,7 @@
   così com'è). I frontali dei dischi in Panoramica e Dischi sono Grafite: corpo scuro in entrambi i
   temi, fessura riempita #d9d4c8, LED sull'asse della fessura con i colori del frontale scuro. Il
   marchio nella barra laterale e nell'accesso è la fessura con il LED dell'icona della barra dei
-  menu, a colori, seguita da "fluix"; l'icona dell'app compare dove si parla di installare l'app
+  menu, a colori, seguita da "floppy"; l'icona dell'app compare dove si parla di installare l'app
   (invito, accesso). Vocabolario dei dettagli invariato.
   Scelta (17/10/2026): le consigliate. Solo barra laterale; dopo la rimozione di una persona un
   promemoria fisso con "Cambia chiave adesso"; un membro vede solo "I miei Mac" e può revocarne uno.
@@ -386,7 +386,7 @@ const ICON = {
 };
 const ic = (n, s = 18) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON[n]}</svg>`;
 // Brand mark: the menu bar icon's slot and LED, in color, then the wordmark (concept-c-app, final brand)
-const wm = (size = 21) => `<span class="wm" style="font-size:${size}px"><svg viewBox="0 0 24 16" aria-hidden="true"><rect x="2" y="6.5" width="13" height="3" rx="1.5" fill="var(--ink)"/><circle cx="19.75" cy="8" r="3.4" fill="var(--bezel)"/><circle cx="19.75" cy="8" r="2.25" fill="var(--brand)"/><ellipse cx="19.75" cy="7.05" rx="1.05" ry=".55" fill="#fff" opacity=".5"/></svg><span>fluix</span></span>`;
+const wm = (size = 21) => `<span class="wm" style="font-size:${size}px"><svg viewBox="0 0 24 16" aria-hidden="true"><rect x="2" y="6.5" width="13" height="3" rx="1.5" fill="var(--ink)"/><circle cx="19.75" cy="8" r="3.4" fill="var(--bezel)"/><circle cx="19.75" cy="8" r="2.25" fill="var(--brand)"/><ellipse cx="19.75" cy="7.05" rx="1.05" ry=".55" fill="#fff" opacity=".5"/></svg><span>floppy</span></span>`;
 // App icon, copied verbatim from the final brand
 const APPICON = '<svg width="128" height="128" viewBox="0 0 124 124" aria-hidden="true"><defs><linearGradient id="fx-sq" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3a3835"/><stop offset="1" stop-color="#1c1b19"/></linearGradient></defs><rect x="4" y="4" width="116" height="116" rx="27" fill="url(#fx-sq)"/><rect x="4.5" y="4.5" width="115" height="115" rx="26.5" fill="none" stroke="#fff" stroke-opacity=".08"/><rect x="16" y="51" width="68" height="22" rx="11" fill="#0b0b0a"/><rect x="20" y="55" width="42" height="14" rx="7" fill="#d9d4c8"/><circle cx="100" cy="62" r="12.5" fill="#0b0b0a"/><circle cx="100" cy="62" r="8.5" fill="#ff6a2e"/><ellipse cx="100" cy="58.2" rx="4" ry="2" fill="#fff" opacity=".5"/></svg>';
 // Grafite faceplate (concept-c-app, final brand) at disk-card size; LED colors of the dark faceplate
@@ -421,7 +421,7 @@ const S = { accesso: "form", panoramica: "promemoria", persone: "tabella", mac: 
 let run = 0; // progress index of the key rotation
 
 function frame(path, inner) {
-  return `<div class="frame"><div class="fbar"><span class="dots"><i></i><i></i><i></i></span><span class="url">${ic("lock", 13)}fluix.example.com${path}</span><span style="width:47px"></span></div><div class="viewport"><div class="canvas">${inner}</div></div></div>`;
+  return `<div class="frame"><div class="fbar"><span class="dots"><i></i><i></i><i></i></span><span class="url">${ic("lock", 13)}floppy.example.com${path}</span><span style="width:47px"></span></div><div class="viewport"><div class="canvas">${inner}</div></div></div>`;
 }
 const NAV = [["panoramica", "home", "Panoramica"], ["persone", "users", "Persone"], ["mac", "laptop", "Mac"], ["dischi", "drive", "Dischi"], ["chiave", "key", "Chiave dell'archivio"], ["registro", "list", "Registro"], ["impostazioni", "sliders", "Impostazioni"]];
 function shell(active, body, overlay = "", pending = true) {
@@ -438,10 +438,10 @@ const dlg = (title, body, btns) => `<div class="scrim"><div class="dlg" role="di
 function accesso() {
   const s = S.accesso;
   let card;
-  if (s === "form") card = `${wm(24)}<div><h1>Accedi a Fluix</h1><p style="margin-top:6px">Ti mandiamo un link via email: niente password da ricordare.</p></div>
+  if (s === "form") card = `${wm(24)}<div><h1>Accedi a Floppy</h1><p style="margin-top:6px">Ti mandiamo un link via email: niente password da ricordare.</p></div>
     <div class="field"><label for="em">Email</label><input id="em" class="input" value="giulia@studio.example"></div>
     <button class="btn btn-ink" data-go="accesso:inviato">${ic("mail", 17)}Mandami il link</button>
-    <div class="appline">${APPICON}<span>Per entrare serve l'app Fluix sul Mac e un invito di un admin del tuo studio.</span></div>`;
+    <div class="appline">${APPICON}<span>Per entrare serve l'app Floppy sul Mac e un invito di un admin del tuo studio.</span></div>`;
   else if (s === "inviato") card = `${wm(24)}<div><h1>Controlla la posta</h1><p style="margin-top:6px">Abbiamo mandato un link a <b style="color:var(--ink)">giulia@studio.example</b>. Vale 15 minuti e funziona una volta sola.</p></div>
     <div style="display:grid;gap:6px">${stx("dl", "In attesa del link", true)}<span style="font-size:14px;color:var(--ink-2)">Questa pagina si aggiorna da sola quando apri il link.</span></div>
     <div style="display:flex;gap:8px"><button class="btn btn-soft" data-go="accesso:form">Usa un'altra email</button><button class="btn btn-ghost">Rimanda il link</button></div>`;
@@ -462,7 +462,7 @@ function panoramica() {
         <div class="svc"><b>Database dei metadata</b>${stx("ok", "Risponde · 4 ms")}<span>Controllato 30 s fa</span></div>
         <div class="svc"><b>Archivio S3</b>${stx("ok", "Scrive")}<span>Scrittura di prova riuscita 2 min fa</span></div>
         <div class="svc"><b>Email per i link</b>${stx("ok", "Configurata")}<span>Ultimo invio oggi alle 10:41</span></div></div>
-        <p class="offpath note"><span class="fessura"></span><span>Fluix non passa di qui per leggere o scrivere i file. Se questo sito si ferma, i dischi già montati continuano a funzionare; si fermano accessi nuovi, inviti e revoche.</span></p>
+        <p class="offpath note"><span class="fessura"></span><span>Floppy non passa di qui per leggere o scrivere i file. Se questo sito si ferma, i dischi già montati continuano a funzionare; si fermano accessi nuovi, inviti e revoche.</span></p>
       </div>
     <div class="grid3">
       <div class="well"><h3>Mac collegati adesso · 3 di 7</h3><div class="macs">${online}</div></div>
@@ -494,7 +494,7 @@ function persone() {
   let overlay = "";
   if (s === "invita") overlay = dlg("Invita una persona", `<div class="field"><label>Email</label><input class="input" value="chiara@studio.example"></div>
     <div class="field"><label>Ruolo</label><div class="choice"><button class="opt" aria-pressed="true"><b>Membro</b><span>Usa il disco e gestisce i suoi Mac</span></button><button class="opt" aria-pressed="false"><b>Admin</b><span>Gestisce persone, Mac, dischi e chiave</span></button></div></div>
-    <div class="appline">${APPICON}<span>Riceve un'email con il link per installare l'app Fluix e accedere. L'invito vale 7 giorni.</span></div>`, `<button class="btn btn-ghost" data-go="persone:tabella">Annulla</button><button class="btn btn-ink" data-go="persone:tabella">Manda invito</button>`);
+    <div class="appline">${APPICON}<span>Riceve un'email con il link per installare l'app Floppy e accedere. L'invito vale 7 giorni.</span></div>`, `<button class="btn btn-ghost" data-go="persone:tabella">Annulla</button><button class="btn btn-ink" data-go="persone:tabella">Manda invito</button>`);
   if (s === "rimuovi") overlay = dlg("Rimuovere Marco Bassi?", `<ul class="mk"><li><span class="fessura"></span><span>Perde l'accesso subito: cancelliamo l'accesso al database del suo Mac, <b style="color:var(--ink)">MacBook Air di Marco</b>, e lì il disco smette di rispondere.</span></li>
     <li><span class="fessura"></span><span>Al prossimo contatto l'app sul suo Mac si spegne e svuota la cache.</span></li>
     <li><span class="fessura"></span><span>La chiave dell'archivio resta valida finché non la cambi. Chi l'avesse copiata potrebbe ancora scaricare o cancellare pezzi di file dal bucket.</span></li></ul>`,
@@ -506,7 +506,7 @@ function persone() {
 function mac() {
   const s = S.mac;
   if (s === "vuoto") {
-    const body = `${ph("Mac", "I Mac da cui si accede ai dischi")}<div class="empty">${face("off", 0)}<h3>Nessun Mac collegato</h3><p>Quando qualcuno accede dall'app Fluix sul suo Mac, il Mac compare qui con il suo ultimo contatto. Da qui lo puoi revocare.</p><button class="btn btn-ink" data-jump="persone">${ic("users", 17)}Invita persone</button></div>`;
+    const body = `${ph("Mac", "I Mac da cui si accede ai dischi")}<div class="empty">${face("off", 0)}<h3>Nessun Mac collegato</h3><p>Quando qualcuno accede dall'app Floppy sul suo Mac, il Mac compare qui con il suo ultimo contatto. Da qui lo puoi revocare.</p><button class="btn btn-ink" data-jump="persone">${ic("users", 17)}Invita persone</button></div>`;
     return frame("/mac", shell("mac", body));
   }
   const rows = MACS.map((m) => {
@@ -517,7 +517,7 @@ function mac() {
   }).join("");
   const body = `${ph("Mac", "Ogni Mac ha il suo accesso al database: revocarne uno non tocca gli altri")}
     <table class="tbl"><thead><tr><th>Mac</th><th>Persona</th><th>macOS</th><th>App</th><th>Ultimo contatto</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
-  const overlay = s === "revoca" ? dlg("Revocare MacBook Pro di Sara?", `<p>Il Mac perde l'accesso al disco entro pochi secondi. Al prossimo contatto Fluix si spegne su quel Mac e svuota la cache.</p><p>Sara continua a lavorare dal suo iMac. Se il Mac è stato perso o rubato, dopo la revoca conviene cambiare la chiave dell'archivio.</p>`,
+  const overlay = s === "revoca" ? dlg("Revocare MacBook Pro di Sara?", `<p>Il Mac perde l'accesso al disco entro pochi secondi. Al prossimo contatto Floppy si spegne su quel Mac e svuota la cache.</p><p>Sara continua a lavorare dal suo iMac. Se il Mac è stato perso o rubato, dopo la revoca conviene cambiare la chiave dell'archivio.</p>`,
     `<button class="btn btn-ghost" data-go="mac:tabella">Annulla</button><button class="btn btn-danger" data-go="mac:tabella">Revoca il Mac</button>`) : "";
   return frame("/mac", shell("mac", body, overlay));
 }
@@ -538,7 +538,7 @@ function chiave() {
   const n = (k, i) => `<span class="n">${st(k) === "done" ? ic("check", 15) : i}</span>`;
   const paste = s === "incolla" || s === "errore"
     ? `<div class="body"><div class="cols"><div class="field"><label>Access key</label><input class="input ro" value="EXAMPLE7Q2K9W3ZT0HVA"></div><div class="field"><label>Secret key</label><input class="input ro" type="password" value="xxxxxxxxxxxxxxxxxxxxxxxx"></div></div>
-      ${s === "errore" ? `<div class="errbox">${stx("err", "Scrittura di prova fallita")}<span>Il bucket ha rifiutato la chiave nuova. Controlla che abbia il permesso di scrivere su <b>studio-esempio-fluix</b>; nella console va assegnata al bucket, non solo creata.</span><code>AccessDenied · PUT /fluix-probe-7f3a</code></div>` : ""}
+      ${s === "errore" ? `<div class="errbox">${stx("err", "Scrittura di prova fallita")}<span>Il bucket ha rifiutato la chiave nuova. Controlla che abbia il permesso di scrivere su <b>studio-esempio-floppy</b>; nella console va assegnata al bucket, non solo creata.</span><code>AccessDenied · PUT /floppy-probe-7f3a</code></div>` : ""}
       <div><button class="btn btn-ink" data-go="chiave:applica">Prova e applica</button></div></div>` : "";
   const prog = s === "applica" ? `<div class="body progress">
       <div><span class="led ${run > 0 ? "ok" : "dl blinking"}"></span>Scrittura di prova con la chiave nuova<span class="ro">${run > 0 ? "ok" : "..."}</span></div>
@@ -548,9 +548,9 @@ function chiave() {
   const del = s === "cancella" ? `<div class="body"><label class="check"><input type="checkbox" data-go="chiave:chiusa">Ho cancellato la chiave vecchia (finisce per <span class="ro">...ZT0QK</span>)</label></div>` : "";
   const body = `${ph("Chiave dell'archivio", "Cambiala dopo ogni rimozione o revoca: è l'ultima cosa che un ex membro potrebbe avere")}${risk}
     <div class="steps">
-      <div class="step ${st("crea")}">${n("crea", 1)}<div><h4>Crea una chiave nuova nel provider</h4><p>Nella console del tuo provider S3 crea una chiave con permesso di lettura e scrittura sul bucket <b>studio-esempio-fluix</b>. Fluix non lo fa da solo: non usa le API del provider.</p></div></div>
+      <div class="step ${st("crea")}">${n("crea", 1)}<div><h4>Crea una chiave nuova nel provider</h4><p>Nella console del tuo provider S3 crea una chiave con permesso di lettura e scrittura sul bucket <b>studio-esempio-floppy</b>. Floppy non lo fa da solo: non usa le API del provider.</p></div></div>
       <div class="step ${st("incolla")}">${n("incolla", 2)}<div><h4>Incollala qui</h4><p>La proviamo con una scrittura nel bucket prima di usarla.</p>${paste}</div></div>
-      <div class="step ${st("applica")}">${n("applica", 3)}<div><h4>Fluix la passa ai dischi</h4><p>Aggiorniamo ogni disco; i Mac collegati la prendono da soli entro un minuto, senza fermarsi.</p>${prog}</div></div>
+      <div class="step ${st("applica")}">${n("applica", 3)}<div><h4>Floppy la passa ai dischi</h4><p>Aggiorniamo ogni disco; i Mac collegati la prendono da soli entro un minuto, senza fermarsi.</p>${prog}</div></div>
       <div class="step ${st("cancella")}">${n("cancella", 4)}<div><h4>Cancella la chiave vecchia nel provider</h4><p>Finché esiste, la finestra resta aperta. È l'unico passo che chiude davvero.</p>${del}</div></div>
     </div>`;
   return frame("/chiave", shell("chiave", body, "", !closed));
@@ -565,15 +565,15 @@ function dischi() {
       <tr><td><b style="font-weight:600">Archivio 2025</b></td><td>${stx("ok", "In linea")}</td><td class="r ro">2,10 TB</td><td class="r ro">9.877</td><td>6 giorni fa</td></tr>
     </tbody></table>
     <div class="well"><div style="display:flex;align-items:center;gap:14px;margin-bottom:16px">${face("ok", 0.7)}<div><b style="font:700 18px var(--f-head);letter-spacing:-0.015em">Progetti</b><div style="margin-top:4px">${stx("ok", "In linea")}</div></div></div><dl class="kv">
-      <dt>Nel bucket</dt><dd class="ro">studio-esempio-fluix/progetti</dd>
-      <dt>Database</dt><dd class="ro">fluix_vol_progetti</dd>
+      <dt>Nel bucket</dt><dd class="ro">studio-esempio-floppy/progetti</dd>
+      <dt>Database</dt><dd class="ro">floppy_vol_progetti</dd>
       <dt>Blocchi</dt><dd class="ro">4 MB</dd>
       <dt>Cestino</dt><dd>7 giorni · <span class="ro">212 GB</span></dd>
       <dt>Montato da</dt><dd>5 Mac</dd>
       <dt>Creato</dt><dd>6 ott 2026, Giulia Ferri</dd></dl>
-      <p class="note" style="margin:16px 0 0;font-size:13px;color:var(--ink-2)"><span class="fessura"></span><span>Il nome compare nel Finder dentro Fluix. Rinominare un disco rompe i percorsi dei progetti CapCut: per questo qui non si rinomina.</span></p></div></div>`;
-  const overlay = s === "nuovo" ? dlg("Nuovo disco", `<div class="field"><label>Nome</label><input class="input" value="Clienti 2026"><span class="hint">Compare nel Finder dentro Fluix. Non si potrà cambiare.</span></div>
-    <div class="field"><label>Posizione nel bucket</label><input class="input ro" value="studio-esempio-fluix/clienti-2026"></div>
+      <p class="note" style="margin:16px 0 0;font-size:13px;color:var(--ink-2)"><span class="fessura"></span><span>Il nome compare nel Finder dentro Floppy. Rinominare un disco rompe i percorsi dei progetti CapCut: per questo qui non si rinomina.</span></p></div></div>`;
+  const overlay = s === "nuovo" ? dlg("Nuovo disco", `<div class="field"><label>Nome</label><input class="input" value="Clienti 2026"><span class="hint">Compare nel Finder dentro Floppy. Non si potrà cambiare.</span></div>
+    <div class="field"><label>Posizione nel bucket</label><input class="input ro" value="studio-esempio-floppy/clienti-2026"></div>
     <div class="field"><label>Dimensione dei blocchi</label><div class="choice"><button class="opt" aria-pressed="true"><b>4 MB</b><span>Consigliato per i video: misurato</span></button><button class="opt" aria-pressed="false"><b>1 MB</b><span>Salti più rapidi nei video mai aperti, più richieste</span></button></div></div>
     <div class="field"><label>Giorni nel cestino</label><input class="input ro" value="7" style="width:110px"></div>`,
     `<button class="btn btn-ghost" data-go="dischi:elenco">Annulla</button><button class="btn btn-ink" data-go="dischi:elenco">Crea disco</button>`) : "";
@@ -607,18 +607,18 @@ function registro() {
 function impostazioni() {
   const err = S.impostazioni === "errore";
   const s3res = err
-    ? `<div class="errbox">${stx("err", "Prova fallita")}<span>Il bucket <b>studio-esempio-fluix-2</b> non esiste in questa regione, o la chiave non può vederlo. I dischi esistenti non sono toccati: questa è solo una prova.</span><code>NoSuchBucket · eu-south-mil</code></div>`
+    ? `<div class="errbox">${stx("err", "Prova fallita")}<span>Il bucket <b>studio-esempio-floppy-2</b> non esiste in questa regione, o la chiave non può vederlo. I dischi esistenti non sono toccati: questa è solo una prova.</span><code>NoSuchBucket · eu-south-mil</code></div>`
     : `<div>${stx("ok", "Scrittura di prova riuscita")}</div>`;
   const body = `${ph("Impostazioni", "Studio Esempio")}
     <div class="form">
       <section><h3>Organizzazione</h3><div class="field"><label>Nome</label><input class="input" value="Studio Esempio"></div></section>
       <section><h3>Email per i link di accesso</h3><p class="sub">Da qui partono inviti e link di accesso. Qualsiasi server SMTP.</p>
         <div class="cols"><div class="field"><label>Server</label><input class="input ro" value="smtp.studio.example"></div><div class="field"><label>Porta</label><input class="input ro" value="587"></div>
-        <div class="field"><label>Utente</label><input class="input ro" value="fluix@studio.example"></div><div class="field"><label>Mittente</label><input class="input" value="Fluix · Studio Esempio"></div></div>
+        <div class="field"><label>Utente</label><input class="input ro" value="floppy@studio.example"></div><div class="field"><label>Mittente</label><input class="input" value="Floppy · Studio Esempio"></div></div>
         <div><button class="btn btn-soft">${ic("mail", 17)}Mandami un'email di prova</button></div></section>
       <section><h3>Archivio S3</h3><p class="sub">Dove stanno i file. Vale per i dischi nuovi; quelli esistenti restano dove sono.</p>
         <div class="cols"><div class="field"><label>Endpoint</label><input class="input ro" value="s3.eu-south-mil.example.net"></div><div class="field"><label>Regione</label><input class="input ro" value="eu-south-mil"></div></div>
-        <div class="field"><label>Bucket</label><input class="input ro" value="${err ? "studio-esempio-fluix-2" : "studio-esempio-fluix"}"></div>
+        <div class="field"><label>Bucket</label><input class="input ro" value="${err ? "studio-esempio-floppy-2" : "studio-esempio-floppy"}"></div>
         <div><button class="btn btn-soft" data-go="impostazioni:${err ? "ok" : "errore"}">Prova a scrivere</button></div>${s3res}</section>
       <section><h3>Chi può invitare</h3><div class="choice"><button class="opt" aria-pressed="true"><b>Solo gli admin</b><span>Consigliato: ogni invito dà accesso a tutti i file</span></button><button class="opt" aria-pressed="false"><b>Tutti</b><span>I membri invitano, gli admin vedono il registro</span></button></div></section>
       <div style="display:flex;gap:8px"><button class="btn btn-ink">Salva</button><button class="btn btn-ghost">Annulla</button></div>

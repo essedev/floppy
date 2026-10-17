@@ -9,7 +9,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-MNT="${MNT:-$HOME/FluixSpike}"
+MNT="${MNT:-$HOME/FloppySpike}"
 OUT="${OUT:-meta-bench.$(date +%Y%m%d-%H%M%S).tsv}"
 CACHE_OPTS="--attr-cache 10 --entry-cache 10 --dir-entry-cache 10"
 env_val() { grep "^$1=" .env | cut -d= -f2; }
@@ -19,7 +19,7 @@ export ACCESS_KEY SECRET_KEY PG_PASSWORD SMB_PASSWORD
 ACCESS_KEY=$(env_val ACCESS_KEY)
 SECRET_KEY=$(env_val SECRET_KEY)
 
-psql_admin() { docker compose exec -T postgres psql -q -U fluix_admin -d fluix -v ON_ERROR_STOP=1 "$@"; }
+psql_admin() { docker compose exec -T postgres psql -q -U floppy_admin -d floppy -v ON_ERROR_STOP=1 "$@"; }
 toxi() { docker compose exec -T toxiproxy /toxiproxy-cli "$@"; }
 
 unmount() {
@@ -35,7 +35,7 @@ unmount() {
 mount_share() {
   mkdir -p "$MNT"
   for _ in $(seq 1 30); do
-    /sbin/mount_smbfs "//drive:$SMB_PASSWORD@localhost:4503/Fluix" "$MNT" 2>/dev/null && return 0
+    /sbin/mount_smbfs "//drive:$SMB_PASSWORD@localhost:4503/Floppy" "$MNT" 2>/dev/null && return 0
     sleep 2
   done
   echo "meta-bench: the share did not come up" >&2
@@ -58,13 +58,13 @@ restart_drive() {
 
 fresh_meta() {
   case "$1" in
-    sqlite) rm -f "$HOME/.fluix-spike/meta-bench.db"; echo "sqlite3:///state/meta-bench.db" ;;
+    sqlite) rm -f "$HOME/.floppy-spike/meta-bench.db"; echo "sqlite3:///state/meta-bench.db" ;;
     *)
       psql_admin -c "DROP DATABASE IF EXISTS bench_$1" -c "CREATE DATABASE bench_$1" >/dev/null
       if [ "$2" = direct ]; then
-        echo "postgres://fluix_admin:$PG_PASSWORD@postgres:5432/bench_$1?sslmode=disable"
+        echo "postgres://floppy_admin:$PG_PASSWORD@postgres:5432/bench_$1?sslmode=disable"
       else
-        echo "postgres://fluix_admin:$PG_PASSWORD@toxiproxy:4504/bench_$1?sslmode=disable"
+        echo "postgres://floppy_admin:$PG_PASSWORD@toxiproxy:4504/bench_$1?sslmode=disable"
       fi
       ;;
   esac
