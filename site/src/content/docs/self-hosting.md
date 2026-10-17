@@ -1,47 +1,57 @@
 ---
 title: Self-hosting
-description: Run your own control plane, with a central Valkey and an S3 bucket.
+description: Run your own %name% on one server with Dokploy, with your domain and any S3.
 ---
 
 Everything %name% needs runs on infrastructure you pick. It speaks only standard S3 and the Redis protocol, which Valkey implements: no provider API is part of the core.
 
 ## What you run
 
-- **The control plane**: an API with a web admin, shipped as Docker Compose, with its own PostgreSQL for its tables. It holds organizations, people, devices and volumes, sends the sign-in links, and creates or deletes the Valkey users of the Macs. It holds no file data.
-- **A central Valkey** for the file tree: one database per volume, written by JuiceFS, and a replica of it in every Mac's VM. This is the critical piece, see [Backups](#backups).
-- **An S3 bucket** per organization, at any provider. Volumes are prefixes inside it.
+One Docker Compose file, `deploy/docker-compose.yml` in the repository, with four services:
 
-## Control plane
+- **The control plane**: the API that holds organizations, people, Macs and disks, sends the sign-in links and decides who may see each disk. It holds no file data, and mounted disks keep working while it is down.
+- **The admin web**, served from the same address as the API.
+- **PostgreSQL 18**, for the control plane's tables.
+- **The meta service**, which runs one Valkey per disk: the disk's file tree, written by JuiceFS, with a replica of it on every Mac that may see the disk. A replica copies a whole Valkey, so each disk has its own and no Mac ever receives a disk it may not see.
 
-```sh
-git clone %repo%
-cd %slug%/server
-cp .env.example .env    # database URLs, S3 endpoint, SMTP
-docker compose up -d
-```
+Besides the server you need:
 
-TODO: the `server/` directory, the variable names and the first-start flow (one organization created at first start) depend on the control plane's first release.
+- **A domain** whose DNS is at a provider Traefik can update by API, for the wildcard certificate of the disks' addresses. Cloudflare and OVH are documented below; any DNS provider Traefik supports works.
+- **An SMTP server** for the sign-in links.
+- **S3 storage** at any provider, one bucket per disk, in the same region as the server.
 
-Mail goes through plain SMTP. Back up the control plane's PostgreSQL like any other service's database.
+## How Macs reach it
 
-## Valkey
+Everything goes through port 443, the one office networks leave open:
 
-- **In the same region as the bucket.** Reads of the file tree come from the replica on each Mac, but every write is a round trip to the central Valkey: creating one file from the Finder costs about nine of them.
-- **One instance per organization.** A replica copies a whole Valkey instance, not one database, so a Mac would receive every volume on its instance: organizations never share one.
-- **Durable by configuration**: every write on disk before the answer (`appendfsync always`), a replica in the datacenter, and a daily `juicefs dump` kept outside Valkey.
-- **One user per Mac**, created by the control plane, which needs an admin user on Valkey to do it. Besides reading and writing the file tree, a Mac's user runs scripts (`EVAL`, `EVALSHA`) for writes in one round trip and feeds its replica (`PSYNC`, `REPLCONF`). Revoking a Mac deletes its user and closes its connections.
+- `https://disk.example.com` is the admin web, with the API under `/api/`.
+- `<label>.meta.disk.example.com` on the same port is one disk's Valkey. Traefik reads the name in the TLS handshake and sends the connection to that disk; the label is random, so no disk's name shows up in DNS or in certificate logs.
 
-If the central Valkey stops, mounted disks turn read-only: browsing and cached clips keep working from each Mac's replica, saving waits until it answers again. If the control plane stops, nothing changes for mounted disks.
+TLS ends at Traefik, which also renews the certificates; behind it the traffic stays on the server's private network.
 
-## S3
+## Install with Dokploy
 
-- Any S3-compatible provider. Egress matters more than space for video: every clip that is not cached downloads again.
-- One key per organization, stored in the volume metadata, never in a file on the Mac. Rotation is pasting a new key in the admin and deleting the old one at the provider; do it after revoking a Mac.
-- Keep versioning and Object Lock off on the main bucket: JuiceFS deletes and compacts blocks, and both would get in the way or bill the deleted blocks.
+1. **DNS**: point `disk.example.com` and `*.meta.disk.example.com` at the server (A, and AAAA if it has IPv6). Only ports 80 and 443 need to be open.
+2. **Traefik**: in Dokploy, under Web Server, Traefik, edit its configuration and merge in the blocks of `deploy/traefik/traefik.yml`: no read timeout on port 443 (Valkey connections stay open while idle), a resolver that obtains the wildcard by DNS challenge, and the address the meta service publishes its routes on. Under Modify Environment, add the DNS provider's credentials, then reload Traefik.
+   - **Cloudflare**: `CF_DNS_API_TOKEN`, a token limited to the zone with Zone DNS Edit and Zone Read.
+   - **OVH**: `OVH_ENDPOINT=ovh-eu`, `OVH_APPLICATION_KEY`, `OVH_APPLICATION_SECRET` and `OVH_CONSUMER_KEY`, with a consumer key allowed `POST` and `DELETE` on `/domain/zone/*`.
+3. **The service**: create a Compose service from %repo% with the compose path `deploy/docker-compose.yml`, type Docker Compose. Leave its Domains tab empty and Isolated Deployments off: the routes are in the file.
+4. **Variables**: copy `deploy/.env.example` into the Environment tab and fill it in: the domain, the generated secrets, SMTP, the subnet of `dokploy-network` as the trusted proxy, and the first organization with its admin's address and default S3 endpoint.
+5. **Deploy.** The first start migrates the database and creates the organization; its admin signs in at `https://disk.example.com` with the link that arrives by mail, then creates the disks and invites people.
 
-## Backups
+Without Dokploy, the same file runs with `docker compose --env-file deploy/.env -f deploy/docker-compose.yml up -d --build` on any host whose Traefik reads Docker labels and has the same three blocks.
 
-- **The file tree is the filesystem.** Without it the blocks on S3 cannot be put back together into files. Hence the replica in the datacenter and the daily `juicefs dump`.
-- **The replicas on the Macs are not a backup**: they follow the central Valkey, deletions included.
-- **JuiceFS is not a backup.** Replicate the bucket to a second provider, with versioning there.
-- Closed projects can leave the disk and go to a separate bucket as normal files, readable without the file tree.
+## Security
+
+- The admin web sends a strict Content Security Policy, HSTS, no referrer and refuses to be framed.
+- Each Mac has its own password on each disk it may see, with read-only or read-write rights; revoking a Mac or lowering someone's access applies at once.
+- Secrets the control plane must use, such as S3 keys and the SMTP password, are encrypted in the database with a key that lives only in the server's environment. Keep a copy of that key outside the server.
+
+## Durability and backups
+
+- **The file tree is the filesystem.** Without it the blocks on S3 cannot be put back together into files. Each disk's Valkey writes every change to disk before answering, and its ACL users are saved with it, so a restart of the meta service brings every disk back within seconds.
+- **Back up both volumes** (`db-data` and `meta-data`) and keep a daily `juicefs dump` of each disk outside the server.
+- **The replicas on the Macs are not a backup**: they follow the server, deletions included.
+- **JuiceFS is not a backup either.** Replicate the buckets to a second provider, with versioning there.
+
+If the meta service stops, mounted disks turn read-only: browsing and cached clips keep working from each Mac's replica, saving waits until it is back. If the control plane stops, nothing changes for mounted disks.
