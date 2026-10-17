@@ -1,6 +1,7 @@
 """
 Test helpers: a recording mailer (a labelled fake of the SMTP server), reading links and
-codes out of mail, and full flows through the API (signing in, enrolling a Mac).
+codes out of mail, the in-memory fakes of a test context, and full flows through the API
+(signing in, enrolling a device, creating a disk with its own bucket and key).
 """
 
 import base64
@@ -14,7 +15,12 @@ from urllib.parse import parse_qs, urlsplit
 import httpx
 
 from floppy_server.context import Context
+from floppy_server.disks.service import run_disk_formats
+from floppy_server.infra.juicefs import FakeVolumeFormatter
 from floppy_server.infra.mail import Mail, MailError, SmtpConfig
+from floppy_server.infra.meta import FakeMetaService
+from floppy_server.infra.metadata import FakeMetadataAdmin
+from floppy_server.infra.providers import FakeAdapter
 
 
 @dataclass
@@ -95,21 +101,22 @@ def pkce() -> tuple[str, str]:
 
 
 @dataclass(frozen=True)
-class EnrolledMac:
-    """A Mac signed in from the app: its id, device token and, once registered, Valkey password."""
+class EnrolledDevice:
+    """A device signed in from the app: its id, token and, once registered, its bootstrap."""
 
     id: str
     token: str
     valkey_user: str
     valkey_password: str | None
     s3: dict[str, str] | None = None
+    disks: list[dict[str, Any]] = field(default_factory=list)
 
     @property
     def auth(self) -> dict[str, str]:
         return {"Authorization": f"Bearer {self.token}"}
 
 
-async def enrol_mac(
+async def enrol_device(
     app_client: httpx.AsyncClient,
     browser: httpx.AsyncClient,
     ctx: Context,
@@ -118,7 +125,7 @@ async def enrol_mac(
     name: str = "MacBook Pro di Giulia",
     register: bool = True,
     via_code: bool = False,
-) -> EnrolledMac:
+) -> EnrolledDevice:
     """The app's sign-in end to end: request, link (or code), token exchange, registration."""
     verifier, challenge = pkce()
     response = await app_client.post(
@@ -146,7 +153,7 @@ async def enrol_mac(
     grant = response.json()
     token, device_id = grant["deviceToken"], grant["deviceId"]
     if not register:
-        return EnrolledMac(id=device_id, token=token, valkey_user="", valkey_password=None)
+        return EnrolledDevice(id=device_id, token=token, valkey_user="", valkey_password=None)
     response = await app_client.post(
         "/device/register",
         json={"appVersion": "0.4.0", "macosVersion": "15.5"},
@@ -154,10 +161,88 @@ async def enrol_mac(
     )
     assert response.status_code == 200, response.text
     reg = response.json()
-    return EnrolledMac(
+    return EnrolledDevice(
         id=device_id,
         token=token,
         valkey_user=reg["valkeyUsername"],
         valkey_password=reg["valkeyPassword"],
         s3=reg["s3"],
+        disks=reg["disks"],
     )
+
+
+def fake_valkey(ctx: Context) -> FakeMetadataAdmin:
+    """The test context's in-memory instances."""
+    assert isinstance(ctx.metadata, FakeMetadataAdmin)
+    return ctx.metadata
+
+
+def fake_meta(ctx: Context) -> FakeMetaService:
+    """The test context's in-memory meta service."""
+    assert isinstance(ctx.meta, FakeMetaService)
+    return ctx.meta
+
+
+def formatter(ctx: Context) -> FakeVolumeFormatter:
+    """The test context's in-memory JuiceFS."""
+    assert isinstance(ctx.formatter, FakeVolumeFormatter)
+    return ctx.formatter
+
+
+def fake_adapter(ctx: Context) -> FakeAdapter:
+    """The storage adapter of managed organizations, an in-memory one unless set."""
+    if ctx.adapter_override is None:
+        ctx.adapter_override = FakeAdapter()
+    assert isinstance(ctx.adapter_override, FakeAdapter)
+    return ctx.adapter_override
+
+
+def disk_key(n: int | str) -> dict[str, str]:
+    """A pasted disk key for tests, its tail the number padded to five digits."""
+    tail = f"{n}".rjust(5, "0")
+    return {"accessKeyId": f"AKIATESTDISK{tail}", "secretKey": f"disk-secret-{tail}-value"}
+
+
+async def create_disk(
+    admin: httpx.AsyncClient,
+    ctx: Context,
+    name: str,
+    *,
+    managed: bool = False,
+    key: dict[str, str] | None = None,
+    bucket: str | None = None,
+    run: bool = True,
+    **extra: Any,
+) -> dict[str, Any]:
+    """
+    Creates a disk (manual: with its own bucket and a pasted key) and runs the creation job;
+    returns it as GET /disks/{id} sees it.
+    """
+    body: dict[str, Any] = {"name": name, **extra}
+    if not managed:
+        slug = "".join(c for c in name.lower() if c.isalnum()) or "disk"
+        body["storage"] = {
+            "bucket": bucket or f"bucket-{slug}-{secrets.token_hex(3)}",
+            **(key or disk_key(secrets.randbelow(10**5))),
+        }
+    response = await admin.post("/disks", json=body)
+    assert response.status_code == 201, response.text
+    if run:
+        await run_disk_formats(ctx)
+    disk: dict[str, Any] = (await admin.get(f"/disks/{response.json()['id']}")).json()
+    return disk
+
+
+async def set_access(
+    admin: httpx.AsyncClient, disk_id: str, person_id: str, access: str
+) -> dict[str, Any]:
+    """Sets a person's access to a disk through the API."""
+    response = await admin.put(f"/disks/{disk_id}/access/{person_id}", json={"access": access})
+    assert response.status_code == 200, response.text
+    out: dict[str, Any] = response.json()
+    return out
+
+
+def instance_url(ctx: Context, disk_id: str) -> str:
+    """The fake meta service's address of a disk's instance."""
+    return fake_meta(ctx).instances[disk_id].url

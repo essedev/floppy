@@ -1,11 +1,11 @@
 """
-The organization's settings: its name, its SMTP server and its storage, with a mail test and
-a storage probe.
+The organization's settings: its name, its SMTP server and the default endpoint of new
+disks, with a mail test and a probe of a bucket and key before creating a disk.
 
 The SMTP password is write only: only whether one is set comes back. An empty `host` means
-the organization uses the instance's SMTP server (the environment's). Storage is frozen once
-a live disk exists: a volume's bucket and endpoint are in its format and do not follow the
-settings (DATABASE_SCHEMA.md, decision 9).
+the organization uses the instance's SMTP server (the environment's). The default endpoint is
+frozen once a live disk exists, like the storage mode (DATABASE_SCHEMA.md, decision 9); each
+disk keeps its own bucket and endpoint anyway.
 """
 
 from typing import Annotated, Literal
@@ -13,7 +13,6 @@ from uuid import UUID
 
 from pydantic import Field, StringConstraints
 from sqlalchemy import func, select, update
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from floppy_server.api import Actor, CamelModel
@@ -21,8 +20,10 @@ from floppy_server.audit.service import AuditActor, Target, record
 from floppy_server.auth.service import mail_failed, mail_language, mark_mail_state
 from floppy_server.context import Context, utcnow
 from floppy_server.errors import ApiError, invalid_state, not_found
+from floppy_server.infra.juicefs import S3Credentials
 from floppy_server.infra.mail import MailError
-from floppy_server.keys.service import active_key, record_versioning
+from floppy_server.keys.schemas import S3KeyIn
+from floppy_server.keys.service import probe, probe_failed
 from floppy_server.mailtext import mail_test
 from floppy_server.models import Organization, OrganizationStatus, Volume
 
@@ -41,15 +42,14 @@ class MailSettings(CamelModel):
 
 
 class StorageSettings(CamelModel):
-    """The organization's bucket."""
+    """The default endpoint and region of new disks."""
 
     endpoint: str
     region: str
-    bucket: str
 
 
 class SettingsOut(CamelModel):
-    """The settings page. Storage mode, provider and key scope are set at creation only."""
+    """The settings page. Storage mode and provider are set at creation only."""
 
     organization_name: str
     mail_language: Literal["it", "en"]
@@ -58,7 +58,6 @@ class SettingsOut(CamelModel):
     storage_locked: bool
     storage_mode: Literal["manual", "managed"]
     storage_provider: Literal["ovh", "aws", "minio", "garage"] | None
-    storage_key_scope: Literal["team", "person", "device"]
 
 
 class MailSettingsIn(CamelModel):
@@ -71,11 +70,21 @@ class MailSettingsIn(CamelModel):
     password: Annotated[str, StringConstraints(max_length=1024)] | None = None
 
 
+Region = Annotated[str, StringConstraints(strip_whitespace=True, max_length=100)]
+
+
 class StorageIn(CamelModel):
-    """A bucket to use or to probe."""
+    """The default endpoint and region of new disks."""
 
     endpoint: Text
-    region: Annotated[str, StringConstraints(strip_whitespace=True, max_length=100)] = ""
+    region: Region = ""
+
+
+class StorageProbeIn(S3KeyIn):
+    """A bucket and its key to try before creating a disk with them (manual)."""
+
+    endpoint: Text
+    region: Region = ""
     bucket: Text
 
 
@@ -121,7 +130,6 @@ async def get_settings(ctx: Context, organization_id: UUID) -> SettingsOut:
         mail_language=org.mail_language,
         storage_mode=org.storage_mode,
         storage_provider=org.storage_provider,
-        storage_key_scope=org.storage_key_scope,
         mail=MailSettings(
             host=org.smtp_host or "",
             port=org.smtp_port or 0,
@@ -129,9 +137,7 @@ async def get_settings(ctx: Context, organization_id: UUID) -> SettingsOut:
             sender=org.smtp_sender or "",
             password_set=org.smtp_password_enc is not None,
         ),
-        storage=StorageSettings(
-            endpoint=org.s3_endpoint, region=org.s3_region, bucket=org.s3_bucket
-        ),
+        storage=StorageSettings(endpoint=org.s3_endpoint, region=org.s3_region),
         storage_locked=disks > 0,
     )
 
@@ -190,12 +196,12 @@ async def update_settings(ctx: Context, actor: Actor, body: UpdateSettingsReques
         if body.mail is not None:
             fields.extend(_apply_mail(ctx, org, body.mail))
         if body.storage is not None:
-            new = (body.storage.endpoint, body.storage.region, body.storage.bucket)
-            if new != (org.s3_endpoint, org.s3_region, org.s3_bucket):
+            new = (body.storage.endpoint, body.storage.region)
+            if new != (org.s3_endpoint, org.s3_region):
                 disks = await _live_disks(db, org.id)
                 if disks:
                     raise storage_in_use(disks)
-                org.s3_endpoint, org.s3_region, org.s3_bucket = new
+                org.s3_endpoint, org.s3_region = new
                 fields.append("storage")
         if fields:
             record(
@@ -206,12 +212,6 @@ async def update_settings(ctx: Context, actor: Actor, body: UpdateSettingsReques
                 Target("organization", org.id, org.name),
                 {"fields": fields},
             )
-            try:
-                await db.flush()
-            except IntegrityError as error:
-                raise ApiError(
-                    409, "validation", "Another organization uses this bucket", {"field": "storage"}
-                ) from error
     return await get_settings(ctx, actor.organization_id)
 
 
@@ -238,32 +238,21 @@ async def test_mail(ctx: Context, actor: Actor) -> str:
     return actor.email
 
 
-async def probe_storage(ctx: Context, actor: Actor, body: StorageIn) -> None:
-    """A test write with the organization's key on a bucket; raises `probe_failed`."""
+async def probe_storage(ctx: Context, actor: Actor, body: StorageProbeIn) -> None:
+    """A test write with a pasted bucket and key (manual); raises `probe_failed`, stores nothing."""
     async with ctx.sessions() as db:
-        key = await active_key(db, actor.organization_id)
-    if key is None:
-        raise invalid_state("The organization has no active S3 key")
-    result = await ctx.prober.probe(
+        org = await db.get(Organization, actor.organization_id)
+    if org is None:
+        raise not_found()
+    if org.storage_mode != "manual":
+        raise invalid_state("The provider creates each disk's bucket: there is nothing to probe")
+    result = await probe(
+        ctx,
         endpoint=body.endpoint,
         region=body.region,
         bucket=body.bucket,
-        key=ctx.credentials(key),
+        key=S3Credentials(body.access_key_id.strip(), body.secret_key),
         label="settings",
     )
-    async with ctx.sessions() as db, db.begin():
-        await db.execute(
-            update(OrganizationStatus)
-            .where(OrganizationStatus.organization_id == actor.organization_id)
-            .values(storage_probed_at=utcnow(), storage_state="ok" if result.ok else "failing")
-        )
-        org = await db.get(Organization, actor.organization_id)
-        if result.ok and org is not None and body.bucket == org.s3_bucket:
-            await record_versioning(db, actor.organization_id, result)
     if not result.ok:
-        raise ApiError(
-            422,
-            "probe_failed",
-            "The test write failed",
-            {"code": result.code or "", "request": result.request or ""},
-        )
+        raise probe_failed(result.code, result.request)

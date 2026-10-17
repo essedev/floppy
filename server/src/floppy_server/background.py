@@ -1,37 +1,41 @@
 """
-Background work: the rotation worker, the Valkey ACL reconciler, housekeeping of stuck rows,
-and the status pollers behind `GET /health` and the disks' counters.
+Background work: the disk creation and rotation workers, the reconciler of the devices' users
+and grants, housekeeping of stuck rows, and the status pollers behind `GET /health` and the
+disks' counters.
 
-Each job is safe to run in several processes at once: the rotation worker takes rows with
-`SKIP LOCKED`, and the per-organization jobs take a transaction-level advisory lock, so a
-second process skips an organization the first is handling.
+Each job is safe to run in several processes at once: the workers take rows with `SKIP
+LOCKED`, and the per-organization jobs take a transaction-level advisory lock, so a second
+process skips an organization the first is handling.
 
-The reconciler is what makes revocation durable (docs/DATABASE_SCHEMA.md, "devices"): Valkey
-keeps ACL users in its own configuration and does not replicate them, so after a restart, a
-failover or a revocation made while it was down, the master's `floppy_d_*` users are made to
-match the active Macs again, from the password hashes kept here.
+The reconciler is what makes revocation and access changes durable (docs/DATABASE_SCHEMA.md,
+"meta_users"): it rewrites the wanted state from `disk_access`, applies what is owed, then
+compares each disk's instance with it. Valkey keeps ACL users in its own configuration and
+does not replicate them, so after a restart, a failover or a change made while an instance
+was down, its `floppy_d_*` users are made to match again from the password hashes kept here.
 """
 
 import asyncio
 import contextlib
 import logging
 from collections.abc import Awaitable, Callable
-from datetime import timedelta
+from datetime import datetime, timedelta
 from uuid import UUID
 
 from sqlalchemy import select, update
 
+from floppy_server.access.service import apply_owed, sync
 from floppy_server.audit.service import AuditActor
 from floppy_server.context import Context, utcnow
 from floppy_server.devices.service import revoke_rows
 from floppy_server.disks.service import run_disk_formats
 from floppy_server.infra.metadata import MetadataUnavailableError
-from floppy_server.keys.scoped import delete_owed_keys
-from floppy_server.keys.service import rotate_after_revocations, run_rotations
+from floppy_server.keys.managed import delete_owed_keys
+from floppy_server.keys.service import run_rotations
 from floppy_server.models import (
     Device,
+    MetaInstance,
+    MetaUser,
     Organization,
-    OrganizationStatus,
     Volume,
     VolumeStatus,
     advisory_lock,
@@ -52,58 +56,133 @@ async def _organizations(ctx: Context) -> list[UUID]:
         )
 
 
-async def reconcile_acl(ctx: Context, organization_id: UUID) -> None:
-    """Makes the organization's Valkey users match its active Macs, and records owed cleanups."""
+async def reconcile_instances(ctx: Context, organization_id: UUID) -> None:
+    """
+    Makes every disk's instance of the organization match the wanted users: the wanted
+    state rewritten from `disk_access`, the owed rows applied, then each instance compared
+    with the rows and corrected.
+    """
     async with ctx.sessions() as db, db.begin():
         if not await advisory_lock(db, "acl", organization_id, wait=False):
             return
-        org = await db.get(Organization, organization_id)
-        if org is None:
-            return
-        devices = list(
+        await sync(db, organization_id)
+    await apply_owed(ctx, organization_id)
+    async with ctx.sessions() as db:
+        instances = list(
             (
                 await db.execute(
-                    select(Device).where(
-                        Device.organization_id == organization_id,
-                        (Device.state == "active")
-                        | ((Device.state == "revoked") & Device.valkey_user_deleted_at.is_(None)),
+                    select(MetaInstance)
+                    .join(
+                        Volume,
+                        (Volume.id == MetaInstance.volume_id)
+                        & (Volume.organization_id == MetaInstance.organization_id),
+                    )
+                    .where(
+                        MetaInstance.organization_id == organization_id,
+                        MetaInstance.state == "ready",
+                        Volume.state == "ready",
                     )
                 )
             ).scalars()
         )
-        wanted = {
-            d.valkey_username: d.valkey_password_sha256
-            for d in devices
-            if d.state == "active" and d.valkey_password_sha256 is not None
-        }
-        owed = [d for d in devices if d.state == "revoked"]
-        target = ctx.valkey_target(org)
-        try:
-            present = await ctx.metadata.device_users(target)
-            for username, digest in wanted.items():
-                if digest not in present.get(username, set()):
-                    log.info("reconciler: recreating a Mac's Valkey user")
-                    await ctx.metadata.set_device_user(target, username, digest)
-            for username in present.keys() - wanted.keys():
-                log.info("reconciler: deleting a Valkey user with no active Mac")
-                await ctx.metadata.delete_device_user(target, username)
-        except MetadataUnavailableError as error:
-            log.warning("reconciler: Valkey unavailable for an organization: %s", error)
-            return
-        if owed:
+    for instance in instances:
+        await _correct(ctx, instance)
+
+
+async def _correct(ctx: Context, instance: MetaInstance) -> None:
+    """
+    One instance made to match its applied rows: a missing or changed user set again, one with
+    no row (or `none`) deleted. The rows are read after the instance, and owed rows are left
+    to `apply_owed`, so a change made meanwhile is never undone by an older reading.
+    """
+    target = ctx.instance_target(instance)
+    try:
+        present = await ctx.metadata.device_users(target)
+    except MetadataUnavailableError as error:
+        log.warning("reconciler: a disk's instance is unavailable: %s", error)
+        return
+    async with ctx.sessions() as db:
+        rows = (
             await db.execute(
-                update(Device)
-                .where(
-                    Device.organization_id == organization_id, Device.id.in_([d.id for d in owed])
+                select(
+                    Device.valkey_username,
+                    Device.valkey_password_sha256,
+                    Device.state,
+                    MetaUser.access,
+                    MetaUser.applied_at,
+                    MetaUser.device_id,
+                    MetaUser.updated_at,
                 )
-                .values(valkey_user_deleted_at=utcnow())
+                .join(
+                    Device,
+                    (Device.id == MetaUser.device_id)
+                    & (Device.organization_id == MetaUser.organization_id),
+                )
+                .where(
+                    MetaUser.organization_id == instance.organization_id,
+                    MetaUser.volume_id == instance.volume_id,
+                )
             )
+        ).all()
+    owed = {r.valkey_username for r in rows if r.applied_at is None}
+    seen = {r.device_id: r.updated_at for r in rows}
+    wanted = {
+        r.valkey_username: (r.valkey_password_sha256, r.access)
+        for r in rows
+        if r.applied_at is not None
+        and r.access != "none"
+        and r.state == "active"
+        and r.valkey_password_sha256
+    }
+    touched = False
+    try:
+        for username, (digest, access) in wanted.items():
+            user = present.get(username)
+            if user is None or digest not in user.passwords or user.access != access:
+                log.info("reconciler: setting a device's user on a disk's instance")
+                touched = True
+                await ctx.metadata.set_device_user(
+                    target, username, digest, "write" if access == "write" else "read"
+                )
+        for username in present.keys() - wanted.keys() - owed:
+            log.info("reconciler: deleting a user with no access on a disk's instance")
+            touched = True
+            await ctx.metadata.delete_device_user(target, username)
+    except MetadataUnavailableError as error:
+        log.warning("reconciler: a disk's instance is unavailable: %s", error)
+    if touched:
+        await _recheck(ctx, instance, seen)
+
+
+async def _recheck(ctx: Context, instance: MetaInstance, seen: dict[UUID, datetime]) -> None:
+    """
+    A row changed while the sweep corrected its instance may have been overwritten by the
+    older reading: it is marked owed again and applied, so the newer change wins.
+    """
+    async with ctx.sessions() as db, db.begin():
+        now = (
+            await db.execute(
+                select(MetaUser.device_id, MetaUser.updated_at).where(
+                    MetaUser.organization_id == instance.organization_id,
+                    MetaUser.volume_id == instance.volume_id,
+                )
+            )
+        ).all()
+        changed = [device_id for device_id, at in now if seen.get(device_id) != at]
+        if not changed:
+            return
+        await db.execute(
+            update(MetaUser)
+            .where(MetaUser.volume_id == instance.volume_id, MetaUser.device_id.in_(changed))
+            .values(applied_at=None)
+        )
+    await apply_owed(ctx, instance.organization_id, device_ids=changed)
 
 
 async def expire_stale_rows(ctx: Context) -> None:
     """
-    Pending Macs that never registered within a day are revoked (`never_registered`), and disks stuck
-    `creating` after a crash become `failed`, their database number and prefix burned.
+    Pending devices that never registered within a day are revoked (`never_registered`), and
+    disks stuck `creating` after a crash become `failed`, their prefix burned.
     """
     now = utcnow()
     async with ctx.sessions() as db, db.begin():
@@ -116,11 +195,9 @@ async def expire_stale_rows(ctx: Context) -> None:
                 )
             ).scalars()
         )
+        # A pending device never had a user or a key: there is nothing to clean up.
         revoke_rows(db, stale, reason="never_registered", actor=AuditActor.system(), now=now)
-        for device in stale:
-            # A pending Mac never had a Valkey user: there is nothing to clean up.
-            device.valkey_user_deleted_at = now
-        # A row the format worker holds is still being formatted: skip it.
+        # A row the creation worker holds is still being created: skip it.
         stuck = (
             (
                 await db.execute(
@@ -138,40 +215,29 @@ async def expire_stale_rows(ctx: Context) -> None:
             await db.execute(
                 update(Volume)
                 .where(Volume.id.in_(stuck))
-                .values(state="failed", deleted_at=now, format_error="The format was interrupted")
+                .values(state="failed", deleted_at=now, format_error="The creation was interrupted")
             )
 
 
 async def poll_status(ctx: Context, organization_id: UUID) -> None:
-    """Pings the organization's Valkey and reads each disk's counters."""
+    """Pings each disk's instance and reads its counters."""
     now = utcnow()
     async with ctx.sessions() as db, db.begin():
         if not await advisory_lock(db, "status", organization_id, wait=False):
             return
-        org = await db.get(Organization, organization_id)
-        if org is None:
-            return
-        target = ctx.valkey_target(org)
-        try:
-            latency: float | None = await ctx.metadata.ping(target)
-        except MetadataUnavailableError:
-            latency = None
-        await db.execute(
-            update(OrganizationStatus)
-            .where(OrganizationStatus.organization_id == organization_id)
-            .values(
-                metadata_state="ok" if latency is not None else "down",
-                metadata_latency_ms=round(latency) if latency is not None else None,
-                metadata_checked_at=now,
-            )
-        )
         rows = (
             await db.execute(
-                select(Volume, VolumeStatus)
+                select(Volume, VolumeStatus, MetaInstance)
                 .join(
                     VolumeStatus,
                     (VolumeStatus.volume_id == Volume.id)
                     & (VolumeStatus.organization_id == Volume.organization_id),
+                )
+                .outerjoin(
+                    MetaInstance,
+                    (MetaInstance.volume_id == Volume.id)
+                    & (MetaInstance.organization_id == Volume.organization_id)
+                    & (MetaInstance.state == "ready"),
                 )
                 .where(
                     Volume.organization_id == organization_id,
@@ -180,30 +246,32 @@ async def poll_status(ctx: Context, organization_id: UUID) -> None:
                 )
             )
         ).all()
-        for volume, status in rows:
+        for _volume, status, instance in rows:
             status.checked_at = now
-            if latency is None:
-                status.reachable = False
+            if instance is None:
+                status.reachable, status.meta_latency_ms = False, None
                 continue
+            target = ctx.instance_target(instance)
             try:
-                counters = await ctx.metadata.volume_counters(target, volume.meta_db)
+                latency = await ctx.metadata.ping(target)
+                counters = await ctx.metadata.volume_counters(target)
             except MetadataUnavailableError:
-                status.reachable = False
+                status.reachable, status.meta_latency_ms = False, None
                 continue
             if (counters.used_bytes, counters.file_count) != (status.used_bytes, status.file_count):
                 status.last_write_at = now
             status.reachable = True
+            status.meta_latency_ms = round(latency)
             status.used_bytes = counters.used_bytes
             status.file_count = counters.file_count
 
 
 async def reconcile_all(ctx: Context) -> None:
-    """One pass of housekeeping and the ACL reconciler over every organization."""
+    """One pass of housekeeping and the reconciler over every organization."""
     await expire_stale_rows(ctx)
     for organization_id in await _organizations(ctx):
-        await reconcile_acl(ctx, organization_id)
+        await reconcile_instances(ctx, organization_id)
         await delete_owed_keys(ctx, organization_id)
-    await rotate_after_revocations(ctx)
 
 
 async def poll_all(ctx: Context) -> None:

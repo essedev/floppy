@@ -11,9 +11,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from floppy_server.context import Context
 from floppy_server.crypto import SecretBox
-from floppy_server.models import Organization, S3Key
+from floppy_server.models import MetaInstance, Organization, S3Key
 
-ORGANIZATION_COLUMNS = ("valkey_admin_password_enc", "smtp_password_enc")
+ORGANIZATION_COLUMNS = ("smtp_password_enc", "storage_admin_credentials_enc")
 
 
 def _reseal(
@@ -49,7 +49,29 @@ async def _keys(db: AsyncSession, box: SecretBox) -> int:
     return moved
 
 
+async def _instances(db: AsyncSession, box: SecretBox) -> int:
+    moved = 0
+    for instance in (
+        await db.execute(
+            select(MetaInstance)
+            .where(MetaInstance.admin_password_enc.is_not(None))
+            .with_for_update()
+        )
+    ).scalars():
+        sealed = _reseal(
+            box, instance.admin_password_enc, "meta_instances", "admin_password_enc", instance.id
+        )
+        if sealed is not None:
+            instance.admin_password_enc = sealed
+            moved += 1
+    return moved
+
+
 async def reencrypt_all(ctx: Context) -> int:
     """Re-seals every stored secret not sealed with the current key; returns how many moved."""
     async with ctx.sessions() as db, db.begin():
-        return await _organizations(db, ctx.box) + await _keys(db, ctx.box)
+        return (
+            await _organizations(db, ctx.box)
+            + await _keys(db, ctx.box)
+            + await _instances(db, ctx.box)
+        )

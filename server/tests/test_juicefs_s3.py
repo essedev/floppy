@@ -1,11 +1,12 @@
 """
-The real `JuiceFSFormatter` and `S3StorageProber` against Garage and the Valkey of the Compose
-file. JuiceFS is Linux only: the tests run the server image's binary with `docker run` on the
-Compose network, so the volume's addresses are the containers' (`valkey:6379`,
-`garage:3900`); the checks read Valkey and Garage from the host.
+The real `JuiceFSFormatter` and `S3StorageProber` against Garage and a disk's own Valkey
+instance (the first of the tests' pool). JuiceFS is Linux only: the tests run the server
+image's binary with `docker run` on the Compose network, so the instance's address is the
+container's (`meta-test-1:6379`) and Garage's is `FLOPPY_TEST_S3_URL_IN_DOCKER` (the Compose
+`garage:3900` by default); the checks read Valkey and Garage from the host.
 
-Needs `docker compose up -d db valkey`, `docker/garage-setup.sh` and the server image built
-(`docker compose build server`).
+Needs `docker compose --profile test up -d db meta-test-1`, `docker/garage-setup.sh` and the
+server image built (`docker compose build server`).
 """
 
 import json
@@ -26,13 +27,16 @@ from floppy_server.infra.juicefs import (
     error_of,
     meta_url,
 )
+from floppy_server.infra.metadata import META_DB
 from floppy_server.infra.storage import S3StorageProber
-from tests.conftest import VALKEY_URL
+from tests.conftest import META_POOL
 
 IMAGE = "floppy-server-server"
 NETWORK = "floppy-server_default"
-GARAGE_HOST = "http://127.0.0.1:4509"
-META_DB = 13
+GARAGE_HOST = os.environ.get("FLOPPY_TEST_S3_URL", "http://127.0.0.1:4509")
+GARAGE_IN_DOCKER = os.environ.get("FLOPPY_TEST_S3_URL_IN_DOCKER", "http://garage:3900")
+INSTANCE_HOST = META_POOL.split(",")[0].strip()
+INSTANCE_IN_DOCKER = "redis://meta-test-1:6379"
 
 
 def _env(name: str) -> str:
@@ -71,9 +75,9 @@ def formatter(image: str) -> JuiceFSFormatter:
 
 @pytest.fixture
 async def volume_db() -> AsyncIterator[aioredis.Redis]:
-    """An empty Valkey database for one volume, seen from the host."""
+    """A disk's own instance, empty, seen from the host."""
     client = aioredis.Redis.from_url(
-        VALKEY_URL, password=_env("FLOPPY_VALKEY_ADMIN_PASSWORD"), db=META_DB
+        INSTANCE_HOST, password=_env("FLOPPY_VALKEY_ADMIN_PASSWORD"), db=META_DB
     )
     await client.flushdb()
     yield client
@@ -83,12 +87,11 @@ async def volume_db() -> AsyncIterator[aioredis.Redis]:
 
 def location(name: str) -> VolumeLocation:
     return VolumeLocation(
-        meta_url="redis://valkey:6379",
+        meta_url=INSTANCE_IN_DOCKER,
         meta_username=None,
         meta_password=_env("FLOPPY_VALKEY_ADMIN_PASSWORD"),
-        meta_db=META_DB,
         volume_name=name,
-        s3_endpoint="http://garage:3900",
+        s3_endpoint=GARAGE_IN_DOCKER,
         s3_region="garage",
         s3_bucket=_env("FLOPPY_TEST_S3_BUCKET"),
     )
@@ -118,11 +121,11 @@ async def test_format_and_trash_days_on_garage(image: str, volume_db: aioredis.R
     assert (await setting(volume_db))["TrashDays"] == 3
 
 
-async def test_a_format_without_a_key_for_person_and_device_scopes(
+async def test_a_format_without_a_key_for_managed_disks(
     image: str, volume_db: aioredis.Redis
 ) -> None:
-    # The control plane's key reaches JuiceFS as AWS_* and is used, not stored: each Mac
-    # mounts with its own (spike/juicefs-replica/test.sh proves the mounts).
+    # The control plane's key reaches JuiceFS as AWS_* and is used, not stored: each device
+    # mounts with its own (spike/perdisk.py proves the mounts).
     name = f"test-{uuid.uuid4().hex[:10]}"
     own = key("FLOPPY_TEST_S3")
     jfs = formatter(image)
@@ -172,7 +175,7 @@ async def test_format_with_a_refused_key_fails_without_the_secret(
 async def test_secrets_go_through_the_environment_not_the_arguments() -> None:
     script = "import json, os, sys; print(json.dumps({'argv': sys.argv, 'env': dict(os.environ)}))"
     jfs = JuiceFSFormatter([sys.executable, "-c", script])
-    output = await jfs._run(["config", "redis://valkey:6379/1"], {"SECRET_KEY": "s3cr3t-value"})
+    output = await jfs._run(["config", "redis://meta-1:6379/1"], {"SECRET_KEY": "s3cr3t-value"})
     seen = json.loads(output)
     assert "s3cr3t-value" not in json.dumps(seen["argv"])
     assert seen["env"]["SECRET_KEY"] == "s3cr3t-value"
@@ -196,7 +199,7 @@ def test_meta_url_carries_the_user_and_database_not_the_password() -> None:
 
 def test_juicefs_errors_are_reduced_to_the_last_one_and_masked() -> None:
     stderr = (
-        "2026/10/17 juicefs[1] <INFO>: Meta address: redis://valkey:6379/13\n"
+        "2026/10/17 juicefs[1] <INFO>: Meta address: redis://meta-1:6379/1\n"
         "2026/10/17 juicefs[1] <FATAL>: Storage s3 is not configured: AccessDenied key=SECRET\x1b[0m\n"
     )
     assert error_of(stderr, ["SECRET"]) == "Storage s3 is not configured: AccessDenied key=***"

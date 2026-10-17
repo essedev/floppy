@@ -1,64 +1,93 @@
-"""Macs: the app's sign-in, enrolment, heartbeat, revocation and the ACL reconciler."""
+"""
+Devices: the app's sign-in, the bootstrap, heartbeat, revocation with what it owes on each
+disk's instance, and the device token's refusals.
+"""
 
 import hashlib
 from datetime import timedelta
 
 import httpx
-from sqlalchemy import select, text, update
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncEngine
 
-from floppy_server.background import expire_stale_rows, reconcile_acl
+from floppy_server.background import expire_stale_rows, reconcile_instances
 from floppy_server.context import Context, utcnow
 from floppy_server.crypto import token_hash
-from floppy_server.infra.metadata import FakeMetadataAdmin
-from floppy_server.models import AuditEvent, Device, KeyExposure, SignInRequest
+from floppy_server.models import AuditEvent, Device, KeyExposure, MetaUser, SignInRequest
 from tests.conftest import ClientFactory, Org
-from tests.helpers import code_in, enrol_mac, invite_and_join, mailer, pkce, token_in
+from tests.helpers import (
+    code_in,
+    create_disk,
+    enrol_device,
+    fake_valkey,
+    instance_url,
+    invite_and_join,
+    mailer,
+    pkce,
+    token_in,
+)
+
+BEAT = {"appVersion": "0.4.0", "macosVersion": "15.5"}
 
 
-def fake_valkey(ctx: Context) -> FakeMetadataAdmin:
-    assert isinstance(ctx.metadata, FakeMetadataAdmin)
-    return ctx.metadata
-
-
-async def test_enrolment_by_link_registers_a_valkey_user(
+async def test_the_bootstrap_registers_a_user_on_each_visible_disk(
     org: Org,
     ctx: Context,
     admin: httpx.AsyncClient,
     clients: ClientFactory,
     owner_engine: AsyncEngine,
 ) -> None:
+    disk = await create_disk(admin, ctx, "Progetti")
     app = clients()
-    mac = await enrol_mac(app, admin, ctx, org.admin_email)
-    assert mac.valkey_user == "floppy_d_" + mac.id.replace("-", "")
-    assert mac.valkey_password
-    users = fake_valkey(ctx).users[org.valkey_url]
-    assert users[mac.valkey_user] == hashlib.sha256(mac.valkey_password.encode()).digest()
+    device = await enrol_device(app, admin, ctx, org.admin_email)
+    assert device.valkey_user == "floppy_d_" + device.id.replace("-", "")
+    assert device.valkey_password
+    users = fake_valkey(ctx).users[instance_url(ctx, disk["id"])]
+    assert users[device.valkey_user] == (
+        hashlib.sha256(device.valkey_password.encode()).digest(),
+        "write",
+    )
+    listed = (await admin.get("/devices")).json()
+    assert len(listed) == 1
+    assert listed[0]["state"] == "active"
+    assert listed[0]["name"] == "MacBook Pro di Giulia"
+    assert listed[0]["owner"]["name"] == "Giulia"
+    assert listed[0]["valkeyUser"] == device.valkey_user
+    assert listed[0]["connected"] is True
+    assert "valkeyPassword" not in listed[0]
 
-    macs = (await admin.get("/devices")).json()
-    assert len(macs) == 1
-    listed = macs[0]
-    assert listed["state"] == "active"
-    assert listed["name"] == "MacBook Pro di Giulia"
-    assert listed["owner"]["name"] == "Giulia"
-    assert listed["valkeyUser"] == mac.valkey_user
-    assert listed["appVersion"] == "0.4.0"
-    assert listed["connected"] is True
-    assert "valkeyPassword" not in listed
-
-    config = await app.get("/device/config", headers=mac.auth)
-    assert config.json() == {
-        "valkeyUrl": org.valkey_url,
-        "keyScope": "team",
+    config = (await app.get("/device/config", headers=device.auth)).json()
+    assert config == {
+        "storageMode": "manual",
         "s3AccessKeyTail": None,
-        "disks": [],
+        "organization": {"id": str(org.id), "name": "Studio studio-a"},
+        "user": {"email": org.admin_email, "name": "Giulia"},
+        "disks": [
+            {
+                "id": disk["id"],
+                "name": "Progetti",
+                "volumeName": "progetti",
+                "access": "write",
+                "metaUrl": f"{instance_url(ctx, disk['id'])}/1",
+                "cacheExpireDays": 30,
+                "mountPath": "/Volumes/Floppy/Progetti",
+            }
+        ],
     }
+    registered = await app.post("/device/register", json=BEAT, headers=device.auth)
+    body = registered.json()
+    assert (body["organization"], body["user"], body["storageMode"], body["s3"]) == (
+        config["organization"],
+        config["user"],
+        "manual",
+        None,
+    )
     async with owner_engine.connect() as conn:
         stored = (await conn.execute(select(Device.token_hash, Device.state))).one()
         actions = (
             await conn.execute(select(AuditEvent.action, AuditEvent.detail).order_by(AuditEvent.id))
         ).all()
-    assert stored == (token_hash(mac.token), "active")
+    assert stored == (token_hash(device.token), "active")
     assert ("device_registered", {"appVersion": "0.4.0", "macosVersion": "15.5"}) in actions
     assert ("signed_in", {"via": "link", "kind": "app"}) in actions
 
@@ -66,8 +95,8 @@ async def test_enrolment_by_link_registers_a_valkey_user(
 async def test_enrolment_by_code_typed_in_the_app(
     org: Org, ctx: Context, admin: httpx.AsyncClient, clients: ClientFactory
 ) -> None:
-    mac = await enrol_mac(clients(), admin, ctx, org.admin_email, via_code=True)
-    assert mac.valkey_password
+    device = await enrol_device(clients(), admin, ctx, org.admin_email, via_code=True)
+    assert device.valkey_password
 
 
 async def test_authorization_code_is_single_use_and_bound_to_the_verifier(
@@ -174,32 +203,93 @@ async def test_app_sign_in_refuses_a_redirect_off_the_loopback(
     assert (response.status_code, response.json()["code"]) == (422, "validation")
 
 
-async def test_reregistering_issues_a_new_password(
+async def test_an_app_restarted_within_the_minute_takes_over_its_pending_sign_in(
     org: Org, ctx: Context, admin: httpx.AsyncClient, clients: ClientFactory
 ) -> None:
     app = clients()
-    mac = await enrol_mac(app, admin, ctx, org.admin_email)
+    _, first_challenge = pkce()
+    request = {
+        "email": org.admin_email,
+        "codeChallenge": first_challenge,
+        "redirectUri": "http://127.0.0.1:53682/callback",
+        "deviceName": "MacBook Pro di Giulia",
+    }
+    first = (await app.post("/auth/app/sign-in", json=request)).json()
+    sent = len(mailer(ctx).outbox)
+    # The app restarts: a new verifier, a new loopback port, too early for another mail.
+    verifier, challenge = pkce()
     again = await app.post(
-        "/device/register", json={"appVersion": "0.4.0", "macosVersion": "15.5"}, headers=mac.auth
+        "/auth/app/sign-in",
+        json={**request, "codeChallenge": challenge, "redirectUri": "http://127.0.0.1:53999/cb"},
     )
     assert again.status_code == 200
-    assert again.json()["valkeyPassword"] != mac.valkey_password
-    stored = fake_valkey(ctx).users[org.valkey_url][mac.valkey_user]
-    assert stored == hashlib.sha256(again.json()["valkeyPassword"].encode()).digest()
+    assert again.json()["requestId"] == first["requestId"]
+    assert len(mailer(ctx).outbox) == sent
+    # The code of the mail already sent completes it with the new verifier...
+    code = code_in(mailer(ctx).last_to(org.admin_email))
+    done = await app.post("/auth/app/token", json={"codeVerifier": verifier, "code": code})
+    assert done.status_code == 200, done.text
 
 
-async def test_registering_while_valkey_is_down_keeps_the_mac_pending(
+async def test_the_link_after_a_restart_redirects_to_the_new_loopback(
+    org: Org, ctx: Context, clients: ClientFactory
+) -> None:
+    app, browser = clients(), clients()
+    _, old = pkce()
+    request = {
+        "email": org.admin_email,
+        "codeChallenge": old,
+        "redirectUri": "http://127.0.0.1:53682/callback",
+        "deviceName": "Mac",
+    }
+    await app.post("/auth/app/sign-in", json=request)
+    verifier, new = pkce()
+    await app.post(
+        "/auth/app/sign-in",
+        json={**request, "codeChallenge": new, "redirectUri": "http://127.0.0.1:54000/cb"},
+    )
+    link = await browser.post(
+        "/auth/app/link", json={"token": token_in(mailer(ctx).last_to(org.admin_email))}
+    )
+    redirect = link.json()["redirectTo"]
+    assert redirect.startswith("http://127.0.0.1:54000/cb?")
+    auth_code = redirect.split("code=")[1]
+    done = await app.post(
+        "/auth/app/token", json={"codeVerifier": verifier, "authorizationCode": auth_code}
+    )
+    assert done.status_code == 200
+
+
+async def test_reregistering_issues_a_new_password_on_every_instance(
     org: Org, ctx: Context, admin: httpx.AsyncClient, clients: ClientFactory
 ) -> None:
+    disks = [await create_disk(admin, ctx, name) for name in ("Progetti", "Archivio")]
     app = clients()
-    mac = await enrol_mac(app, admin, ctx, org.admin_email, register=False)
-    fake_valkey(ctx).down = True
-    response = await app.post(
-        "/device/register", json={"appVersion": "0.4.0", "macosVersion": "15.5"}, headers=mac.auth
-    )
-    assert (response.status_code, response.json()["code"]) == (503, "metadata_unavailable")
-    macs = (await admin.get("/devices")).json()
-    assert macs[0]["state"] == "pending"
+    device = await enrol_device(app, admin, ctx, org.admin_email)
+    again = await app.post("/device/register", json=BEAT, headers=device.auth)
+    assert again.status_code == 200
+    password = again.json()["valkeyPassword"]
+    assert password != device.valkey_password
+    digest = hashlib.sha256(password.encode()).digest()
+    for disk in disks:
+        stored = fake_valkey(ctx).users[instance_url(ctx, disk["id"])][device.valkey_user]
+        assert stored == (digest, "write")
+    assert device.valkey_user in fake_valkey(ctx).killed  # old connections closed
+
+
+async def test_registering_while_an_instance_is_down_finishes_with_the_reconciler(
+    org: Org, ctx: Context, admin: httpx.AsyncClient, clients: ClientFactory
+) -> None:
+    disk = await create_disk(admin, ctx, "Progetti")
+    url = instance_url(ctx, disk["id"])
+    fake_valkey(ctx).down.add(url)
+    device = await enrol_device(clients(), admin, ctx, org.admin_email)
+    assert device.valkey_password
+    assert [d["name"] for d in device.disks] == ["Progetti"]
+    assert url not in fake_valkey(ctx).users
+    fake_valkey(ctx).down.clear()
+    await reconcile_instances(ctx, org.id)
+    assert fake_valkey(ctx).access(url, device.valkey_user) == "write"
 
 
 async def test_heartbeat_reports_status_and_logs_an_outdated_app_once(
@@ -210,7 +300,7 @@ async def test_heartbeat_reports_status_and_logs_an_outdated_app_once(
     owner_engine: AsyncEngine,
 ) -> None:
     app = clients()
-    mac = await enrol_mac(app, admin, ctx, org.admin_email)
+    device = await enrol_device(app, admin, ctx, org.admin_email)
     beat = {
         "appVersion": "0.3.9",
         "macosVersion": "15.5",
@@ -219,8 +309,8 @@ async def test_heartbeat_reports_status_and_logs_an_outdated_app_once(
         "mountedDiskIds": [],
     }
     for _ in range(2):
-        response = await app.post("/device/heartbeat", json=beat, headers=mac.auth)
-        assert response.json() == {"state": "active"}
+        response = await app.post("/device/heartbeat", json=beat, headers=device.auth)
+        assert response.json() == {"state": "active", "disks": []}
     listed = (await admin.get("/devices")).json()[0]
     assert listed["appOutdated"] is True
     assert listed["replica"] == {"mode": "replica", "lagMs": 12}
@@ -237,7 +327,7 @@ async def test_heartbeat_reports_status_and_logs_an_outdated_app_once(
     assert outdated == [{"appVersion": "0.3.9"}]
 
 
-async def test_admin_revokes_a_mac_and_the_window_opens(
+async def test_admin_revokes_a_device_and_the_window_of_each_disk_it_saw_opens(
     org: Org,
     ctx: Context,
     admin: httpx.AsyncClient,
@@ -245,32 +335,39 @@ async def test_admin_revokes_a_mac_and_the_window_opens(
     owner_engine: AsyncEngine,
 ) -> None:
     marco = clients()
-    await invite_and_join(admin, marco, ctx, "marco@studio-a.test")
+    person = await invite_and_join(admin, marco, ctx, "marco@studio-a.test")
+    seen = await create_disk(
+        admin, ctx, "Progetti", access=[{"personId": person["id"], "access": "read"}]
+    )
+    unseen = await create_disk(admin, ctx, "Riservato")
     app = clients()
-    mac = await enrol_mac(app, marco, ctx, "marco@studio-a.test", name="iMac di Marco")
-    response = await admin.post(f"/devices/{mac.id}/revoke")
+    device = await enrol_device(app, marco, ctx, "marco@studio-a.test", name="iMac di Marco")
+    response = await admin.post(f"/devices/{device.id}/revoke")
     assert response.status_code == 200
     body = response.json()
     assert body["device"]["state"] == "revoked"
     assert body["device"]["revokedBy"] == "Giulia"
     assert body["device"]["connected"] is False
-    assert [r["label"] for r in body["key"]["window"]["reasons"]] == ["iMac di Marco"]
-    assert mac.valkey_user not in fake_valkey(ctx).users[org.valkey_url]
-    assert mac.valkey_user in fake_valkey(ctx).killed
-    again = await admin.post(f"/devices/{mac.id}/revoke")
+    windows = {d["diskName"]: d["window"] for d in body["key"]["disks"]}
+    assert [r["label"] for r in windows["Progetti"]["reasons"]] == ["iMac di Marco"]
+    assert windows["Riservato"] is None
+    url = instance_url(ctx, seen["id"])
+    assert fake_valkey(ctx).access(url, device.valkey_user) is None
+    assert device.valkey_user in fake_valkey(ctx).killed
+    assert device.valkey_user not in fake_valkey(ctx).users.get(instance_url(ctx, unseen["id"]), {})
+    again = await admin.post(f"/devices/{device.id}/revoke")
     assert (again.status_code, again.json()["code"]) == (409, "invalid_state")
     # A revoked device token no longer configures anything; the heartbeat says why.
-    assert (await app.get("/device/config", headers=mac.auth)).status_code == 401
-    beat = await app.post(
-        "/device/heartbeat", json={"appVersion": "0.4.0", "macosVersion": "15.5"}, headers=mac.auth
-    )
-    assert beat.json() == {"state": "revoked"}
+    refused = await app.get("/device/config", headers=device.auth)
+    assert (refused.status_code, refused.json()["details"]) == (401, {"reason": "device_revoked"})
+    beat = await app.post("/device/heartbeat", json=BEAT, headers=device.auth)
+    assert beat.json() == {"state": "revoked", "disks": []}
     async with owner_engine.connect() as conn:
         reason = (await conn.execute(select(Device.revoke_reason))).scalar_one()
     assert reason == "admin"
 
 
-async def test_members_see_and_revoke_only_their_own_macs(
+async def test_members_see_and_revoke_only_their_own_devices(
     org: Org,
     ctx: Context,
     admin: httpx.AsyncClient,
@@ -278,14 +375,19 @@ async def test_members_see_and_revoke_only_their_own_macs(
     owner_engine: AsyncEngine,
 ) -> None:
     marco = clients()
-    await invite_and_join(admin, marco, ctx, "marco@studio-a.test")
-    giulia_mac = await enrol_mac(clients(), admin, ctx, org.admin_email)
-    marco_mac = await enrol_mac(clients(), marco, ctx, "marco@studio-a.test", name="iMac di Marco")
-    seen = [m["id"] for m in (await marco.get("/devices")).json()]
-    assert seen == [marco_mac.id]
-    other = await marco.post(f"/devices/{giulia_mac.id}/revoke")
+    person = await invite_and_join(admin, marco, ctx, "marco@studio-a.test")
+    await create_disk(
+        admin, ctx, "Progetti", access=[{"personId": person["id"], "access": "write"}]
+    )
+    giulia_device = await enrol_device(clients(), admin, ctx, org.admin_email)
+    marco_device = await enrol_device(
+        clients(), marco, ctx, "marco@studio-a.test", name="iMac di Marco"
+    )
+    seen = [d["id"] for d in (await marco.get("/devices")).json()]
+    assert seen == [marco_device.id]
+    other = await marco.post(f"/devices/{giulia_device.id}/revoke")
     assert (other.status_code, other.json()["code"]) == (404, "not_found")
-    own = await marco.post(f"/devices/{marco_mac.id}/revoke")
+    own = await marco.post(f"/devices/{marco_device.id}/revoke")
     assert own.status_code == 200
     assert own.json()["key"] is None
     session = (await marco.get("/session")).json()
@@ -306,13 +408,16 @@ async def test_signing_out_from_the_app_opens_no_window(
     clients: ClientFactory,
     owner_engine: AsyncEngine,
 ) -> None:
+    disk = await create_disk(admin, ctx, "Progetti")
     app = clients()
-    mac = await enrol_mac(app, admin, ctx, org.admin_email)
-    response = await app.post("/device/sign-out", headers=mac.auth)
+    device = await enrol_device(app, admin, ctx, org.admin_email)
+    response = await app.post("/device/sign-out", headers=device.auth)
     assert response.status_code == 204
-    assert mac.valkey_user not in fake_valkey(ctx).users[org.valkey_url]
+    assert fake_valkey(ctx).access(instance_url(ctx, disk["id"]), device.valkey_user) is None
     key = (await admin.get("/key")).json()
-    assert key["window"] is None
+    assert key["disks"][0]["window"] is None
+    refused = await app.get("/device/config", headers=device.auth)
+    assert refused.json()["details"] == {"reason": "device_signed_out"}
     async with owner_engine.connect() as conn:
         actions = (
             (await conn.execute(select(AuditEvent.action).order_by(AuditEvent.id))).scalars().all()
@@ -322,69 +427,72 @@ async def test_signing_out_from_the_app_opens_no_window(
     assert reason == "signed_out"
 
 
-async def test_revoking_a_pending_mac_opens_no_window(
+async def test_revoking_a_pending_device_opens_no_window(
     org: Org, ctx: Context, admin: httpx.AsyncClient, clients: ClientFactory
 ) -> None:
-    mac = await enrol_mac(clients(), admin, ctx, org.admin_email, register=False)
-    response = await admin.post(f"/devices/{mac.id}/revoke")
-    assert response.json()["key"]["window"] is None
+    await create_disk(admin, ctx, "Progetti")
+    device = await enrol_device(clients(), admin, ctx, org.admin_email, register=False)
+    response = await admin.post(f"/devices/{device.id}/revoke")
+    assert response.json()["key"]["disks"][0]["window"] is None
+    refused = await clients().get(
+        "/device/config", headers={"Authorization": f"Bearer {device.token}"}
+    )
+    assert refused.json()["details"] == {"reason": "device_revoked"}
 
 
-async def test_revocation_while_valkey_is_down_is_finished_by_the_reconciler(
+async def test_a_pending_device_is_told_it_is_not_registered(
+    org: Org, ctx: Context, admin: httpx.AsyncClient, clients: ClientFactory
+) -> None:
+    app = clients()
+    device = await enrol_device(app, admin, ctx, org.admin_email, register=False)
+    refused = await app.get("/device/config", headers=device.auth)
+    assert (refused.status_code, refused.json()["details"]) == (
+        401,
+        {"reason": "device_not_registered"},
+    )
+
+
+async def test_revocation_while_an_instance_is_down_is_finished_by_the_reconciler(
     org: Org,
     ctx: Context,
     admin: httpx.AsyncClient,
     clients: ClientFactory,
     owner_engine: AsyncEngine,
 ) -> None:
-    mac = await enrol_mac(clients(), admin, ctx, org.admin_email)
+    disk = await create_disk(admin, ctx, "Progetti")
+    url = instance_url(ctx, disk["id"])
+    device = await enrol_device(clients(), admin, ctx, org.admin_email)
     valkey = fake_valkey(ctx)
-    valkey.down = True
-    response = await admin.post(f"/devices/{mac.id}/revoke")
+    valkey.down.add(url)
+    response = await admin.post(f"/devices/{device.id}/revoke")
     assert response.status_code == 200
-    assert mac.valkey_user in valkey.users[org.valkey_url]
+    assert valkey.access(url, device.valkey_user) == "write"
     async with owner_engine.connect() as conn:
-        owed = (await conn.execute(select(Device.valkey_user_deleted_at))).scalar_one()
-    assert owed is None
-    valkey.down = False
-    await reconcile_acl(ctx, org.id)
-    assert mac.valkey_user not in valkey.users[org.valkey_url]
+        owed = (await conn.execute(select(MetaUser.access, MetaUser.applied_at))).one()
+    assert tuple(owed) == ("none", None)
+    valkey.down.clear()
+    await reconcile_instances(ctx, org.id)
+    assert valkey.access(url, device.valkey_user) is None
     async with owner_engine.connect() as conn:
-        done = (await conn.execute(select(Device.valkey_user_deleted_at))).scalar_one()
+        done = (await conn.execute(select(MetaUser.applied_at))).scalar_one()
     assert done is not None
 
 
-async def test_reconciler_rebuilds_users_lost_by_valkey(
-    org: Org, ctx: Context, admin: httpx.AsyncClient, clients: ClientFactory
-) -> None:
-    mac = await enrol_mac(clients(), admin, ctx, org.admin_email)
-    valkey = fake_valkey(ctx)
-    digest = valkey.users[org.valkey_url][mac.valkey_user]
-    # A failover to a replica: ACL users are not replicated; a stray user appears too.
-    valkey.users[org.valkey_url] = {"floppy_d_" + "f" * 32: b"x" * 32}
-    await reconcile_acl(ctx, org.id)
-    assert valkey.users[org.valkey_url] == {mac.valkey_user: digest}
-
-
-async def test_pending_macs_expire_after_a_day(
+async def test_pending_devices_expire_after_a_day(
     org: Org,
     ctx: Context,
     admin: httpx.AsyncClient,
     clients: ClientFactory,
     owner_engine: AsyncEngine,
 ) -> None:
-    mac = await enrol_mac(clients(), admin, ctx, org.admin_email, register=False)
+    device = await enrol_device(clients(), admin, ctx, org.admin_email, register=False)
     async with owner_engine.begin() as conn:
         await conn.execute(update(Device).values(created_at=utcnow() - timedelta(hours=25)))
     await expire_stale_rows(ctx)
     listed = (await admin.get("/devices")).json()[0]
-    assert (listed["id"], listed["state"], listed["revokedBy"]) == (mac.id, "revoked", None)
+    assert (listed["id"], listed["state"], listed["revokedBy"]) == (device.id, "revoked", None)
     async with owner_engine.connect() as conn:
-        row = (
-            await conn.execute(
-                text("SELECT revoke_reason, valkey_user_deleted_at IS NOT NULL FROM devices")
-            )
-        ).one()
+        reason = (await conn.execute(select(Device.revoke_reason))).scalar_one()
         logged = (
             await conn.execute(
                 select(AuditEvent.actor_kind, AuditEvent.detail).where(
@@ -392,7 +500,7 @@ async def test_pending_macs_expire_after_a_day(
                 )
             )
         ).one()
-    assert tuple(row) == ("never_registered", True)
+    assert reason == "never_registered"
     assert tuple(logged) == ("system", {"reason": "never_registered"})
 
 
@@ -400,6 +508,7 @@ async def test_device_endpoints_need_a_valid_token(client: httpx.AsyncClient, or
     for response in (
         await client.get("/device/config"),
         await client.get("/device/config", headers={"Authorization": "Bearer nope"}),
-        await client.post("/device/heartbeat", json={"appVersion": "1", "macosVersion": "1"}),
+        await client.post("/device/heartbeat", json=BEAT),
     ):
         assert (response.status_code, response.json()["code"]) == (401, "unauthorized")
+        assert response.json()["details"] == {"reason": "token_unknown"}

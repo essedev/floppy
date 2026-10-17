@@ -1,9 +1,10 @@
 """
 Volume formats: `juicefs format` for a new disk and `juicefs config` for a new key or trash.
 
-The format lives in the volume's Valkey database and holds the S3 key that Macs read from
-their replica (DECISIONS #4). `JuiceFSFormatter` runs the patched JuiceFS binary of the server
-image with the key passed through the environment, never on a command line;
+The format lives in database 1 of the disk's own Valkey instance. In manual mode it holds the
+disk's S3 key, which devices read from their replica; in managed mode it holds none and each
+mount brings its own (DECISIONS #24). `JuiceFSFormatter` runs the patched JuiceFS binary of
+the server image with the key passed through the environment, never on a command line;
 `FakeVolumeFormatter` keeps the same state in memory for tests and development.
 """
 
@@ -17,6 +18,8 @@ from typing import Protocol
 from urllib.parse import quote, urlsplit, urlunsplit
 from uuid import UUID, uuid4
 
+from floppy_server.infra.metadata import META_DB
+
 
 class FormatError(Exception):
     """JuiceFS refused or failed; the message never contains the key."""
@@ -29,11 +32,14 @@ class VolumeLocation:
     meta_url: str
     meta_username: str | None
     meta_password: str | None
-    meta_db: int
     volume_name: str
     s3_endpoint: str
     s3_region: str
     s3_bucket: str
+    meta_db: int = META_DB
+
+    def __repr__(self) -> str:
+        return f"VolumeLocation(meta_url={self.meta_url!r}, volume_name={self.volume_name!r})"
 
 
 @dataclass(frozen=True)
@@ -61,8 +67,8 @@ class VolumeFormatter(Protocol):
     ) -> UUID:
         """
         Formats a new volume and returns its JuiceFS UUID. With `store_key` the key goes into
-        the format (team scope); without, the format holds no key and every mount brings
-        its own (person and device scopes, DATABASE_SCHEMA.md "Storage modes").
+        the format (manual: the disk's key); without, the format holds no key and every mount
+        brings its own (managed, DATABASE_SCHEMA.md "Storage modes").
         """
         ...
 

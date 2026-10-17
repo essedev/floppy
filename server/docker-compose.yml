@@ -1,8 +1,10 @@
-# The control plane for self-hosting and local development: PostgreSQL 18, the central
-# Valkey and the server. Secrets come from server/.env (outside git); see .env.example.
+# The control plane for self-hosting and local development: PostgreSQL 18, a pool of Valkey
+# instances (one per disk, DECISIONS #23) and the server. Secrets come from server/.env
+# (outside git); see .env.example.
 #
-#   docker compose up -d --build     # migrations and bootstrap run before the server starts
-#   docker compose up -d db valkey   # only the stores, for `uv run` and the tests
+#   docker compose up -d --build                        # migrations and bootstrap, then serve
+#   docker compose up -d db meta-1 meta-2 meta-3        # only the stores, for `uv run`
+#   docker compose --profile test up -d db meta-test-1 meta-test-2 meta-test-3   # for the tests
 #   docker compose --profile s3 up -d garage && docker/garage-setup.sh   # a local S3 for tests
 #
 # The image carries the patched JuiceFS built by spike/juicefs-replica/build.sh; JUICEFS_DIST
@@ -30,17 +32,19 @@ services:
       timeout: 3s
       retries: 30
 
-  valkey:
+  # The meta service's pool for development and the tests (DECISIONS #25 is the real one):
+  # each instance is handed to one disk. Every write is on disk before the answer
+  # (architecture.html, Failure modes); ACL users are not persisted here: the control plane's
+  # reconciler recreates them. No databases beyond 0 (the pool's claim) and 1 (the disk).
+  meta-1: &meta
     image: valkey/valkey:8.1.4
-    # Every write is on disk before the answer (architecture.html, Failure modes). ACL users
-    # are not persisted here: the control plane's reconciler recreates them at start.
     command: >
       valkey-server --requirepass ${FLOPPY_VALKEY_ADMIN_PASSWORD:?set it in server/.env}
-      --appendonly yes --appendfsync always --databases 16
+      --appendonly yes --appendfsync always --databases 2 --repl-diskless-sync-delay 0
     volumes:
-      - valkey-data:/data
+      - meta-1-data:/data
     ports:
-      - "127.0.0.1:4505:6379"
+      - "127.0.0.1:4541:6379"
     healthcheck:
       test: ["CMD-SHELL", "valkey-cli -a \"$$VALKEY_PASSWORD\" --no-auth-warning ping | grep -q PONG"]
       interval: 2s
@@ -48,6 +52,42 @@ services:
       retries: 30
     environment:
       VALKEY_PASSWORD: ${FLOPPY_VALKEY_ADMIN_PASSWORD}
+
+  meta-2:
+    <<: *meta
+    volumes:
+      - meta-2-data:/data
+    ports:
+      - "127.0.0.1:4542:6379"
+
+  meta-3:
+    <<: *meta
+    volumes:
+      - meta-3-data:/data
+    ports:
+      - "127.0.0.1:4543:6379"
+
+  # The tests' own pool: their fixtures wipe it, so the development disks on meta-1..3 stay.
+  meta-test-1:
+    <<: *meta
+    profiles: [test]
+    volumes: []
+    ports:
+      - "127.0.0.1:4546:6379"
+
+  meta-test-2:
+    <<: *meta
+    profiles: [test]
+    volumes: []
+    ports:
+      - "127.0.0.1:4547:6379"
+
+  meta-test-3:
+    <<: *meta
+    profiles: [test]
+    volumes: []
+    ports:
+      - "127.0.0.1:4548:6379"
 
   server:
     build:
@@ -57,13 +97,18 @@ services:
     depends_on:
       db:
         condition: service_healthy
-      valkey:
+      meta-1:
+        condition: service_healthy
+      meta-2:
+        condition: service_healthy
+      meta-3:
         condition: service_healthy
     env_file: .env
     environment:
       FLOPPY_DATABASE_URL: postgresql+asyncpg://floppy_app:${FLOPPY_DB_APP_PASSWORD}@db:5432/floppy
       FLOPPY_MIGRATION_DATABASE_URL: postgresql+asyncpg://floppy_owner:${FLOPPY_DB_OWNER_PASSWORD}@db:5432/floppy
-      FLOPPY_BOOTSTRAP_VALKEY_ADMIN_URL: redis://valkey:6379
+      # Devices reach the pool on the host's ports, the control plane on the Compose network.
+      FLOPPY_META_POOL: redis://localhost:4541|redis://meta-1:6379,redis://localhost:4542|redis://meta-2:6379,redis://localhost:4543|redis://meta-3:6379
     ports:
       - "127.0.0.1:4507:8000"
     healthcheck:
@@ -89,7 +134,9 @@ services:
 
 volumes:
   db-data:
-  valkey-data:
+  meta-1-data:
+  meta-2-data:
+  meta-3-data:
   garage-meta:
   garage-data:
 

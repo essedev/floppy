@@ -1,8 +1,9 @@
 """
 What every service needs, built once at startup: settings, the database, the secret box and
-the external systems (mail, Valkey, JuiceFS, the storage probe) behind their interfaces.
+the external systems (mail, the disks' Valkey instances, the meta service, JuiceFS, the
+storage probe) behind their interfaces.
 
-Also resolves, per organization, which Valkey, SMTP server and volume location to use: an
+Also resolves which SMTP server, which instance and which volume location to use: an
 organization's own columns win, the instance's environment fills the gaps (self-hosted).
 """
 
@@ -17,10 +18,11 @@ from floppy_server.config import MailBackend, Settings
 from floppy_server.crypto import SecretBox
 from floppy_server.infra.juicefs import S3Credentials, VolumeFormatter, VolumeLocation
 from floppy_server.infra.mail import Mailer, SmtpConfig
+from floppy_server.infra.meta import MetaService
 from floppy_server.infra.metadata import MetadataAdmin, ValkeyTarget
 from floppy_server.infra.providers import GarageAdapter, ProviderError, StorageAdapter
 from floppy_server.infra.storage import StorageProber
-from floppy_server.models import Organization, S3Key, Volume
+from floppy_server.models import MetaInstance, Organization, S3Key, Volume
 from floppy_server.ratelimit import RateLimiter
 
 
@@ -39,6 +41,7 @@ class Context:
     box: SecretBox
     mailer: Mailer
     metadata: MetadataAdmin
+    meta: MetaService
     formatter: VolumeFormatter
     prober: StorageProber
     rotation_wakeup: asyncio.Event = field(default_factory=asyncio.Event)
@@ -47,23 +50,19 @@ class Context:
     # Tests put a fake here; otherwise each managed organization gets its provider's.
     adapter_override: StorageAdapter | None = None
 
-    def valkey_target(self, org: Organization) -> ValkeyTarget:
-        """The organization's Valkey as the control plane reaches it, with admin credentials."""
-        password: str | None
-        if org.valkey_admin_password_enc is not None:
+    def instance_target(self, instance: MetaInstance) -> ValkeyTarget:
+        """A disk's instance as the control plane reaches it, with its admin credentials."""
+        password = None
+        if instance.admin_password_enc is not None:
             password = self.box.open(
-                org.valkey_admin_password_enc,
-                table="organizations",
-                column="valkey_admin_password_enc",
-                row_id=org.id,
+                instance.admin_password_enc,
+                table="meta_instances",
+                column="admin_password_enc",
+                row_id=instance.id,
             )
-        elif self.settings.valkey_admin_password is not None:
-            password = self.settings.valkey_admin_password.get_secret_value()
-        else:
-            password = None
         return ValkeyTarget(
-            url=org.valkey_admin_url or org.valkey_url,
-            username=org.valkey_admin_username or self.settings.valkey_admin_username,
+            url=instance.admin_url or instance.url,
+            username=instance.admin_username,
             password=password,
         )
 
@@ -104,14 +103,13 @@ class Context:
         """Whether mail can leave for this organization (the console backend counts)."""
         return self.settings.mail_backend is MailBackend.CONSOLE or self.smtp_for(org) is not None
 
-    def volume_location(self, org: Organization, volume: Volume) -> VolumeLocation:
-        """Where a volume's format and objects live."""
-        target = self.valkey_target(org)
+    def volume_location(self, instance: MetaInstance, volume: Volume) -> VolumeLocation:
+        """Where a volume's format (its instance) and objects (its bucket) live."""
+        target = self.instance_target(instance)
         return VolumeLocation(
             meta_url=target.url,
             meta_username=target.username,
             meta_password=target.password,
-            meta_db=volume.meta_db,
             volume_name=volume.volume_name,
             s3_endpoint=volume.s3_endpoint,
             s3_region=volume.s3_region,
@@ -154,3 +152,9 @@ class Context:
             key.secret_key_enc, table="s3_keys", column="secret_key_enc", row_id=key.id
         )
         return S3Credentials(access_key_id=key.access_key_id, secret_key=secret)
+
+    def seal_secret(self, key: S3Key, secret: str) -> None:
+        """Encrypts a key's secret into its row; the row needs its id first."""
+        key.secret_key_enc = self.box.seal(
+            secret, table="s3_keys", column="secret_key_enc", row_id=key.id
+        )

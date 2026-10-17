@@ -1,14 +1,13 @@
-"""`/key`: the S3 key's status and its rotation (admins only)."""
+"""`/key`: each disk's S3 key, its window and its rotation (admins only)."""
 
 from uuid import UUID
 
 from fastapi import APIRouter
 
 from floppy_server.api import AdminDep, CtxDep
-from floppy_server.audit.service import AuditActor
 from floppy_server.errors import not_found
 from floppy_server.infra.juicefs import S3Credentials
-from floppy_server.keys import scoped, service
+from floppy_server.keys import service
 from floppy_server.keys.schemas import (
     CloseRotationRequest,
     KeyStatusOut,
@@ -30,27 +29,20 @@ async def _status(ctx: CtxDep, organization_id: UUID) -> KeyStatusOut:
 
 @router.get("/key", response_model=KeyStatusOut)
 async def get_key(actor: AdminDep, ctx: CtxDep) -> KeyStatusOut:
-    """The key in use, the window and the current rotation."""
-    return await _status(ctx, actor.organization_id)
-
-
-@router.post("/key/{key_id}/deleted", response_model=KeyStatusOut)
-async def key_deleted(key_id: UUID, actor: AdminDep, ctx: CtxDep) -> KeyStatusOut:
-    """The admin confirms a person's old key is deleted at the provider (manual)."""
-    await scoped.confirm_deleted(
-        ctx, actor.organization_id, key_id, AuditActor.person(actor.user_id, actor.label)
-    )
+    """Every disk's key, window and rotation, and the devices' keys."""
     return await _status(ctx, actor.organization_id)
 
 
 @router.post("/key/rotations", response_model=RotationOut, status_code=201)
-async def start_rotation(
-    actor: AdminDep, ctx: CtxDep, body: StartRotationRequest | None = None
-) -> RotationOut:
-    """Starts a rotation: a pasted key (manual), or none and the provider makes it (managed)."""
-    key = S3Credentials(body.access_key_id, body.secret_key) if body is not None else None
+async def start_rotation(body: StartRotationRequest, actor: AdminDep, ctx: CtxDep) -> RotationOut:
+    """Starts a rotation of one disk's key with a pasted new key (manual)."""
     rotation = await service.start_rotation(
-        ctx, actor.organization_id, user_id=actor.user_id, user_label=actor.label, key=key
+        ctx,
+        actor.organization_id,
+        body.disk_id,
+        user_id=actor.user_id,
+        user_label=actor.label,
+        key=S3Credentials(body.access_key_id, body.secret_key),
     )
     return await service.get_rotation(ctx, actor.organization_id, rotation.id)
 
@@ -65,7 +57,7 @@ async def get_rotation(rotation_id: UUID, actor: AdminDep, ctx: CtxDep) -> Rotat
 async def close_rotation(
     rotation_id: UUID, body: CloseRotationRequest, actor: AdminDep, ctx: CtxDep
 ) -> KeyStatusOut:
-    """Closes a rotation once the old key is deleted at the provider."""
+    """Closes a rotation once the disk's old key is deleted at the provider."""
     await service.close_rotation(
         ctx, actor.organization_id, rotation_id, actor.user_id, actor.label
     )

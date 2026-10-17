@@ -7,13 +7,13 @@ from datetime import datetime
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Cookie, Depends, Form, Query, Request, Response
+from fastapi import APIRouter, Depends, Form, Query, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from floppy_server.api import SESSION_COOKIE, ActorDep, CamelModel, CtxDep, Email, rate_limit
+from floppy_server.api import ActorDep, CamelModel, CtxDep, Email, rate_limit
 from floppy_server.auth import app_page, service
 from floppy_server.context import Context
 from floppy_server.errors import ApiError, not_found, validation
@@ -83,7 +83,7 @@ class SessionOut(CamelModel):
 
 
 class AppSignInRequest(CamelModel):
-    """The app's sign-in: the address, its PKCE challenge, loopback and the Mac's name."""
+    """The app's sign-in: the address, its PKCE challenge, loopback and the device's name."""
 
     email: Email
     code_challenge: str = Field(pattern=r"^[A-Za-z0-9_-]{43}$")
@@ -106,7 +106,7 @@ class AppTokenRequest(CamelModel):
 
 
 class AppTokenResponse(CamelModel):
-    """The new Mac, `pending` until it registers, and its token (returned once, for the Keychain)."""
+    """The new device, `pending` until it registers, and its token (returned once, for the Keychain)."""
 
     device_id: UUID
     device_token: str
@@ -126,12 +126,12 @@ async def session_view(
             Membership.deleted_at.is_(None),
         )
     )
-    macs_query = select(func.count()).where(
+    devices_query = select(func.count()).where(
         Device.organization_id == org.id, Device.state != "revoked", Device.deleted_at.is_(None)
     )
     if membership.role != "admin":
-        macs_query = macs_query.where(Device.user_id == user.id)
-    macs = await db.scalar(macs_query)
+        devices_query = devices_query.where(Device.user_id == user.id)
+    devices = await db.scalar(devices_query)
     return SessionOut(
         user=SessionUser(id=user.id, email=user.email, name=user.name or user.email),
         role=membership.role,
@@ -140,14 +140,14 @@ async def session_view(
             name=org.name,
             disk_count=disks or 0,
             people_count=people or 0,
-            device_count=macs or 0,
+            device_count=devices or 0,
         ),
     )
 
 
 def _set_cookie(ctx: Context, response: Response, token: str) -> None:
     response.set_cookie(
-        SESSION_COOKIE,
+        ctx.settings.session_cookie,
         token,
         max_age=int(ctx.settings.session_absolute.total_seconds()),
         httponly=True,
@@ -249,16 +249,13 @@ async def get_session(actor: ActorDep, ctx: CtxDep) -> SessionOut:
 
 
 @router.delete("/session", status_code=204)
-async def delete_session(
-    response: Response,
-    ctx: CtxDep,
-    floppy_session: Annotated[str | None, Cookie()] = None,
-) -> Response:
+async def delete_session(request: Request, response: Response, ctx: CtxDep) -> Response:
     """Signs out: the session is revoked and the cookie cleared."""
-    await service.sign_out(ctx, floppy_session)
+    name = ctx.settings.session_cookie
+    await service.sign_out(ctx, request.cookies.get(name))
     response.status_code = 204
     response.delete_cookie(
-        SESSION_COOKIE, path="/", httponly=True, secure=ctx.settings.cookie_secure, samesite="lax"
+        name, path="/", httponly=True, secure=ctx.settings.cookie_secure, samesite="lax"
     )
     return response
 
@@ -325,7 +322,7 @@ async def open_app_link(body: TokenRequest, ctx: CtxDep) -> AppLinkResponse:
     "/auth/app/token", response_model=AppTokenResponse, dependencies=[Depends(rate_limit("code"))]
 )
 async def app_token(body: AppTokenRequest, ctx: CtxDep) -> AppTokenResponse:
-    """Trades the verifier and a code for a device token (the Mac is created, pending)."""
+    """Trades the verifier and a code for a device token (the device is created, pending)."""
     if (body.authorization_code is None) == (body.code is None):
         raise validation("Send either authorizationCode or code")
     grant = await service.exchange_app_token(

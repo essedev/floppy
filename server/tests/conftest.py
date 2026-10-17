@@ -1,11 +1,13 @@
 """
 Integration fixtures: a real PostgreSQL 18 database built by the migrations, the
 application connected as the role without DELETE, and fakes only for what leaves the
-process (mail, Valkey unless a test asks for the real one, JuiceFS, the storage probe).
+process (mail, the meta service and Valkey unless a test asks for the real pool, JuiceFS, the
+storage probe and the provider).
 
-The database is the Compose service (`docker compose up -d db valkey`); credentials come from
-the environment (`uv run --env-file .env pytest`). Each session recreates `floppy_test`, and
-each test starts from empty tables, truncated by the owner role.
+The database is the Compose service (`docker compose up -d db meta-1 meta-2 meta-3`);
+credentials come from the environment (`uv run --env-file .env pytest`). Each session
+recreates the test database (`FLOPPY_TEST_DB_NAME`, `floppy_test` by default), and each test
+starts from empty tables, truncated by the owner role.
 """
 
 import asyncio
@@ -18,8 +20,10 @@ from uuid import UUID
 import asyncpg  # type: ignore[import-untyped]
 import httpx
 import pytest
+import redis.asyncio as aioredis
 from alembic import command
 from alembic.config import Config
+from redis.exceptions import RedisError
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
@@ -30,12 +34,13 @@ from floppy_server.context import Context
 from floppy_server.crypto import SecretBox
 from floppy_server.db import Base, make_engine, make_sessionmaker
 from floppy_server.infra.juicefs import FakeVolumeFormatter
+from floppy_server.infra.meta import FakeMetaService
 from floppy_server.infra.metadata import FakeMetadataAdmin
 from floppy_server.infra.storage import FakeStorageProber
 from tests.helpers import RecordingMailer, sign_in
 
 SERVER_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-TEST_DB = "floppy_test"
+TEST_DB = os.environ.get("FLOPPY_TEST_DB_NAME", "floppy_test")
 SECRET_KEY = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
 
 
@@ -48,7 +53,12 @@ def _env(name: str, default: str | None = None) -> str:
 
 DB_HOST = _env("FLOPPY_TEST_DB_HOST", "127.0.0.1")
 DB_PORT = _env("FLOPPY_TEST_DB_PORT", "4504")
-VALKEY_URL = _env("FLOPPY_TEST_VALKEY_URL", "redis://127.0.0.1:4505")
+# The tests' own meta pool (Compose profile `test`), as they reach it from the host; its
+# fixtures wipe it. The development pool (meta-1..3) is never touched.
+META_POOL = _env(
+    "FLOPPY_TEST_META_POOL",
+    "redis://127.0.0.1:4546,redis://127.0.0.1:4547,redis://127.0.0.1:4548",
+)
 
 
 def owner_url(database: str = TEST_DB) -> str:
@@ -138,6 +148,7 @@ async def ctx(app_engine: AsyncEngine, clean: None) -> Context:
         box=SecretBox(settings.key_ring),
         mailer=RecordingMailer(),
         metadata=FakeMetadataAdmin(),
+        meta=FakeMetaService(),
         formatter=FakeVolumeFormatter(),
         prober=FakeStorageProber(),
     )
@@ -175,27 +186,16 @@ class Org:
     """An organization made by the bootstrap, with its admin's address."""
 
     id: UUID
+    slug: str
     admin_email: str
-    bucket: str
-    valkey_url: str
 
 
-async def make_org(
-    ctx: Context,
-    slug: str,
-    admin_email: str,
-    *,
-    key: str = "AKIAFIRSTKEY00001",
-    valkey_url: str | None = None,
-    **options: Any,
-) -> Org:
+async def make_org(ctx: Context, slug: str, admin_email: str, **options: Any) -> Org:
     """
     An organization through the real bootstrap; `options` reach `BootstrapInput` (mail
-    language, storage mode, provider and key scope). A managed one gets no pasted key.
+    language, storage mode, provider). A managed one gets the control plane's key from the
+    adapter (a `FakeAdapter` unless the test set one).
     """
-    bucket = f"bucket-{slug}"
-    valkey = valkey_url or f"redis://valkey-{slug}.test:6379"
-    managed = options.get("storage_mode") == "managed"
     org_id = await bootstrap(
         ctx,
         BootstrapInput(
@@ -204,14 +204,41 @@ async def make_org(
             admin_email=admin_email,
             s3_endpoint="https://s3.test",
             s3_region="eu-south",
-            s3_bucket=bucket,
-            s3_access_key_id="" if managed else key,
-            s3_secret_key="" if managed else "first-secret-key-value-0001",
-            valkey_url=valkey,
             **options,
         ),
     )
-    return Org(id=org_id, admin_email=admin_email, bucket=bucket, valkey_url=valkey)
+    return Org(id=org_id, slug=slug, admin_email=admin_email)
+
+
+@pytest.fixture
+async def pool() -> AsyncIterator[list[str]]:
+    """
+    The tests' meta pool, wiped before and after (data, the pool's claims, the devices'
+    users), with its admin password from FLOPPY_VALKEY_ADMIN_PASSWORD.
+    """
+    password = os.environ.get("FLOPPY_VALKEY_ADMIN_PASSWORD")
+    if not password:
+        pytest.skip("FLOPPY_VALKEY_ADMIN_PASSWORD is not set")
+    urls = [u.strip() for u in META_POOL.split(",") if u.strip()]
+
+    async def wipe() -> None:
+        for url in urls:
+            client = aioredis.Redis.from_url(url, password=password)
+            try:
+                await client.flushall()
+                for name in await client.execute_command("ACL", "USERS"):
+                    if name.decode().startswith("floppy_d_"):
+                        await client.execute_command("ACL", "DELUSER", name)
+            except RedisError:
+                pytest.skip(
+                    f"the tests' meta pool does not answer at {url}: docker compose --profile test up -d"
+                )
+            finally:
+                await client.aclose()
+
+    await wipe()
+    yield urls
+    await wipe()
 
 
 @pytest.fixture

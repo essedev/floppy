@@ -6,7 +6,6 @@ import httpx
 from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import AsyncEngine
 
-from floppy_server.api import SESSION_COOKIE
 from floppy_server.context import Context, utcnow
 from floppy_server.models import AuditEvent, Membership, SignInRequest, User, WebSession
 from tests.conftest import ClientFactory, Org
@@ -27,7 +26,7 @@ async def test_link_signs_in_and_sets_an_httponly_cookie(
     response = await client.post("/auth/magic-link", json={"token": token})
     assert response.status_code == 200
     cookie = response.headers["set-cookie"]
-    assert cookie.startswith(f"{SESSION_COOKIE}=")
+    assert cookie.startswith("floppy_session=")  # plain http in tests: no __Host- prefix
     assert "HttpOnly" in cookie
     assert "SameSite=lax" in cookie
     session = response.json()
@@ -78,7 +77,7 @@ async def test_polling_never_grants_a_session(
     assert (await victim.post("/auth/magic-link", json={"token": token})).status_code == 200
     polled = await attacker.get(f"/auth/sign-in/{started['requestId']}")
     assert polled.json() == {"status": "completed"}
-    assert SESSION_COOKIE not in polled.headers.get("set-cookie", "")
+    assert "floppy_session" not in polled.headers.get("set-cookie", "")
     assert (await attacker.get("/session")).status_code == 401
 
 
@@ -303,3 +302,31 @@ async def test_cross_origin_writes_are_refused(admin: httpx.AsyncClient) -> None
     assert (response.status_code, response.json()["code"]) == (403, "forbidden")
     same = await admin.delete("/session", headers={"Origin": "http://localhost:4508"})
     assert same.status_code == 204
+
+
+async def test_a_secure_session_cookie_is_host_only(
+    org: Org, ctx: Context, client: httpx.AsyncClient
+) -> None:
+    # `__Host-`: Secure, Path=/ and no Domain, so no subdomain (the disks' *.meta.<domain>)
+    # can set or overwrite it. Over plain http (cookie_secure off) the plain name stays.
+    ctx.settings.cookie_secure = True
+    await client.post("/auth/sign-in", json={"email": org.admin_email})
+    token = token_in(mailer(ctx).last_to(org.admin_email))
+    response = await client.post("/auth/magic-link", json={"token": token})
+    cookie = response.headers["set-cookie"]
+    name, _, rest = cookie.partition("=")
+    assert name == "__Host-floppy_session"
+    attributes = {a.strip().split("=")[0].lower() for a in rest.split(";")[1:]}
+    assert {"secure", "httponly", "path"} <= attributes
+    assert "domain" not in attributes
+    assert "Path=/" in cookie
+    value = rest.split(";")[0]
+    session = await client.get("/session", headers={"Cookie": f"__Host-floppy_session={value}"})
+    assert session.status_code == 200
+    plain = await client.get("/session", headers={"Cookie": f"floppy_session={value}"})
+    assert plain.status_code == 401
+    out = await client.delete("/session", headers={"Cookie": f"__Host-floppy_session={value}"})
+    assert out.status_code == 204
+    assert "__Host-floppy_session=" in out.headers["set-cookie"]
+    again = await client.get("/session", headers={"Cookie": f"__Host-floppy_session={value}"})
+    assert again.status_code == 401

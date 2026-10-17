@@ -8,11 +8,10 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from floppy_server.context import Context
-from floppy_server.disks.service import run_disk_formats
 from floppy_server.keys.service import run_rotations
 from floppy_server.models import AuditEvent, Organization
 from tests.conftest import ClientFactory, Org
-from tests.helpers import enrol_mac, invite_and_join, mailer
+from tests.helpers import create_disk, enrol_device, invite_and_join, mailer
 
 
 async def test_settings_round_trip_with_a_write_only_password(
@@ -24,9 +23,8 @@ async def test_settings_round_trip_with_a_write_only_password(
         "mailLanguage": "it",
         "storageMode": "manual",
         "storageProvider": None,
-        "storageKeyScope": "team",
         "mail": {"host": "", "port": 0, "username": "", "sender": "", "passwordSet": False},
-        "storage": {"endpoint": "https://s3.test", "region": "eu-south", "bucket": org.bucket},
+        "storage": {"endpoint": "https://s3.test", "region": "eu-south"},
         "storageLocked": False,
     }
     body = {
@@ -86,13 +84,14 @@ async def test_settings_round_trip_with_a_write_only_password(
     }
 
 
-async def test_storage_is_frozen_once_a_disk_exists(
+async def test_the_default_endpoint_is_frozen_once_a_disk_exists(
     org: Org, ctx: Context, admin: httpx.AsyncClient
 ) -> None:
-    storage = {"endpoint": "https://s3.other.test", "region": "eu-west", "bucket": "other"}
+    storage = {"endpoint": "https://s3.other.test", "region": "eu-west"}
     assert (await admin.patch("/settings", json={"storage": storage})).json()["storage"] == storage
-    await admin.post("/disks", json={"name": "Archivio"})
-    response = await admin.patch("/settings", json={"storage": {**storage, "bucket": "third"}})
+    disk = await create_disk(admin, ctx, "Archivio")
+    assert disk["endpoint"] == "https://s3.other.test"  # a new disk starts from the default
+    response = await admin.patch("/settings", json={"storage": {**storage, "region": "eu-north"}})
     assert response.status_code == 409
     assert response.json() == {
         "code": "storage_in_use",
@@ -102,20 +101,26 @@ async def test_storage_is_frozen_once_a_disk_exists(
     assert (await admin.get("/settings")).json()["storageLocked"] is True
 
 
-async def test_mail_test_and_storage_probe_update_health(
+async def test_mail_test_and_a_bucket_probe(
     org: Org, ctx: Context, admin: httpx.AsyncClient
 ) -> None:
     sent = await admin.post("/settings/mail/test")
     assert sent.json() == {"sentTo": org.admin_email}
     assert "prova" in mailer(ctx).last_to(org.admin_email).subject
+    key = {"accessKeyId": "AKIAPROBEKEY0001", "secretKey": "probe-secret-0001"}
     ok = await admin.post(
         "/settings/storage/probe",
-        json={"endpoint": "https://s3.test", "region": "eu-south", "bucket": org.bucket},
+        json={"endpoint": "https://s3.test", "region": "eu-south", "bucket": "studio-a", **key},
     )
     assert ok.status_code == 204
     bad = await admin.post(
         "/settings/storage/probe",
-        json={"endpoint": "https://s3.test", "region": "eu-south", "bucket": "missing-bucket"},
+        json={
+            "endpoint": "https://s3.test",
+            "region": "eu-south",
+            "bucket": "missing-bucket",
+            **key,
+        },
     )
     assert bad.status_code == 422
     assert bad.json() == {
@@ -124,7 +129,7 @@ async def test_mail_test_and_storage_probe_update_health(
         "details": {"code": "NoSuchBucket", "request": "PUT /missing-bucket/floppy-probe-settings"},
     }
     health = (await admin.get("/health")).json()
-    assert health["storage"]["state"] == "failing"
+    assert health["disks"] == []  # a probe before a disk exists stores nothing
     assert health["mail"]["state"] == "ok"
     assert health["mail"]["lastSentAt"] is not None
     mailer(ctx).failing = True
@@ -192,16 +197,22 @@ async def test_no_secret_reaches_an_answer_or_the_audit_log(
     marco = clients()
     await invite_and_join(admin, marco, ctx, "marco@studio-a.test")
     app = clients()
-    mac = await enrol_mac(app, marco, ctx, "marco@studio-a.test")
-    assert mac.valkey_password
-    secrets += [mac.token, mac.valkey_password]
+    disk = await create_disk(
+        admin,
+        ctx,
+        "Archivio",
+        key={"accessKeyId": "AKIAFIRSTKEY00001", "secretKey": secrets[0]},
+        access=[{"personId": (await admin.get("/people")).json()[1]["id"], "access": "read"}],
+    )
+    device = await enrol_device(app, marco, ctx, "marco@studio-a.test")
+    assert device.valkey_password
+    secrets += [device.token, device.valkey_password]
     secrets += [
         m.text.split("token=")[1].split()[0] for m in mailer(ctx).outbox if "token=" in m.text
     ]
-    await admin.post("/disks", json={"name": "Archivio"})
-    await run_disk_formats(ctx)
     rotation = await admin.post(
-        "/key/rotations", json={"accessKeyId": "AKIASECONDKEY00002", "secretKey": secrets[1]}
+        "/key/rotations",
+        json={"diskId": disk["id"], "accessKeyId": "AKIASECONDKEY00002", "secretKey": secrets[1]},
     )
     answers.append(rotation.text)
     await run_rotations(ctx)
@@ -225,6 +236,7 @@ async def test_no_secret_reaches_an_answer_or_the_audit_log(
         "/devices",
         "/disks",
         "/key",
+        "/access",
         f"/key/rotations/{rotation.json()['id']}",
         "/settings",
         "/health",
@@ -232,7 +244,7 @@ async def test_no_secret_reaches_an_answer_or_the_audit_log(
     ):
         answers.append((await admin.get(path)).text)
     answers.append((await admin.get("/audit", params={"sinceDays": 90, "limit": 100})).text)
-    answers.append((await app.get("/device/config", headers=mac.auth)).text)
+    answers.append((await app.get("/device/config", headers=device.auth)).text)
     async with owner_engine.connect() as conn:
         log = json.dumps(
             [

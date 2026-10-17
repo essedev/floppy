@@ -1,4 +1,4 @@
-"""`/devices`: the Macs of the organization (members see only their own) and revocation."""
+"""`/devices`: the devices of the organization (members see only their own) and revocation."""
 
 from uuid import UUID
 

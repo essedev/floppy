@@ -1,17 +1,20 @@
 """
-Storage adapters for managed organizations (DECISIONS #22): through a provider's own API they
-create the bucket and the S3 keys, each allowed on that bucket only, and delete keys when
-access ends. The core never needs one: a manual organization pastes its keys.
+Storage adapters for managed organizations (DECISIONS #24): through a provider's own API they
+create each disk's bucket and the keys, grant a key read or read-write on each bucket and
+change that grant in place, and delete keys when access ends. The core never needs one: a
+manual organization pastes a key per disk.
 
 `GarageAdapter` speaks Garage's admin API v2; OVH, AWS and MinIO come next. `FakeAdapter`
-keeps keys in memory for tests.
+keeps buckets, keys and grants in memory for tests.
 """
 
 import secrets
 from dataclasses import dataclass, field
-from typing import Protocol
+from typing import Literal, Protocol
 
 import httpx
+
+Grant = Literal["none", "read", "write"]
 
 
 class ProviderError(Exception):
@@ -20,7 +23,7 @@ class ProviderError(Exception):
 
 @dataclass(frozen=True)
 class ProviderKey:
-    """A key the provider created: its pair and the id to delete it with."""
+    """A key the provider created: its pair and the id to change and delete it with."""
 
     access_key_id: str
     secret_key: str
@@ -37,12 +40,22 @@ class StorageAdapter(Protocol):
         """Creates the bucket, or does nothing when it exists."""
         ...
 
-    async def create_key(self, bucket: str, name: str) -> ProviderKey:
-        """A new key allowed to read and write that bucket, and nothing else."""
+    async def create_key(self, name: str) -> ProviderKey:
+        """A new key with no grant on any bucket."""
+        ...
+
+    async def set_grant(
+        self, provider_ref: str, bucket: str, grant: Grant, *, owner: bool = False
+    ) -> None:
+        """
+        What the key may do on the bucket, changed in place: `read` lists and gets, `write`
+        also puts and deletes, `none` nothing. `owner` (the control plane's key) also manages
+        the bucket.
+        """
         ...
 
     async def delete_key(self, provider_ref: str) -> None:
-        """Deletes a key at the provider; a key already gone is not an error."""
+        """Deletes a key at the provider, with its grants; a key already gone is not an error."""
         ...
 
 
@@ -95,30 +108,37 @@ class GarageAdapter:
         if response.status_code != 200:
             raise self._fail(response, "to create the bucket")
 
-    async def create_key(self, bucket: str, name: str) -> ProviderKey:
-        bucket_id = await self._bucket_id(bucket)
+    async def create_key(self, name: str) -> ProviderKey:
         response = await self._call("POST", "/v2/CreateKey", json={"name": name})
         if response.status_code != 200:
             raise self._fail(response, "to create a key")
         body = response.json()
-        key = ProviderKey(
+        return ProviderKey(
             access_key_id=str(body["accessKeyId"]),
             secret_key=str(body["secretAccessKey"]),
             provider_ref=str(body["accessKeyId"]),
         )
-        allowed = await self._call(
-            "POST",
-            "/v2/AllowBucketKey",
-            json={
-                "bucketId": bucket_id,
-                "accessKeyId": key.access_key_id,
-                "permissions": {"read": True, "write": True, "owner": False},
-            },
-        )
-        if allowed.status_code != 200:
-            await self.delete_key(key.provider_ref)
-            raise self._fail(allowed, "to allow the key on the bucket")
-        return key
+
+    async def set_grant(
+        self, provider_ref: str, bucket: str, grant: Grant, *, owner: bool = False
+    ) -> None:
+        bucket_id = await self._bucket_id(bucket)
+        wanted = {"read": grant != "none", "write": grant == "write", "owner": owner}
+        # Deny what must go, then allow what must be: Garage's two calls each only add or
+        # only remove the flags set to true, so the grant changes in place.
+        for path, flags in (
+            ("/v2/DenyBucketKey", {k: not v for k, v in wanted.items()}),
+            ("/v2/AllowBucketKey", wanted),
+        ):
+            if not any(flags.values()):
+                continue
+            response = await self._call(
+                "POST",
+                path,
+                json={"bucketId": bucket_id, "accessKeyId": provider_ref, "permissions": flags},
+            )
+            if response.status_code != 200:
+                raise self._fail(response, "to change the key's grant on the bucket")
 
     async def delete_key(self, provider_ref: str) -> None:
         response = await self._call("POST", "/v2/DeleteKey", params={"id": provider_ref})
@@ -133,6 +153,7 @@ class FakeAdapter:
 
     buckets: set[str] = field(default_factory=set)
     keys: dict[str, str] = field(default_factory=dict)
+    grants: dict[tuple[str, str], tuple[Grant, bool]] = field(default_factory=dict)
     deleted: list[str] = field(default_factory=list)
     down: bool = False
 
@@ -144,15 +165,29 @@ class FakeAdapter:
         self._guard()
         self.buckets.add(bucket)
 
-    async def create_key(self, bucket: str, name: str) -> ProviderKey:
+    async def create_key(self, name: str) -> ProviderKey:
         self._guard()
         access = "FAKE" + secrets.token_hex(8).upper()
-        self.keys[access] = bucket
+        self.keys[access] = name
         return ProviderKey(
             access_key_id=access, secret_key=secrets.token_urlsafe(24), provider_ref=access
         )
 
+    async def set_grant(
+        self, provider_ref: str, bucket: str, grant: Grant, *, owner: bool = False
+    ) -> None:
+        self._guard()
+        if provider_ref not in self.keys or bucket not in self.buckets:
+            raise ProviderError("no such key or bucket")
+        self.grants[(provider_ref, bucket)] = (grant, owner)
+
     async def delete_key(self, provider_ref: str) -> None:
         self._guard()
         self.keys.pop(provider_ref, None)
+        for pair in [p for p in self.grants if p[0] == provider_ref]:
+            del self.grants[pair]
         self.deleted.append(provider_ref)
+
+    def grant(self, provider_ref: str, bucket: str) -> Grant:
+        """A key's grant on a bucket, `none` when it has none."""
+        return self.grants.get((provider_ref, bucket), ("none", False))[0]

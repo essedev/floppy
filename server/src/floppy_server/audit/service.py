@@ -38,12 +38,13 @@ ACTIONS: dict[str, tuple[str, frozenset[str]]] = {
     "organization_created": ("settings", frozenset({"storageMode", "provider"})),
     "key_created": ("key", frozenset({"holder", "accessKeyTail", "for"})),
     "key_deleted": ("key", frozenset({"holder", "accessKeyTail", "by"})),
-    "key_rotation_started": ("key", frozenset({"newKeyTail", "oldKeyTail", "trigger"})),
-    "key_rotated": ("key", frozenset({"disks"})),
-    "key_rotation_failed": ("key", frozenset({"step", "code"})),
-    "key_window_closed": ("key", frozenset({"oldKeyTail", "reasons"})),
+    "key_rotation_started": ("key", frozenset({"disk", "newKeyTail", "oldKeyTail"})),
+    "key_rotated": ("key", frozenset({"disk"})),
+    "key_rotation_failed": ("key", frozenset({"disk", "step", "code"})),
+    "key_window_closed": ("key", frozenset({"disk", "oldKeyTail", "reasons"})),
     "disk_created": ("disks", frozenset({"blockSize"})),
     "disk_updated": ("disks", frozenset({"trashDays", "cacheExpireDays"})),
+    "disk_access_changed": ("disks", frozenset({"person", "from", "to"})),
     "settings_updated": ("settings", frozenset({"fields"})),
 }
 

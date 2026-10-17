@@ -18,6 +18,7 @@ from fastapi import APIRouter, FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 
 from floppy_server import background
+from floppy_server.access.router import router as access_router
 from floppy_server.audit.router import router as audit_router
 from floppy_server.auth.router import router as auth_router
 from floppy_server.config import Backend, Environment, Settings
@@ -31,6 +32,7 @@ from floppy_server.errors import install_error_handlers
 from floppy_server.health.router import router as health_router
 from floppy_server.infra.juicefs import FakeVolumeFormatter, JuiceFSFormatter
 from floppy_server.infra.mail import ConsoleMailer, SmtpMailer
+from floppy_server.infra.meta import FakeMetaService, MetaService, PoolMetaService, parse_pool
 from floppy_server.infra.metadata import FakeMetadataAdmin, ValkeyMetadataAdmin
 from floppy_server.infra.storage import FakeStorageProber, S3StorageProber
 from floppy_server.keys.router import router as keys_router
@@ -41,6 +43,18 @@ from floppy_server.settings.router import router as settings_router
 log = logging.getLogger(__name__)
 
 UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+
+
+def build_meta(settings: Settings) -> MetaService:
+    """The meta service the settings name: the pool of `FLOPPY_META_POOL`, or the fake."""
+    if settings.meta_backend == "fake":
+        return FakeMetaService()
+    password = settings.valkey_admin_password
+    return PoolMetaService(
+        parse_pool(settings.meta_pool),
+        password.get_secret_value() if password else None,
+        settings.valkey_admin_username,
+    )
 
 
 def build_context(settings: Settings) -> Context:
@@ -55,6 +69,7 @@ def build_context(settings: Settings) -> Context:
         metadata=ValkeyMetadataAdmin()
         if settings.metadata_backend is Backend.REAL
         else FakeMetadataAdmin(),
+        meta=build_meta(settings),
         formatter=JuiceFSFormatter(
             shlex.split(settings.juicefs_command), settings.juicefs_timeout_seconds
         )
@@ -122,6 +137,7 @@ def create_app(ctx: Context) -> FastAPI:
         people_router,
         devices_router,
         disks_router,
+        access_router,
         keys_router,
         audit_router,
         health_router,

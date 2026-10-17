@@ -1,10 +1,10 @@
-"""`/settings`: the organization's name, SMTP server and storage, a mail test, a storage probe (admins only)."""
+"""`/settings`: the organization's name, SMTP server and default endpoint, a mail test, a bucket probe (admins only)."""
 
 from fastapi import APIRouter, Response
 
 from floppy_server.api import AdminDep, CamelModel, CtxDep
 from floppy_server.settings import service
-from floppy_server.settings.service import SettingsOut, StorageIn, UpdateSettingsRequest
+from floppy_server.settings.service import SettingsOut, StorageProbeIn, UpdateSettingsRequest
 
 router = APIRouter(tags=["settings"])
 
@@ -23,7 +23,7 @@ async def get_settings(actor: AdminDep, ctx: CtxDep) -> SettingsOut:
 
 @router.patch("/settings", response_model=SettingsOut)
 async def update_settings(body: UpdateSettingsRequest, actor: AdminDep, ctx: CtxDep) -> SettingsOut:
-    """Changes the settings; storage only while no disk exists."""
+    """Changes the settings; the default endpoint only while no disk exists."""
     return await service.update_settings(ctx, actor, body)
 
 
@@ -34,7 +34,7 @@ async def test_mail(actor: AdminDep, ctx: CtxDep) -> MailTestResponse:
 
 
 @router.post("/settings/storage/probe", status_code=204)
-async def probe_storage(body: StorageIn, actor: AdminDep, ctx: CtxDep) -> Response:
-    """A test write with the organization's key on a bucket; nothing changes."""
+async def probe_storage(body: StorageProbeIn, actor: AdminDep, ctx: CtxDep) -> Response:
+    """A test write with a pasted bucket and key before creating a disk (manual)."""
     await service.probe_storage(ctx, actor, body)
     return Response(status_code=204)

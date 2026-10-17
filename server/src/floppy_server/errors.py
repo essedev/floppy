@@ -43,6 +43,14 @@ def unauthorized(message: str = "Not signed in") -> ApiError:
     return ApiError(401, "unauthorized", message)
 
 
+def device_unauthorized(reason: str, message: str) -> ApiError:
+    """
+    401 for a device token, with `details.reason` for the app to word it: `token_unknown`,
+    `device_revoked`, `device_signed_out` or `device_not_registered`.
+    """
+    return ApiError(401, "unauthorized", message, {"reason": reason})
+
+
 def forbidden(message: str = "Admins only") -> ApiError:
     """403: signed in, but the role does not allow it."""
     return ApiError(403, "forbidden", message)

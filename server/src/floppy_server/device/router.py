@@ -13,9 +13,8 @@ from floppy_server.device.service import (
     HeartbeatResponse,
     RegisterRequest,
     RegisterResponse,
-    S3KeyOut,
 )
-from floppy_server.errors import unauthorized
+from floppy_server.errors import device_unauthorized
 
 router = APIRouter(tags=["device"])
 bearer = HTTPBearer(auto_error=False)
@@ -24,9 +23,9 @@ bearer = HTTPBearer(auto_error=False)
 def device_token(
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)],
 ) -> str:
-    """The device token from the Authorization header, or 401."""
+    """The device token from the Authorization header, or 401 `token_unknown`."""
     if credentials is None or credentials.scheme.lower() != "bearer" or not credentials.credentials:
-        raise unauthorized("Missing device token")
+        raise device_unauthorized("token_unknown", "Missing device token")
     return credentials.credentials
 
 
@@ -35,30 +34,24 @@ TokenDep = Annotated[str, Depends(device_token)]
 
 @router.post("/device/register", response_model=RegisterResponse)
 async def register(body: RegisterRequest, token: TokenDep, ctx: CtxDep) -> RegisterResponse:
-    """Creates the Mac's Valkey user; the password comes back once."""
+    """The bootstrap: credentials (once) and the disks the device may see."""
     return await service.register(ctx, token, body)
-
-
-@router.get("/device/key", response_model=S3KeyOut)
-async def mount_key(token: TokenDep, ctx: CtxDep) -> S3KeyOut:
-    """The person's current S3 key (`person` scope), after `s3AccessKeyTail` changed."""
-    return await service.mount_key(ctx, token)
 
 
 @router.get("/device/config", response_model=DeviceConfig)
 async def config(token: TokenDep, ctx: CtxDep) -> DeviceConfig:
-    """The Valkey address and the disks to mount."""
+    """The disks the device may see, with their access and instances."""
     return await service.config(ctx, token)
 
 
 @router.post("/device/heartbeat", response_model=HeartbeatResponse)
 async def heartbeat(body: HeartbeatRequest, token: TokenDep, ctx: CtxDep) -> HeartbeatResponse:
-    """The Mac's report; the answer says whether it is still allowed."""
+    """The device's report; the answer says what it may still see."""
     return await service.heartbeat(ctx, token, body)
 
 
 @router.post("/device/sign-out", status_code=204)
 async def sign_out(token: TokenDep, ctx: CtxDep) -> Response:
-    """The Mac signs out: revoked by its owner, without opening the key window."""
+    """The device signs out: revoked by its owner, without opening a key window."""
     await service.sign_out(ctx, token)
     return Response(status_code=204)

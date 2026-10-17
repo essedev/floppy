@@ -3,8 +3,10 @@ People: invitations, resends, role changes and removal (admins only).
 
 A person in the API is a user plus their latest membership in the organization; a removed
 person stays listed. Organization-level invariants (the last admin) are checked under the
-organization's row lock. Removing a person revokes their sessions, invitations and Macs, and
-opens the key window when one of their Macs held credentials (DECISIONS #12).
+organization's row lock. An invitation may carry the disks the person will see (none by
+default, DATABASE_SCHEMA.md "Access per disk"). Removing a person revokes their sessions,
+invitations and devices; in manual mode it opens the key window of each disk their devices
+could see (DECISIONS #12, #18).
 """
 
 from datetime import datetime
@@ -17,22 +19,21 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
 from floppy_server import mailtext
+from floppy_server.access.service import DiskEntry, put_access
 from floppy_server.api import Actor, CamelModel
 from floppy_server.audit.service import AuditActor, Target, record
 from floppy_server.auth.service import INVITATION_TTL, mail_language, send_mail
 from floppy_server.context import Context, utcnow
 from floppy_server.crypto import new_token, token_hash
-from floppy_server.devices.service import delete_valkey_users, retire_reached_keys, revoke_rows
+from floppy_server.devices.service import finish_revocation, revoke_devices
 from floppy_server.errors import ApiError, invalid_state, not_found, validation
-from floppy_server.infra.juicefs import S3Credentials
-from floppy_server.keys import scoped
-from floppy_server.keys.service import open_exposure
 from floppy_server.models import (
     Device,
     Invitation,
     Membership,
     Organization,
     User,
+    Volume,
     WebSession,
     lock_organization,
 )
@@ -121,7 +122,7 @@ async def _people(
             email=user.email,
             role=m.role,
             status=m.status,
-            device_count=macs,
+            device_count=devices,
             last_sign_in_at=user.last_sign_in_at,
             invited_at=sent_at,
             invited_by=(inv.name or inv.email) if inv is not None else None,
@@ -129,7 +130,7 @@ async def _people(
             removed_at=m.removed_at,
             is_me=user.id == me,
         )
-        for user, m, sent_at, expires_at, inv, macs in rows
+        for user, m, sent_at, expires_at, inv, devices in rows
     ]
     order = {"active": 0, "invited": 1, "removed": 2}
     return sorted(people, key=lambda p: (order[p.status], (p.name or p.email).lower()))
@@ -224,31 +225,15 @@ async def _invite_mail(
     await send_mail(ctx, db, mail, org)
 
 
-async def _check_key_for(ctx: Context, org: Organization, key: S3Credentials | None) -> None:
-    """A pasted person key is wanted exactly in manual `person` scope, and probed first."""
-    pasted = org.storage_mode == "manual" and org.storage_key_scope == "person"
-    if pasted and key is None:
-        raise validation("This organization gives each person a key: paste it", {"field": "key"})
-    if not pasted and key is not None:
-        raise validation("This organization takes no pasted person keys", {"field": "key"})
-    if key is not None:
-        await scoped.probe(ctx, org, key, "person")
-
-
 async def invite(
-    ctx: Context, actor: Actor, email: str, role: Role, key: S3Credentials | None = None
+    ctx: Context, actor: Actor, email: str, role: Role, disks: list[DiskEntry] | None = None
 ) -> PersonOut:
     """
-    Invites an address: a user if new, an `invited` membership, an invitation and its mail.
-    With `person` keys, the person's key too: pasted and probed (manual) or created (managed).
+    Invites an address: a user if new, an `invited` membership with the access to the listed
+    disks (none elsewhere), an invitation and its mail.
     """
     address = email.strip().lower()
     now = utcnow()
-    async with ctx.sessions() as db:
-        org_now = await db.get(Organization, actor.organization_id)
-    if org_now is None:
-        raise not_found()
-    await _check_key_for(ctx, org_now, key)
     async with ctx.sessions() as db, db.begin():
         org = await db.get(Organization, actor.organization_id)
         if org is None:
@@ -286,15 +271,26 @@ async def invite(
         )
         db.add(membership)
         await db.flush()
-        if org.storage_key_scope == "person":
-            await scoped.add_person_key(
-                ctx,
+        for entry in disks or []:
+            volume = (
+                await db.execute(
+                    select(Volume).where(
+                        Volume.organization_id == org.id,
+                        Volume.id == entry.disk_id,
+                        Volume.deleted_at.is_(None),
+                    )
+                )
+            ).scalar_one_or_none()
+            if volume is None:
+                raise validation("No such disk", {"field": "disks", "diskId": str(entry.disk_id)})
+            await put_access(
                 db,
-                org,
-                membership,
-                address,
-                AuditActor.person(actor.user_id, actor.label),
-                key,
+                org.id,
+                volume,
+                membership.id,
+                entry.access,
+                actor=AuditActor.person(actor.user_id, actor.label),
+                person_label=address,
             )
         await _invite_mail(ctx, db, org, membership, user, actor, now)
         record(
@@ -307,35 +303,6 @@ async def invite(
         )
         user_id = user.id
     return await get_person(ctx, actor, user_id)
-
-
-async def replace_key(ctx: Context, actor: Actor, user_id: UUID, key: S3Credentials) -> None:
-    """
-    Manual `person` scope: the admin pastes a person's new key, probed first; the old one goes
-    `retiring` until the admin confirms its deletion at the provider.
-    """
-    async with ctx.sessions() as db:
-        org = await db.get(Organization, actor.organization_id)
-    if org is None:
-        raise not_found()
-    if org.storage_mode != "manual" or org.storage_key_scope != "person":
-        raise invalid_state("Only a manual organization with person keys takes a pasted key")
-    await scoped.probe(ctx, org, key, "person")
-    async with ctx.sessions() as db, db.begin():
-        org_row = await db.get(Organization, actor.organization_id)
-        membership = await _live_membership(db, actor.organization_id, user_id)
-        user = await db.get(User, user_id)
-        if org_row is None or membership is None or user is None:
-            raise not_found("No such person")
-        await scoped.add_person_key(
-            ctx,
-            db,
-            org_row,
-            membership,
-            user.name or user.email,
-            AuditActor.person(actor.user_id, actor.label),
-            key,
-        )
 
 
 async def resend(ctx: Context, actor: Actor, user_id: UUID) -> PersonOut:
@@ -391,9 +358,10 @@ async def change_role(ctx: Context, actor: Actor, user_id: UUID, role: Role) -> 
 
 async def remove(ctx: Context, actor: Actor, user_id: UUID) -> tuple[PersonOut, int]:
     """
-    Removes a person: membership `removed`, invitations revoked, sessions ended, Macs revoked
-    (`member_removed`), and one key exposure if a Mac had credentials. Returns the person and
-    how many Macs were revoked.
+    Removes a person: membership `removed`, invitations revoked, sessions ended, devices
+    revoked (`member_removed`); in manual mode one exposure per disk their devices could see,
+    in managed mode their devices' keys deleted. Returns the person and how many devices were
+    revoked.
     """
     now = utcnow()
     async with ctx.sessions() as db, db.begin():
@@ -446,21 +414,18 @@ async def remove(ctx: Context, actor: Actor, user_id: UUID) -> tuple[PersonOut, 
                 )
             ).scalars()
         )
-        exposed = revoke_rows(db, devices, reason="member_removed", actor=who, now=now)
         org = await db.get(Organization, actor.organization_id)
         if org is None:
             raise not_found()
-        await retire_reached_keys(ctx, db, org, devices, "member_removed")
-        if org.storage_key_scope == "person":
-            await scoped.retire_keys(db, org.id, membership_id=membership.id)
-        if exposed and org.storage_key_scope == "team":
-            open_exposure(
-                db,
-                actor.organization_id,
-                kind="person_removed",
-                label=label,
-                membership_id=membership.id,
-            )
+        await revoke_devices(
+            db,
+            org,
+            devices,
+            reason="member_removed",
+            actor=who,
+            now=now,
+            person=(membership.id, label),
+        )
         record(
             db,
             actor.organization_id,
@@ -470,6 +435,5 @@ async def remove(ctx: Context, actor: Actor, user_id: UUID) -> tuple[PersonOut, 
             {"devices": len(devices)},
         )
         device_ids = [d.id for d in devices]
-    await delete_valkey_users(ctx, actor.organization_id, device_ids)
-    await scoped.delete_owed_keys(ctx, actor.organization_id)
+    await finish_revocation(ctx, actor.organization_id, device_ids)
     return await get_person(ctx, actor, user_id), len(device_ids)

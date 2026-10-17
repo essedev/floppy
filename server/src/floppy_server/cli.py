@@ -7,8 +7,9 @@
     floppy-server reconcile                     # one pass of housekeeping and the ACL reconciler
     floppy-server reencrypt                     # re-seal stored secrets with the newest key
 
-Secrets never come from arguments, which `ps` shows: the bootstrap's S3 secret key is read
-from `FLOPPY_BOOTSTRAP_S3_SECRET_KEY` or, with `--secret-key-stdin`, from standard input.
+Secrets never come from arguments, which `ps` shows: the bootstrap's adapter credentials come
+from `FLOPPY_BOOTSTRAP_STORAGE_ADMIN_CREDENTIALS` or the instance's environment. A manual
+organization starts with no S3 key: each disk brings its own.
 """
 
 import argparse
@@ -16,7 +17,6 @@ import asyncio
 import json
 import logging
 import os
-import sys
 from pathlib import Path
 
 import uvicorn
@@ -64,12 +64,6 @@ async def _bootstrap(settings: Settings, args: argparse.Namespace) -> int:
             log.info("bootstrap: the organization exists already")
             return 0
         mode = _env("STORAGE_MODE", required=False) or "manual"
-        manual = mode == "manual"
-        secret = ""
-        if manual:
-            secret = (
-                sys.stdin.readline().strip() if args.secret_key_stdin else _env("S3_SECRET_KEY")
-            )
         admin_credentials = _env("STORAGE_ADMIN_CREDENTIALS", required=False)
         data = BootstrapInput(
             organization_name=_env("ORGANIZATION_NAME"),
@@ -77,16 +71,9 @@ async def _bootstrap(settings: Settings, args: argparse.Namespace) -> int:
             admin_email=_env("ADMIN_EMAIL"),
             s3_endpoint=_env("S3_ENDPOINT"),
             s3_region=_env("S3_REGION", required=False),
-            s3_bucket=_env("S3_BUCKET"),
-            s3_access_key_id=_env("S3_ACCESS_KEY_ID", required=manual),
-            s3_secret_key=secret,
-            valkey_url=_env("VALKEY_URL"),
-            valkey_admin_url=_env("VALKEY_ADMIN_URL", required=False) or None,
-            valkey_databases=int(_env("VALKEY_DATABASES", required=False) or 16),
             mail_language=_env("MAIL_LANGUAGE", required=False) or "it",
             storage_mode=mode,
             storage_provider=_env("STORAGE_PROVIDER", required=False) or None,
-            storage_key_scope=_env("KEY_SCOPE", required=False) or "team",
             storage_admin_credentials=json.loads(admin_credentials) if admin_credentials else None,
         )
         try:
@@ -153,9 +140,6 @@ def main(argv: list[str] | None = None) -> int:
     )
     boot.add_argument(
         "--if-needed", action="store_true", help="do nothing when an organization exists"
-    )
-    boot.add_argument(
-        "--secret-key-stdin", action="store_true", help="read the S3 secret key from stdin"
     )
     run = sub.add_parser("serve", help="serve the API")
     run.add_argument("--host", default="127.0.0.1")

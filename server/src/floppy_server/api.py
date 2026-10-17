@@ -24,7 +24,6 @@ from floppy_server.errors import forbidden, unauthorized
 from floppy_server.models import Membership, Organization, User, WebSession
 from floppy_server.ratelimit import rate_limited
 
-SESSION_COOKIE = "floppy_session"
 LAST_SEEN_EVERY = timedelta(minutes=5)
 
 
@@ -81,7 +80,7 @@ CtxDep = Annotated[Context, Depends(get_context)]
 
 async def current_actor(request: Request, ctx: CtxDep) -> Actor:
     """The session's person, or 401 when the cookie is missing, expired, revoked or orphaned."""
-    token = request.cookies.get(SESSION_COOKIE)
+    token = request.cookies.get(ctx.settings.session_cookie)
     if not token:
         raise unauthorized()
     now = utcnow()

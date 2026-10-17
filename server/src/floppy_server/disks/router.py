@@ -1,12 +1,13 @@
-"""`/disks`: list, create, update (admins only)."""
+"""`/disks`: list, create, update, probe (admins only)."""
 
 from uuid import UUID
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Response
 
 from floppy_server.api import AdminDep, CtxDep
 from floppy_server.disks import service
 from floppy_server.disks.service import CreateDiskRequest, DiskOut, UpdateDiskRequest
+from floppy_server.keys.service import probe_disk
 
 router = APIRouter(tags=["disks"])
 
@@ -35,3 +36,10 @@ async def update_disk(
 ) -> DiskOut:
     """Changes trash days or the cache expiry."""
     return await service.update_disk(ctx, actor, disk_id, body)
+
+
+@router.post("/disks/{disk_id}/probe", status_code=204)
+async def probe(disk_id: UUID, actor: AdminDep, ctx: CtxDep) -> Response:
+    """A test write on the disk's bucket; the result also lands in its storage status."""
+    await probe_disk(ctx, actor.organization_id, disk_id)
+    return Response(status_code=204)

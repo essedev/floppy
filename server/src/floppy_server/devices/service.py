@@ -1,11 +1,11 @@
 """
-Macs (devices): the list, revocation, and removing their Valkey users.
+Devices: the list, revocation, and what a revocation owes outside PostgreSQL.
 
 Revocation is durable before it is effective (docs/DATABASE_SCHEMA.md, "devices"): the
-`revoked` state is committed first, then the Mac's ACL user is deleted and its connections
-killed. When Valkey does not answer, `valkey_user_deleted_at` stays null and the reconciler
-finishes the job; the Mac cannot write meanwhile only if Valkey is down too, which is the
-same outage.
+`revoked` state and the device's users set to `none` on every disk's instance are committed
+first, then each user is deleted and its connections killed; an instance that does not answer
+keeps its row owed for the reconciler. In manual mode each disk the device could see opens
+its key window; in managed mode the device's own key is deleted at the provider.
 """
 
 import logging
@@ -14,18 +14,17 @@ from datetime import datetime, timedelta
 from typing import Literal
 from uuid import UUID
 
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
+from floppy_server.access.service import apply_owed, could_see, open_exposure, sync
 from floppy_server.api import Actor, CamelModel
 from floppy_server.audit.service import AuditActor, DetailValue, Target, record
 from floppy_server.context import Context, utcnow
 from floppy_server.errors import invalid_state, not_found
-from floppy_server.infra.metadata import MetadataUnavailableError
-from floppy_server.keys import scoped
-from floppy_server.keys.service import open_exposure
-from floppy_server.models import Device, DeviceStatus, Membership, Organization, User
+from floppy_server.keys.managed import delete_owed_keys, retire_device_keys
+from floppy_server.models import Device, DeviceStatus, Organization, User
 
 log = logging.getLogger(__name__)
 
@@ -33,21 +32,21 @@ CONNECTED_WITHIN = timedelta(minutes=2)
 
 
 class DeviceOwner(CamelModel):
-    """Whose Mac it is."""
+    """Whose device it is."""
 
     id: UUID
     name: str
 
 
 class Replica(CamelModel):
-    """Where the Mac's JuiceFS reads metadata from, as its last heartbeat says."""
+    """Where the device's JuiceFS reads metadata from, as its last heartbeat says."""
 
     mode: Literal["replica", "master", "offline"]
     lag_ms: int | None
 
 
 class DeviceOut(CamelModel):
-    """A Mac, as the admin web lists it."""
+    """A device, as the admin web lists it."""
 
     id: UUID
     name: str
@@ -76,7 +75,7 @@ def version_tuple(version: str) -> tuple[int, ...]:
 
 
 def is_outdated(app_version: str | None, latest: str) -> bool:
-    """Whether a Mac runs an app older than the latest release this instance knows."""
+    """Whether a device runs an app older than the latest release this instance knows."""
     return bool(app_version) and version_tuple(app_version or "") < version_tuple(latest)
 
 
@@ -114,7 +113,7 @@ def device_view(
 
 
 async def list_devices(ctx: Context, actor: Actor) -> list[DeviceOut]:
-    """Every Mac of the organization for an admin; only the caller's own for a member."""
+    """Every device of the organization for an admin; only the caller's own for a member."""
     owner, revoker = aliased(User), aliased(User)
     query = (
         select(Device, owner, DeviceStatus, revoker)
@@ -131,13 +130,13 @@ async def list_devices(ctx: Context, actor: Actor) -> list[DeviceOut]:
         query = query.where(Device.user_id == actor.user_id)
     async with ctx.sessions() as db:
         rows = (await db.execute(query)).all()
-    macs = [device_view(d, o, s, r, ctx.settings.latest_app_version) for d, o, s, r in rows]
+    devices = [device_view(d, o, s, r, ctx.settings.latest_app_version) for d, o, s, r in rows]
     order = {"active": 0, "pending": 1, "revoked": 2}
-    return sorted(macs, key=lambda m: (order[m.state], not m.connected, m.name.lower()))
+    return sorted(devices, key=lambda d: (order[d.state], not d.connected, d.name.lower()))
 
 
 async def get_device(ctx: Context, organization_id: UUID, device_id: UUID) -> DeviceOut:
-    """One Mac with its status."""
+    """One device with its status."""
     owner, revoker = aliased(User), aliased(User)
     async with ctx.sessions() as db:
         row = (
@@ -167,15 +166,9 @@ def revoke_rows(
     actor: AuditActor,
     now: datetime,
     audit_action: str = "device_revoked",
-) -> list[Device]:
-    """
-    Marks devices revoked and logs each; returns those that held Valkey credentials, which
-    are the ones that could have read the S3 key.
-    """
-    exposed: list[Device] = []
+) -> None:
+    """Marks devices revoked and logs each."""
     for device in devices:
-        if device.state == "active" or device.valkey_password_sha256 is not None:
-            exposed.append(device)
         device.state = "revoked"
         device.revoked_at = now
         device.revoke_reason = reason
@@ -191,81 +184,60 @@ def revoke_rows(
             Target("device", device.id, device.name),
             detail,
         )
-    return exposed
 
 
-async def delete_valkey_users(
+async def revoke_devices(
+    db: AsyncSession,
+    org: Organization,
+    devices: Sequence[Device],
+    *,
+    reason: str,
+    actor: AuditActor,
+    now: datetime,
+    audit_action: str = "device_revoked",
+    person: tuple[UUID, str] | None = None,
+) -> None:
+    """
+    Revokes devices in the caller's transaction, with what it owes outside: their users set to
+    `none` on every instance, and the key window of each disk they could see (manual, one
+    exposure per device, or one per disk for a person's removal given in `person`; none when
+    the device only signed out) or their own keys retiring (managed). The caller applies the
+    owed work after the commit (`finish_revocation`).
+    """
+    seen = await could_see(db, org.id, [d.id for d in devices])
+    revoke_rows(db, devices, reason=reason, actor=actor, now=now, audit_action=audit_action)
+    if org.storage_mode == "manual" and reason != "signed_out":
+        for volume_id, device_ids in seen.items():
+            if person is not None:
+                open_exposure(
+                    db, org.id, volume_id, kind="person_removed", label=person[1],
+                    membership_id=person[0],
+                )  # fmt: skip
+                continue
+            for device in devices:
+                if device.id in device_ids:
+                    open_exposure(
+                        db, org.id, volume_id, kind="device_revoked", label=device.name,
+                        device_id=device.id,
+                    )  # fmt: skip
+    if org.storage_mode == "managed":
+        for device in devices:
+            await retire_device_keys(db, org.id, device.id)
+    await db.flush()
+    await sync(db, org.id, device_ids=[d.id for d in devices])
+
+
+async def finish_revocation(
     ctx: Context, organization_id: UUID, device_ids: Sequence[UUID]
 ) -> None:
-    """
-    Deletes revoked Macs' ACL users and kills their connections, then records it. A Valkey
-    that does not answer leaves the cleanup to the reconciler.
-    """
-    if not device_ids:
-        return
-    async with ctx.sessions() as db:
-        org = await db.get(Organization, organization_id)
-        devices = list(
-            (
-                await db.execute(
-                    select(Device).where(
-                        Device.organization_id == organization_id, Device.id.in_(device_ids)
-                    )
-                )
-            ).scalars()
-        )
-    if org is None:
-        return
-    target = ctx.valkey_target(org)
-    done: list[UUID] = []
-    for device in devices:
-        try:
-            await ctx.metadata.delete_device_user(target, device.valkey_username)
-        except MetadataUnavailableError as error:
-            log.warning("Valkey cleanup of a revoked Mac postponed to the reconciler: %s", error)
-            continue
-        done.append(device.id)
-    if done:
-        async with ctx.sessions() as db, db.begin():
-            await db.execute(
-                update(Device)
-                .where(Device.organization_id == organization_id, Device.id.in_(done))
-                .values(valkey_user_deleted_at=utcnow())
-            )
-
-
-async def retire_reached_keys(
-    ctx: Context, db: AsyncSession, org: Organization, devices: Sequence[Device], reason: str
-) -> None:
-    """
-    What a revocation does to S3 beyond the team key's window (DATABASE_SCHEMA.md, "Mac
-    enrolment and revocation"): with `device` scope each Mac's own key goes `retiring`; with
-    `person` scope the person's key does, except when the Mac only signed out, and a managed
-    organization replaces it at once for the person's other Macs.
-    """
-    scope = org.storage_key_scope
-    if scope == "device":
-        for device in devices:
-            await scoped.retire_keys(db, org.id, device_id=device.id)
-    elif scope == "person" and reason not in ("signed_out", "member_removed"):
-        for membership_id in {d.membership_id for d in devices}:
-            if not await scoped.retire_keys(db, org.id, membership_id=membership_id):
-                continue
-            if org.storage_mode == "managed":
-                label = await scoped.owner_label(db, membership_id)
-                membership = await db.get(Membership, membership_id)
-                if membership is not None:
-                    await scoped.add_person_key(
-                        ctx, db, org, membership, label, AuditActor.system(), None
-                    )
+    """After the commit: the users deleted on each instance, the keys at the provider."""
+    if device_ids:
+        await apply_owed(ctx, organization_id, device_ids=device_ids)
+    await delete_owed_keys(ctx, organization_id)
 
 
 async def revoke_device(ctx: Context, actor: Actor, device_id: UUID) -> None:
-    """
-    Revokes a Mac: an admin any, a member only their own (reason `owner`, a lost Mac). With a
-    team key a Mac that held credentials opens the key window; with person or device keys the
-    key it reached goes `retiring` instead.
-    """
+    """Revokes a device: an admin any, a member only their own (reason `owner`, a lost device)."""
     now = utcnow()
     async with ctx.sessions() as db, db.begin():
         query = select(Device).where(
@@ -284,21 +256,12 @@ async def revoke_device(ctx: Context, actor: Actor, device_id: UUID) -> None:
         org = await db.get(Organization, actor.organization_id)
         if org is None:
             raise not_found()
-        exposed = revoke_rows(
+        await revoke_devices(
             db,
+            org,
             [device],
             reason=reason,
             actor=AuditActor.person(actor.user_id, actor.label),
             now=now,
         )
-        if exposed and org.storage_key_scope == "team":
-            open_exposure(
-                db,
-                actor.organization_id,
-                kind="device_revoked",
-                label=device.name,
-                device_id=device.id,
-            )
-        await retire_reached_keys(ctx, db, org, [device], reason)
-    await delete_valkey_users(ctx, actor.organization_id, [device_id])
-    await scoped.delete_owed_keys(ctx, actor.organization_id)
+    await finish_revocation(ctx, actor.organization_id, [device_id])

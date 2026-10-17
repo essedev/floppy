@@ -126,14 +126,18 @@ class Settings(BaseSettings):
     juicefs_timeout_seconds: float = 120.0
     storage_timeout_seconds: float = 15.0
 
-    # Valkey admin credentials for self-hosted instances (organizations may carry their own).
+    # The meta service that gives each disk its own Valkey instance (DECISIONS #25): `pool`
+    # hands out a fixed list of instances (`meta_pool`, comma-separated `url` or
+    # `url|admin_url`), all with the admin credentials below; `fake` invents them.
+    meta_backend: Literal["pool", "fake"] = "pool"
+    meta_pool: str = ""
     valkey_admin_username: str | None = None
     valkey_admin_password: SecretStr | None = None
 
     # Self-hosted: one organization, refused after the first.
     single_organization: bool = True
 
-    # The app release Macs are compared against for `appOutdated`.
+    # The app release devices are compared against for `appOutdated`.
     latest_app_version: str = "0.1.0"
 
     # Background loops: rotation worker, ACL reconciler, status pollers.
@@ -179,6 +183,8 @@ class Settings(BaseSettings):
                 )
                 if backend is Backend.FAKE
             ]
+            if self.meta_backend == "fake":
+                fakes.append("meta")
             if fakes:
                 raise ValueError(f"fake backends are for development and tests only: {fakes}")
         if not self.public_url.startswith(("http://", "https://")):
@@ -211,6 +217,15 @@ class Settings(BaseSettings):
             for name, limits in rules.items()
             if (kept := tuple(item for item in limits if item.count > 0))
         }
+
+    @property
+    def session_cookie(self) -> str:
+        """
+        The session cookie's name: `__Host-` when the cookie is Secure, so no subdomain (the
+        disks' `*.meta.<domain>`) can set or overwrite it; browsers refuse that prefix without
+        Secure, so plain http in development keeps the plain name.
+        """
+        return "__Host-floppy_session" if self.cookie_secure else "floppy_session"
 
     @property
     def public_origin(self) -> str:

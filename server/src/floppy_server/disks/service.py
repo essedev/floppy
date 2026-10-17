@@ -1,37 +1,53 @@
 """
-Disks (volumes): the list, creation with `juicefs format`, and the two settings that change
-later (trash days through `juicefs config`, the cache expiry at the next mount).
+Disks (volumes): the list, creation with its own instance, bucket and format, the two settings
+that change later (trash days through `juicefs config`, the cache expiry at the next mount),
+and a probe of the disk's bucket.
 
-Creating a disk (docs/DATABASE_SCHEMA.md, "volumes"): under the organization's lock the
-lowest Valkey database never used is allocated, JuiceFS's name is derived from the display
-name, and the row is inserted as `creating`; the answer goes back at once. The format is a
-job: `run_disk_formats` (the worker) takes `creating` rows with `SKIP LOCKED` and makes them
-`ready`, or `failed` and soft deleted with their database number and prefix burned, since a
-half-written format is never reused. A disk is never created while a rotation applies, so
-it cannot end up on a key the rotation already left behind.
+Creating a disk (docs/DATABASE_SCHEMA.md, "volumes"): under the organization's lock the name
+and the bucket are checked, JuiceFS's name is derived from the display name, and the row is
+inserted as `creating` with its key (manual, probed first) and the access the request carries;
+the answer goes back at once. The rest is a job: `run_disk_formats` takes `creating` rows with
+`SKIP LOCKED`, asks the meta service for the disk's instance, creates the bucket (managed),
+runs `juicefs format` and makes the disk `ready`, then gives the devices that may see it their
+users and grants. A failed step makes it `failed` and soft deleted, its key rejected and its
+instance wiped: a half-written format is never reused.
 """
 
 import logging
 import re
 from datetime import datetime, timedelta
-from typing import Literal
-from uuid import UUID
+from typing import Annotated, Literal
+from uuid import UUID, uuid7
 
-from pydantic import Field
+from pydantic import Field, StringConstraints
 from sqlalchemy import any_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from floppy_server.access.service import AccessEntry, apply_owed, put_access, sync
 from floppy_server.api import Actor, CamelModel
 from floppy_server.audit.service import AuditActor, DetailValue, Target, record
 from floppy_server.context import Context, utcnow
-from floppy_server.errors import ApiError, invalid_state, not_found
-from floppy_server.infra.juicefs import FormatError
-from floppy_server.keys.service import active_key, rotation_in_progress
+from floppy_server.errors import ApiError, invalid_state, not_found, validation
+from floppy_server.infra.juicefs import FormatError, S3Credentials
+from floppy_server.infra.meta import MetaServiceError, device_meta_url
+from floppy_server.infra.providers import ProviderError
+from floppy_server.keys.managed import control_plane_key
+from floppy_server.keys.schemas import S3KeyIn
+from floppy_server.keys.service import (
+    instance_of,
+    new_key_row,
+    probe,
+    probe_failed,
+    record_probe,
+    storage_key,
+)
 from floppy_server.models import (
     Device,
     DeviceStatus,
-    KeyRotation,
+    Membership,
+    MetaInstance,
     Organization,
+    S3Key,
     User,
     Volume,
     VolumeStatus,
@@ -43,13 +59,17 @@ log = logging.getLogger(__name__)
 CONNECTED_WITHIN = timedelta(minutes=2)
 BLOCK_SIZE_KB = 1024  # DECISIONS #15
 MOUNT_ROOT = "/Volumes/Floppy"
-# The folder in /Volumes/Floppy (DATABASE_SCHEMA.md, "Disks on a Mac").
+# The folder in /Volumes/Floppy (DATABASE_SCHEMA.md, "Disks on a device").
 DISK_NAME_PATTERN = r"^[A-Za-z0-9]([A-Za-z0-9 ._-]{0,58}[A-Za-z0-9])?$"
 VOLUME_NAME = re.compile(r"[a-z0-9][a-z0-9-]{1,61}[a-z0-9]")
+# S3 bucket names: 3-63 characters, lowercase letters, digits, dots and hyphens.
+BUCKET_PATTERN = r"^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$"
+
+Text = Annotated[str, StringConstraints(strip_whitespace=True, max_length=255)]
 
 
 class CachePolicy(CamelModel):
-    """The cache option every Mac mounting the disk gets: only the expiry."""
+    """The cache option every device mounting the disk gets: only the expiry."""
 
     expire_days: int = Field(ge=1, le=365)
 
@@ -73,7 +93,7 @@ class DiskOut(CamelModel):
     bucket: str
     region: str
     endpoint: str
-    meta_db: int
+    meta_url: str | None
     block_size_kb: int
     trash_days: int
     trash_bytes: int
@@ -86,11 +106,24 @@ class DiskOut(CamelModel):
     created_by: str
 
 
+class DiskStorageIn(S3KeyIn):
+    """Manual mode: the disk's own bucket and its key, made by the admin at the provider."""
+
+    endpoint: Text = ""
+    region: Text = ""
+    bucket: str = Field(pattern=BUCKET_PATTERN)
+
+
 class CreateDiskRequest(CamelModel):
-    """A new disk: its name, which is its folder on every Mac, and the trash retention."""
+    """
+    A new disk: its name (its folder on every device), the trash retention, its bucket and key
+    in manual mode, and who may see it (the creator gets `write` unless listed).
+    """
 
     name: str = Field(pattern=DISK_NAME_PATTERN)
     trash_days: int = Field(default=7, ge=0, le=365)
+    storage: DiskStorageIn | None = None
+    access: list[AccessEntry] = Field(default_factory=list, max_length=500)
 
 
 class UpdateDiskRequest(CamelModel):
@@ -105,11 +138,9 @@ def disk_name_taken() -> ApiError:
     return ApiError(409, "disk_name_taken", "Name already in use")
 
 
-def disk_limit_reached(limit: int) -> ApiError:
-    """409: every Valkey database of the instance is taken (database 0 stays empty)."""
-    return ApiError(
-        409, "disk_limit_reached", "No Valkey database left for a new disk", {"limit": limit}
-    )
+def bucket_taken() -> ApiError:
+    """409: another disk uses this bucket; each disk has its own (DECISIONS #23)."""
+    return ApiError(409, "bucket_taken", "Another disk uses this bucket", {"field": "bucket"})
 
 
 def format_failed(message: str) -> ApiError:
@@ -118,8 +149,13 @@ def format_failed(message: str) -> ApiError:
 
 
 def mount_path(name: str) -> str:
-    """Where a disk appears on every Mac: a folder of the one share."""
+    """Where a disk appears on every device: a folder of the one share."""
     return f"{MOUNT_ROOT}/{name}"
+
+
+def managed_bucket(volume_id: UUID) -> str:
+    """The bucket the adapter creates for a disk: unique forever with the disk's id."""
+    return f"floppy-{volume_id.hex}"
 
 
 def derive_volume_name(name: str, taken: set[str]) -> str:
@@ -160,11 +196,17 @@ async def _disks(
         .scalar_subquery()
     )
     query = (
-        select(Volume, VolumeStatus, User, mounted)
+        select(Volume, VolumeStatus, User, MetaInstance.url, mounted)
         .outerjoin(
             VolumeStatus,
             (VolumeStatus.volume_id == Volume.id)
             & (VolumeStatus.organization_id == Volume.organization_id),
+        )
+        .outerjoin(
+            MetaInstance,
+            (MetaInstance.volume_id == Volume.id)
+            & (MetaInstance.organization_id == Volume.organization_id)
+            & (MetaInstance.state == "ready"),
         )
         .join(User, User.id == Volume.created_by_user_id)
         .where(Volume.organization_id == organization_id)
@@ -190,7 +232,7 @@ async def _disks(
             bucket=v.s3_bucket,
             region=v.s3_region,
             endpoint=v.s3_endpoint,
-            meta_db=v.meta_db,
+            meta_url=device_meta_url(url) if url else None,
             block_size_kb=v.block_size_kb,
             trash_days=v.trash_days,
             trash_bytes=status.trash_bytes if status else 0,
@@ -202,7 +244,7 @@ async def _disks(
             created_at=v.created_at,
             created_by=creator.name or creator.email,
         )
-        for v, status, creator, count in rows
+        for v, status, creator, url, count in rows
     ]
 
 
@@ -221,55 +263,73 @@ async def get_disk(ctx: Context, organization_id: UUID, volume_id: UUID) -> Disk
     return disks[0]
 
 
-async def _free_meta_db(db: AsyncSession, org: Organization) -> int | None:
-    """The lowest database number never used by any disk, deleted ones included."""
-    used = set(
-        (await db.execute(select(Volume.meta_db).where(Volume.organization_id == org.id))).scalars()
-    )
-    return next((n for n in range(1, org.valkey_databases) if n not in used), None)
+def _storage_of(org: Organization, body: CreateDiskRequest) -> tuple[str, str, str | None]:
+    """The new disk's endpoint, region and, manual, bucket; the request fits the mode."""
+    if org.storage_mode == "managed":
+        if body.storage is not None:
+            raise validation(
+                "The provider creates each disk's bucket: send no storage", {"field": "storage"}
+            )
+        return org.s3_endpoint, org.s3_region, None
+    if body.storage is None:
+        raise validation("Each disk has its own bucket and key: paste them", {"field": "storage"})
+    storage = body.storage
+    return storage.endpoint or org.s3_endpoint, storage.region or org.s3_region, storage.bucket
 
 
 async def create_disk(ctx: Context, actor: Actor, body: CreateDiskRequest) -> DiskOut:
-    """Records a new disk as `creating`; the worker formats it."""
-    name = body.name
+    """Records a new disk as `creating` (manual: its pasted key probed first); the job does the rest."""
+    async with ctx.sessions() as db:
+        org_now = await db.get(Organization, actor.organization_id)
+    if org_now is None:
+        raise not_found()
+    endpoint, region, bucket = _storage_of(org_now, body)
+    pasted: S3Credentials | None = None
+    if body.storage is not None and bucket is not None:
+        pasted = S3Credentials(body.storage.access_key_id.strip(), body.storage.secret_key)
+        result = await probe(
+            ctx, endpoint=endpoint, region=region, bucket=bucket, key=pasted, label="disk"
+        )
+        if not result.ok:
+            raise probe_failed(result.code, result.request)
+    who = AuditActor.person(actor.user_id, actor.label)
     async with ctx.sessions() as db, db.begin():
         await lock_organization(db, actor.organization_id)
         org = await db.get(Organization, actor.organization_id)
         if org is None:
             raise not_found()
-        applying = await db.scalar(
-            select(func.count()).where(
-                KeyRotation.organization_id == org.id, KeyRotation.state == "applying"
-            )
-        )
-        if applying:
-            raise rotation_in_progress()
         if await db.scalar(
             select(func.count()).where(
                 Volume.organization_id == org.id,
-                func.lower(Volume.name) == name.lower(),
+                func.lower(Volume.name) == body.name.lower(),
                 Volume.deleted_at.is_(None),
             )
         ):
             raise disk_name_taken()
-        if await active_key(db, org.id) is None:
-            raise invalid_state("The organization has no active S3 key")
-        meta_db = await _free_meta_db(db, org)
-        if meta_db is None:
-            raise disk_limit_reached(org.valkey_databases - 1)
+        if org.storage_mode == "managed" and await control_plane_key(db, org.id) is None:
+            raise invalid_state("The organization has no control-plane key")
+        volume_id = uuid7()
+        bucket = bucket or managed_bucket(volume_id)
+        if await db.scalar(
+            select(func.count()).where(
+                Volume.s3_endpoint == endpoint, Volume.s3_bucket == bucket, Volume.state != "failed"
+            )
+        ):
+            raise bucket_taken()
+        people = await _access_entries(db, org.id, actor, body.access)
         taken = set(
             (
                 await db.execute(select(Volume.volume_name).where(Volume.organization_id == org.id))
             ).scalars()
         )
         volume = Volume(
+            id=volume_id,
             organization_id=org.id,
-            name=name,
-            volume_name=derive_volume_name(name, taken),
-            s3_endpoint=org.s3_endpoint,
-            s3_region=org.s3_region,
-            s3_bucket=org.s3_bucket,
-            meta_db=meta_db,
+            name=body.name,
+            volume_name=derive_volume_name(body.name, taken),
+            s3_endpoint=endpoint,
+            s3_region=region,
+            s3_bucket=bucket,
             block_size_kb=BLOCK_SIZE_KB,
             trash_days=body.trash_days,
             created_by_user_id=actor.user_id,
@@ -278,22 +338,86 @@ async def create_disk(ctx: Context, actor: Actor, body: CreateDiskRequest) -> Di
         await db.flush()
         db.add(VolumeStatus(volume_id=volume.id, organization_id=org.id))
         record(
-            db,
-            org.id,
-            "disk_created",
-            AuditActor.person(actor.user_id, actor.label),
-            Target("disk", volume.id, name),
+            db, org.id, "disk_created", who, Target("disk", volume.id, body.name),
             {"blockSize": "1 MB"},
-        )
-        volume_id = volume.id
+        )  # fmt: skip
+        if pasted is not None:
+            await _add_disk_key(ctx, db, volume, pasted, actor)
+        for membership_id, (access, label) in people.items():
+            await put_access(
+                db, org.id, volume, membership_id, access, actor=who, person_label=label
+            )
     ctx.disk_wakeup.set()
     return await get_disk(ctx, actor.organization_id, volume_id)
 
 
+async def _access_entries(
+    db: AsyncSession, organization_id: UUID, actor: Actor, entries: list[AccessEntry]
+) -> dict[UUID, tuple[Literal["none", "read", "write"], str]]:
+    """The access a new disk starts with, by membership: the listed people, the creator `write`."""
+    rows = (
+        await db.execute(
+            select(Membership.id, Membership.user_id, User.name, User.email)
+            .join(User, User.id == Membership.user_id)
+            .where(
+                Membership.organization_id == organization_id,
+                Membership.status != "removed",
+                Membership.deleted_at.is_(None),
+            )
+        )
+    ).all()
+    by_user = {user_id: (mid, name or email) for mid, user_id, name, email in rows}
+    out: dict[UUID, tuple[Literal["none", "read", "write"], str]] = {}
+    for entry in entries:
+        if entry.person_id not in by_user:
+            raise validation(
+                "No such person", {"field": "access", "personId": str(entry.person_id)}
+            )
+        membership_id, label = by_user[entry.person_id]
+        out[membership_id] = (entry.access, label)
+    if actor.membership_id not in out:
+        out[actor.membership_id] = ("write", actor.label)
+    return {m: v for m, v in out.items() if v[0] != "none"}
+
+
+async def _add_disk_key(
+    ctx: Context, db: AsyncSession, volume: Volume, key: S3Credentials, actor: Actor
+) -> None:
+    if await db.scalar(
+        select(func.count()).where(
+            S3Key.organization_id == volume.organization_id,
+            S3Key.access_key_id == key.access_key_id,
+            S3Key.state.in_(("pending", "active", "retiring")),
+        )
+    ):
+        raise validation("This key already serves another disk", {"field": "accessKeyId"})
+    row = new_key_row(
+        ctx,
+        volume.organization_id,
+        key.access_key_id,
+        key.secret_key,
+        holder="disk",
+        user_id=actor.user_id,
+        volume_id=volume.id,
+    )
+    db.add(row)
+    await db.flush()
+    await db.refresh(row)
+    record(
+        db,
+        volume.organization_id,
+        "key_created",
+        AuditActor.person(actor.user_id, actor.label),
+        Target("key", row.id, row.access_key_tail),
+        {"holder": "disk", "accessKeyTail": row.access_key_tail, "for": volume.name},
+    )
+
+
 async def run_disk_formats(ctx: Context) -> int:
     """
-    Formats every `creating` disk not taken by another process, one per transaction; the row
-    stays locked while JuiceFS runs. Returns how many were handled.
+    Creates every `creating` disk not taken by another process, one per transaction; the row
+    stays locked while the meta service, the provider and JuiceFS run. Returns how many were
+    handled.
     """
     handled = 0
     while True:
@@ -309,40 +433,132 @@ async def run_disk_formats(ctx: Context) -> int:
             ).scalar_one_or_none()
             if volume is None:
                 return handled
-            await _format(ctx, db, volume)
-            handled += 1
+            ready = await _create(ctx, db, volume)
+            organization_id = volume.organization_id
+        if ready:
+            await apply_owed(ctx, organization_id)
+        handled += 1
 
 
-async def _format(ctx: Context, db: AsyncSession, volume: Volume) -> None:
-    org = await db.get(Organization, volume.organization_id)
-    key = await active_key(db, volume.organization_id)
-    if org is None or key is None:
-        _fail(volume, "The organization has no active S3 key")
-        return
-    # A team key goes into the format; with person or device keys the format holds none
-    # and the control plane formats with its own (DATABASE_SCHEMA.md, "Storage modes").
-    team = org.storage_key_scope == "team"
+class _CreationError(Exception):
+    """A step of a disk's creation failed; the message is the disk's `format_error`."""
+
+
+async def _instance(ctx: Context, db: AsyncSession, volume: Volume) -> MetaInstance:
+    """The disk's instance: the one recorded, or a new one from the meta service."""
+    existing = await instance_of(db, volume.id)
+    if existing is not None:
+        return existing
     try:
+        spec = await ctx.meta.create_instance(str(volume.id))
+    except MetaServiceError as error:
+        raise _CreationError(f"meta_unavailable: {error}") from error
+    instance = MetaInstance(
+        id=uuid7(),
+        organization_id=volume.organization_id,
+        volume_id=volume.id,
+        service_ref=spec.service_ref,
+        url=spec.url,
+        admin_url=spec.admin_url,
+        admin_username=spec.admin_username,
+    )
+    if spec.admin_password is not None:
+        instance.admin_password_enc = ctx.box.seal(
+            spec.admin_password,
+            table="meta_instances",
+            column="admin_password_enc",
+            row_id=instance.id,
+        )
+    db.add(instance)
+    await db.flush()
+    return instance
+
+
+async def _create(ctx: Context, db: AsyncSession, volume: Volume) -> bool:
+    """The creation job for one disk; returns whether it became `ready`."""
+    org = await db.get(Organization, volume.organization_id)
+    if org is None:
+        raise RuntimeError(f"disk {volume.id} lost its organization")
+    managed = org.storage_mode == "managed"
+    key = await storage_key(db, org, volume)
+    instance: MetaInstance | None = None
+    try:
+        if key is None:
+            raise _CreationError("The disk has no key to format with")
+        credentials = ctx.credentials(key)
+        instance = await _instance(ctx, db, volume)
+        if managed:
+            await _managed_bucket(ctx, db, org, volume, key, credentials)
         juicefs_uuid = await ctx.formatter.format(
-            ctx.volume_location(org, volume),
-            ctx.credentials(key),
+            ctx.volume_location(instance, volume),
+            credentials,
             block_size_kb=volume.block_size_kb,
             trash_days=volume.trash_days,
-            store_key=team,
+            store_key=not managed,
         )
-    except FormatError as error:
-        log.warning("format of a new disk failed: %s", error)
-        _fail(volume, str(error))
-        return
+    except (_CreationError, FormatError) as error:
+        log.warning("creation of a disk failed: %s", error)
+        await _fail(ctx, db, volume, instance, str(error))
+        return False
     volume.state = "ready"
     volume.juicefs_uuid = juicefs_uuid
-    volume.s3_key_id = key.id if team else None
+    if not managed:
+        key.state, key.activated_at = "active", utcnow()
+    await db.flush()
+    await sync(db, org.id, volume_ids=[volume.id])
+    return True
 
 
-def _fail(volume: Volume, message: str) -> None:
+async def _managed_bucket(
+    ctx: Context,
+    db: AsyncSession,
+    org: Organization,
+    volume: Volume,
+    key: S3Key,
+    credentials: S3Credentials,
+) -> None:
+    """Managed: the adapter creates the bucket and makes the control plane's key its owner."""
+    if key.provider_ref is None:
+        raise _CreationError("The control plane's key has no provider id")
+    try:
+        adapter = ctx.adapter_for(org)
+        await adapter.ensure_bucket(volume.s3_bucket)
+        await adapter.set_grant(key.provider_ref, volume.s3_bucket, "write", owner=True)
+    except ProviderError as error:
+        raise _CreationError(f"provider_failed: {error}") from error
+    result = await probe(
+        ctx,
+        endpoint=volume.s3_endpoint,
+        region=volume.s3_region,
+        bucket=volume.s3_bucket,
+        key=credentials,
+        label="disk",
+    )
+    await record_probe(db, volume, result)
+    if not result.ok:
+        raise _CreationError(f"probe_failed: {result.code} on {result.request}")
+
+
+async def _fail(
+    ctx: Context, db: AsyncSession, volume: Volume, instance: MetaInstance | None, message: str
+) -> None:
+    """A failed creation: the disk soft deleted, its key rejected, its instance wiped."""
+    now = utcnow()
     volume.state = "failed"
     volume.format_error = message[:500]
-    volume.deleted_at = utcnow()
+    volume.deleted_at = now
+    for key in (
+        await db.execute(
+            select(S3Key).where(S3Key.volume_id == volume.id, S3Key.state == "pending")
+        )
+    ).scalars():
+        key.state, key.rejected_at, key.secret_key_enc = "rejected", now, None
+    if instance is not None:
+        try:
+            await ctx.meta.release_instance(instance.service_ref, discard=True)
+        except MetaServiceError as error:
+            log.warning("the instance of a failed disk was not wiped: %s", error)
+        instance.state, instance.stopped_at = "stopped", now
 
 
 async def update_disk(
@@ -361,16 +577,18 @@ async def update_disk(
                 .with_for_update()
             )
         ).scalar_one_or_none()
-        org = await db.get(Organization, actor.organization_id)
-        if volume is None or org is None:
+        if volume is None:
             raise not_found("No such disk")
         if volume.state != "ready":
             raise invalid_state("The disk is not ready")
         changes: dict[str, DetailValue] = {}
         if body.trash_days is not None and body.trash_days != volume.trash_days:
+            instance = await instance_of(db, volume.id)
+            if instance is None:
+                raise invalid_state("The disk has no instance")
             try:
                 await ctx.formatter.set_trash_days(
-                    ctx.volume_location(org, volume), body.trash_days
+                    ctx.volume_location(instance, volume), body.trash_days
                 )
             except FormatError as error:
                 raise format_failed(str(error)) from error

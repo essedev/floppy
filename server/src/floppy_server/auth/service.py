@@ -39,6 +39,7 @@ from floppy_server.models import (
     User,
     WebSession,
 )
+from floppy_server.ratelimit import rate_limited
 
 log = logging.getLogger(__name__)
 
@@ -217,10 +218,20 @@ async def start_sign_in(
                 if clash.email == address and clash.state == "pending" and clash.expires_at > now:
                     return clash
                 raise ApiError(422, "validation", "Use a new PKCE verifier for every sign-in")
-        # Too early to resend, or too many this hour: the same answer, no new mail.
-        if pending is not None and pending.resend_at > now:
+        # Too early to resend, or too many this hour: the same answer, no new mail. An app
+        # restarted meanwhile has a new PKCE verifier: the pending request takes its challenge,
+        # loopback and name, or the app could never complete it; the mail already sent stays
+        # valid (its code is bound to the request, not to the challenge).
+        capped = len(recent) >= ctx.settings.sign_in_hourly_limit and bool(same_kind)
+        if pending is not None and (pending.resend_at > now or capped):
+            if kind == "app":
+                _rebind(pending, code_challenge, redirect_uri, device_name)
             return pending
-        if len(recent) >= ctx.settings.sign_in_hourly_limit and same_kind:
+        if capped:
+            if kind == "app":
+                # Nothing pending to rebind, and no new mail this hour: say when to retry.
+                oldest = min(r.created_at for r in recent)
+                raise rate_limited((oldest + timedelta(hours=1) - now).total_seconds())
             return same_kind[0]
 
         user = await _user_by_email(db, address)
@@ -281,6 +292,23 @@ async def start_sign_in(
             )
         await send_mail(ctx, db, mail, org)
         return request
+
+
+def _rebind(
+    request: SignInRequest,
+    code_challenge: str | None,
+    redirect_uri: str | None,
+    device_name: str | None,
+) -> None:
+    """A pending app request taken over by the app's new PKCE challenge and loopback."""
+    if code_challenge is None or redirect_uri is None:
+        return
+    request.code_challenge = code_challenge
+    request.redirect_uri = redirect_uri
+    request.device_name = device_name or request.device_name
+    # An authorization code issued for the old loopback is no longer redeemable.
+    request.auth_code_hash = None
+    request.auth_code_expires_at = None
 
 
 def mail_language(org: Organization) -> mailtext.Language:

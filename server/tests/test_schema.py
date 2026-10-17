@@ -2,6 +2,7 @@
 
 import uuid
 
+import httpx
 import pytest
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError, IntegrityError
@@ -10,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from floppy_server.context import Context
 from floppy_server.db import Base
 from tests.conftest import Org, make_org
+from tests.helpers import create_disk, disk_key
 
 TABLES = [t.name for t in Base.metadata.sorted_tables]
 
@@ -24,7 +26,7 @@ async def test_every_table_is_migrated(owner_engine: AsyncEngine) -> None:
             ).scalars()
         )
     assert set(TABLES) <= present
-    assert len(TABLES) == 16
+    assert len(TABLES) == 19
 
 
 @pytest.mark.parametrize("table", TABLES)
@@ -68,7 +70,7 @@ async def test_a_row_cannot_point_at_another_organizations_row(
     ctx: Context, app_engine: AsyncEngine
 ) -> None:
     a = await make_org(ctx, "studio-a", "a@a.test")
-    b = await make_org(ctx, "studio-b", "b@b.test", key="AKIASTUDIOBKEY001")
+    b = await make_org(ctx, "studio-b", "b@b.test")
     async with app_engine.connect() as conn:
         membership_b = (
             await conn.execute(
@@ -104,8 +106,10 @@ async def test_ids_are_uuidv7_and_timestamps_utc(org: Org, owner_engine: AsyncEn
 
 
 async def test_constraints_hold_the_state_machines(
-    org: Org, ctx: Context, owner_engine: AsyncEngine
+    org: Org, ctx: Context, admin: httpx.AsyncClient, owner_engine: AsyncEngine
 ) -> None:
+    disk = await create_disk(admin, ctx, "Archivio", key=disk_key(1))
+    await create_disk(admin, ctx, "Progetti", key=disk_key(2))
     async with owner_engine.connect() as conn:
         with pytest.raises(IntegrityError, match="ck_memberships_removed_at"):
             await conn.execute(text("UPDATE memberships SET status = 'removed'"))
@@ -113,10 +117,29 @@ async def test_constraints_hold_the_state_machines(
         with pytest.raises(IntegrityError, match="ck_s3_keys_secret_wiped"):
             await conn.execute(text("UPDATE s3_keys SET state = 'retired', retired_at = now()"))
     async with owner_engine.connect() as conn:
-        with pytest.raises(IntegrityError, match="uq_s3_keys_organization_id_active"):
+        # One key in a disk's format at a time.
+        with pytest.raises(IntegrityError, match="uq_s3_keys_volume_id_active"):
             await conn.execute(
                 text(
-                    "INSERT INTO s3_keys (organization_id, access_key_id, state, secret_key_enc)"
-                    " SELECT organization_id, 'AKIAANOTHER00009', 'active', secret_key_enc FROM s3_keys"
+                    "INSERT INTO s3_keys (organization_id, access_key_id, holder, volume_id, state,"
+                    " secret_key_enc) SELECT organization_id, 'AKIAANOTHER00009', 'disk', volume_id,"
+                    " 'active', secret_key_enc FROM s3_keys LIMIT 1"
                 )
             )
+    async with owner_engine.connect() as conn:
+        # Two disks never share an instance, across organizations too.
+        with pytest.raises(IntegrityError, match="uq_meta_instances_url_ready"):
+            await conn.execute(
+                text(
+                    "UPDATE meta_instances SET url = (SELECT upper(url) FROM meta_instances"
+                    " WHERE volume_id = :first) WHERE volume_id <> :first"
+                ),
+                {"first": disk["id"]},
+            )
+    async with owner_engine.connect() as conn:
+        with pytest.raises(IntegrityError, match="ck_disk_access_access"):
+            await conn.execute(text("UPDATE disk_access SET access = 'admin'"))
+    async with owner_engine.connect() as conn:
+        with pytest.raises(IntegrityError, match="ck_meta_instances_url_no_credentials"):
+            await conn.execute(text("UPDATE meta_instances SET url = 'redis://u:p@x:6379'"))
+    assert disk["state"] == "ready"

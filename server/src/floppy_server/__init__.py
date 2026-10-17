@@ -1,4 +1,4 @@
-"""Floppy's control plane: organizations, people, Macs, disks and the S3 key, off the data path."""
+"""Floppy's control plane: organizations, people, devices, disks and their access, off the data path."""
 
 import sys
 

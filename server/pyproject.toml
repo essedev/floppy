@@ -76,7 +76,12 @@ ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 # redis-py's execute_command is untyped; ACL and CLIENT commands have no typed wrappers.
-module = ["floppy_server.infra.metadata", "tests.test_valkey"]
+module = [
+    "floppy_server.infra.metadata",
+    "tests.conftest",
+    "tests.test_valkey",
+    "tests.test_perdisk",
+]
 disallow_untyped_calls = false
 
 [tool.pytest.ini_options]

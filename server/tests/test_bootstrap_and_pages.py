@@ -10,10 +10,10 @@ from floppy_server.bootstrap import BootstrapError, BootstrapInput, bootstrap
 from floppy_server.config import Environment, MailBackend
 from floppy_server.context import Context
 from floppy_server.crypto import SecretBox
-from floppy_server.models import Membership, S3Key
+from floppy_server.models import Membership, MetaInstance, S3Key
 from floppy_server.rekey import reencrypt_all
 from tests.conftest import ClientFactory, Org, make_settings
-from tests.helpers import mailer, pkce, token_in
+from tests.helpers import create_disk, disk_key, fake_adapter, mailer, pkce, token_in
 
 
 def bootstrap_input(**overrides: object) -> BootstrapInput:
@@ -23,41 +23,49 @@ def bootstrap_input(**overrides: object) -> BootstrapInput:
         "admin_email": "Admin@Studio.test",
         "s3_endpoint": "https://s3.test",
         "s3_region": "eu-south",
-        "s3_bucket": "floppy-studio",
-        "s3_access_key_id": "AKIABOOTSTRAP0001",
-        "s3_secret_key": "bootstrap-secret-0001",
-        "valkey_url": "redis://meta.studio.test:6379",
     }
     values.update(overrides)
     return BootstrapInput(**values)  # type: ignore[arg-type]
 
 
-async def test_bootstrap_creates_an_active_admin_and_an_active_key(
+async def test_bootstrap_creates_an_active_admin_and_no_key_in_manual_mode(
     ctx: Context, owner_engine: AsyncEngine
 ) -> None:
     await bootstrap(ctx, bootstrap_input())
     async with owner_engine.connect() as conn:
         membership = (await conn.execute(select(Membership.role, Membership.status))).one()
-        key = (
-            await conn.execute(select(S3Key.state, S3Key.access_key_tail, S3Key.secret_key_enc))
-        ).one()
+        keys = (await conn.execute(select(S3Key.id))).all()
         email = (await conn.execute(text("SELECT email FROM users"))).scalar_one()
     assert tuple(membership) == ("admin", "active")
-    assert (key[0], key[1]) == ("active", "P0001")
-    assert key[2] is not None
-    assert b"bootstrap-secret" not in key[2]
+    assert keys == []
     assert email == "admin@studio.test"
 
 
+async def test_a_managed_bootstrap_stores_the_control_planes_key_sealed(
+    ctx: Context, owner_engine: AsyncEngine
+) -> None:
+    fake_adapter(ctx)
+    await bootstrap(ctx, bootstrap_input(storage_mode="managed", storage_provider="garage"))
+    async with owner_engine.connect() as conn:
+        key = (await conn.execute(select(S3Key.holder, S3Key.state, S3Key.secret_key_enc))).one()
+    assert (key[0], key[1]) == ("control_plane", "active")
+    assert key[2] is not None
+
+
 async def test_bootstrap_refusals(ctx: Context) -> None:
-    with pytest.raises(BootstrapError, match="test write"):
-        await bootstrap(ctx, bootstrap_input(s3_access_key_id="AKIADENIEDKEY0001"))
-    with pytest.raises(BootstrapError, match="no credentials"):
-        await bootstrap(ctx, bootstrap_input(valkey_url="redis://user:pw@meta.test:6379"))
+    with pytest.raises(BootstrapError, match="manual or managed"):
+        await bootstrap(ctx, bootstrap_input(storage_mode="other"))
+    with pytest.raises(BootstrapError, match="no provider adapter"):
+        await bootstrap(ctx, bootstrap_input(storage_provider="garage"))
+    with pytest.raises(BootstrapError, match="available are: garage"):
+        await bootstrap(ctx, bootstrap_input(storage_mode="managed", storage_provider="ovh"))
+    fake_adapter(ctx).down = True
+    with pytest.raises(BootstrapError, match="provider refused"):
+        await bootstrap(ctx, bootstrap_input(storage_mode="managed", storage_provider="garage"))
     ctx.settings.single_organization = True
     await bootstrap(ctx, bootstrap_input())
     with pytest.raises(BootstrapError, match="already has its organization"):
-        await bootstrap(ctx, bootstrap_input(slug="second", s3_bucket="other"))
+        await bootstrap(ctx, bootstrap_input(slug="second"))
 
 
 def test_production_refuses_development_backends() -> None:
@@ -114,18 +122,22 @@ async def test_reencrypt_moves_every_secret_to_the_newest_key(
             "mail": {"host": "smtp.test", "port": 25, "sender": "f@x.test", "password": "smtp-pw"}
         },
     )
+    await create_disk(admin, ctx, "Archivio", key=disk_key(1))
     ctx.box = SecretBox({1: ctx.settings.key_ring[1], 2: bytes(range(32, 64))})
-    assert await reencrypt_all(ctx) == 2
+    assert await reencrypt_all(ctx) == 3  # the SMTP password, the disk's key, its instance's
     assert await reencrypt_all(ctx) == 0
     async with owner_engine.connect() as conn:
         keys = list((await conn.execute(select(S3Key.secret_key_enc))).scalars())
         smtp = list(
             (await conn.execute(text("SELECT smtp_password_enc FROM organizations"))).scalars()
         )
-    assert [blob[1] for blob in keys + smtp] == [2, 2]
+        instances = list((await conn.execute(select(MetaInstance.admin_password_enc))).scalars())
+    assert [blob[1] for blob in keys + smtp + instances] == [2, 2, 2]
     async with ctx.sessions() as db:
         key = (await db.execute(select(S3Key))).scalar_one()
-    assert ctx.credentials(key).secret_key == "first-secret-key-value-0001"
+        instance = (await db.execute(select(MetaInstance))).scalar_one()
+    assert ctx.credentials(key).secret_key == disk_key(1)["secretKey"]
+    assert ctx.instance_target(instance).password == "fake-admin-1"
 
 
 async def test_openapi_is_served(client: httpx.AsyncClient) -> None:

@@ -1,11 +1,12 @@
 """
-Storage modes and key scopes (DATABASE_SCHEMA.md, "Storage modes"), the mail language and
-`organization_created`. The provider is the labelled `FakeAdapter`; the real Garage adapter is
-tested in test_garage.py.
+Storage modes (DATABASE_SCHEMA.md, "Storage modes"), the mail language and
+`organization_created`. Managed mode with the labelled `FakeAdapter`: a bucket per disk owned
+by the control plane's key, a key per device granted per bucket and changed in place, deleted
+when the device goes. The real Garage is in test_garage.py and test_perdisk.py.
 """
 
-from datetime import timedelta
 from typing import Any
+from uuid import UUID
 
 import httpx
 import pytest
@@ -13,24 +14,25 @@ from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from floppy_server.background import reconcile_instances
 from floppy_server.context import Context
-from floppy_server.disks.service import run_disk_formats
-from floppy_server.infra.juicefs import FakeVolumeFormatter
-from floppy_server.infra.providers import FakeAdapter
-from floppy_server.keys.scoped import delete_owed_keys
-from floppy_server.keys.service import rotate_after_revocations, run_rotations
-from floppy_server.models import AuditEvent, KeyExposure, Organization, S3Key
+from floppy_server.disks.service import managed_bucket
+from floppy_server.keys.managed import delete_owed_keys
+from floppy_server.models import AuditEvent, S3Key
 from tests.conftest import ClientFactory, Org, make_org
-from tests.helpers import enrol_mac, invite_and_join, mailer, sign_in, token_in
+from tests.helpers import (
+    create_disk,
+    enrol_device,
+    fake_adapter,
+    formatter,
+    instance_url,
+    invite_and_join,
+    mailer,
+    set_access,
+    sign_in,
+)
 
-PERSON_KEY = {"accessKeyId": "AKIAPERSONKEY00011", "secretKey": "person-secret-0011"}
-
-
-def adapter(ctx: Context) -> FakeAdapter:
-    if ctx.adapter_override is None:
-        ctx.adapter_override = FakeAdapter()
-    assert isinstance(ctx.adapter_override, FakeAdapter)
-    return ctx.adapter_override
+BEAT = {"appVersion": "0.4.0", "macosVersion": "15.5"}
 
 
 async def keys(engine: AsyncEngine) -> list[tuple[Any, ...]]:
@@ -99,140 +101,42 @@ async def test_bootstrap_logs_organization_created(org: Org, owner_engine: Async
     assert tuple(row) == ("operator", "settings", {"storageMode": "manual", "provider": ""})
 
 
-# Manual, one key per person
+async def test_a_manual_organization_starts_with_no_key(
+    org: Org, owner_engine: AsyncEngine
+) -> None:
+    assert await keys(owner_engine) == []
+
+
+# Managed: a key per device, granted per bucket
 
 
 @pytest.fixture
-async def person_org(ctx: Context) -> Org:
-    return await make_org(ctx, "studio-p", "paola@p.test", storage_key_scope="person")
-
-
-async def test_person_scope_formats_with_the_control_planes_key_and_no_key_inside(
-    person_org: Org, ctx: Context, clients: ClientFactory, owner_engine: AsyncEngine
-) -> None:
-    admin = clients()
-    await sign_in(admin, ctx, person_org.admin_email)
-    await admin.post("/disks", json={"name": "Archivio"})
-    await run_disk_formats(ctx)
-    assert isinstance(ctx.formatter, FakeVolumeFormatter)
-    assert ctx.formatter.formats[(person_org.valkey_url, 1)]["access_key_id"] == ""
-    assert (await keys(owner_engine))[0][:3] == ("control_plane", "00001", "active")
-    rotation = await admin.post(
-        "/key/rotations", json={"accessKeyId": "AKIANEWTEAMKEY0002", "secretKey": "x" * 12}
-    )
-    assert (rotation.status_code, rotation.json()["code"]) == (409, "invalid_state")
-
-
-async def test_person_keys_are_pasted_probed_given_to_macs_and_replaced(
-    person_org: Org, ctx: Context, clients: ClientFactory, owner_engine: AsyncEngine
-) -> None:
-    admin = clients()
-    await sign_in(admin, ctx, person_org.admin_email)
-    missing = await admin.post("/people", json={"email": "marco@p.test", "role": "member"})
-    assert (missing.status_code, missing.json()["details"]) == (422, {"field": "key"})
-    denied = await admin.post(
-        "/people",
-        json={
-            "email": "marco@p.test",
-            "role": "member",
-            "key": {"accessKeyId": "AKIADENIED000099", "secretKey": "denied-secret-99"},
-        },
-    )
-    assert (denied.status_code, denied.json()["code"]) == (422, "probe_failed")
-    assert "denied-secret-99" not in denied.text
-
-    marco = clients()
-    response = await admin.post(
-        "/people", json={"email": "marco@p.test", "role": "member", "key": PERSON_KEY}
-    )
-    assert response.status_code == 201
-    await marco.post(
-        "/auth/invitation", json={"token": token_in(mailer(ctx).last_to("marco@p.test"))}
-    )
-    app = clients()
-    mac = await enrol_mac(app, marco, ctx, "marco@p.test")
-    assert mac.s3 == PERSON_KEY
-    config = (await app.get("/device/config", headers=mac.auth)).json()
-    assert (config["keyScope"], config["s3AccessKeyTail"]) == ("person", "00011")
-
-    # A lost Mac: the person's key is reached; no window, the key waits for its deletion.
-    revoked = (await admin.post(f"/devices/{mac.id}/revoke")).json()
-    assert revoked["key"]["window"] is None
-    owed = revoked["key"]["keys"]
-    assert [(k["holder"], k["owner"], k["state"]) for k in owed] == [
-        ("person", "Marco", "retiring")
-    ]
-    other = await enrol_mac(clients(), marco, ctx, "marco@p.test", name="Mini")
-    assert other.s3 is None
-
-    person_id = response.json()["id"]
-    new_key = {"accessKeyId": "AKIAPERSONKEY00022", "secretKey": "person-secret-0022"}
-    replaced = (await admin.put(f"/people/{person_id}/key", json=new_key)).json()
-    assert [(k["accessKeyTail"], k["state"]) for k in replaced["keys"]] == [
-        ("00011", "retiring"),
-        ("00022", "active"),
-    ]
-    fetched = await clients().get("/device/key", headers=other.auth)
-    assert fetched.json() == new_key
-
-    old_id = replaced["keys"][0]["id"]
-    confirmed = (await admin.post(f"/key/{old_id}/deleted")).json()
-    assert [k["accessKeyTail"] for k in confirmed["keys"]] == ["00022"]
-    again = await admin.post(f"/key/{old_id}/deleted")
-    assert again.json()["code"] == "invalid_state"
-    stored = await keys(owner_engine)
-    assert ("person", "00011", "retired", False) in stored
-    assert ("person", "00022", "active", True) in stored
-    logged = await actions(owner_engine)
-    assert ("key_deleted", {"holder": "person", "accessKeyTail": "00011", "by": "admin"}) in logged
-    assert ("key_created", {"holder": "person", "accessKeyTail": "00022", "for": "Marco"}) in logged
-
-    removed = (await admin.delete(f"/people/{person_id}")).json()
-    assert removed["key"]["window"] is None
-    assert [(k["accessKeyTail"], k["state"]) for k in removed["key"]["keys"]] == [
-        ("00022", "retiring")
-    ]
-    async with owner_engine.connect() as conn:
-        assert (await conn.execute(select(KeyExposure.id))).first() is None
-
-
-async def test_signing_out_keeps_the_persons_key(
-    person_org: Org, ctx: Context, clients: ClientFactory, owner_engine: AsyncEngine
-) -> None:
-    admin = clients()
-    await sign_in(admin, ctx, person_org.admin_email)
-    marco = clients()
-    await admin.post("/people", json={"email": "marco@p.test", "role": "member", "key": PERSON_KEY})
-    await marco.post(
-        "/auth/invitation", json={"token": token_in(mailer(ctx).last_to("marco@p.test"))}
-    )
-    app = clients()
-    mac = await enrol_mac(app, marco, ctx, "marco@p.test")
-    await app.post("/device/sign-out", headers=mac.auth)
-    assert ("person", "00011", "active", True) in await keys(owner_engine)
-
-
-# Managed, one key per Mac
-
-
-@pytest.fixture
-async def device_org(ctx: Context) -> Org:
-    adapter(ctx)
+async def managed_org(ctx: Context) -> Org:
+    fake_adapter(ctx)
     return await make_org(
-        ctx,
-        "studio-d",
-        "dario@d.test",
-        storage_mode="managed",
-        storage_provider="garage",
-        storage_key_scope="device",
+        ctx, "studio-m", "mara@m.test", storage_mode="managed", storage_provider="garage"
     )
 
 
-async def test_managed_bootstrap_creates_the_bucket_and_its_own_key(
-    device_org: Org, ctx: Context, owner_engine: AsyncEngine
+@pytest.fixture
+async def managed_admin(
+    managed_org: Org, ctx: Context, clients: ClientFactory
+) -> httpx.AsyncClient:
+    client = clients()
+    await sign_in(client, ctx, managed_org.admin_email)
+    return client
+
+
+async def person(admin: httpx.AsyncClient, email: str) -> str:
+    found: str = next(p["id"] for p in (await admin.get("/people")).json() if p["email"] == email)
+    return found
+
+
+async def test_managed_bootstrap_creates_the_control_planes_key(
+    managed_org: Org, ctx: Context, owner_engine: AsyncEngine
 ) -> None:
-    fake = adapter(ctx)
-    assert fake.buckets == {device_org.bucket}
+    fake = fake_adapter(ctx)
+    assert fake.buckets == set()
     async with owner_engine.connect() as conn:
         holder, origin, ref = (
             await conn.execute(select(S3Key.holder, S3Key.origin, S3Key.provider_ref))
@@ -241,101 +145,152 @@ async def test_managed_bootstrap_creates_the_bucket_and_its_own_key(
     assert ref in fake.keys
 
 
-async def test_each_mac_gets_its_own_key_deleted_when_revoked(
-    device_org: Org, ctx: Context, clients: ClientFactory, owner_engine: AsyncEngine
+async def test_a_managed_disk_gets_its_bucket_owned_by_the_control_plane_and_no_key_inside(
+    managed_org: Org, ctx: Context, managed_admin: httpx.AsyncClient, owner_engine: AsyncEngine
 ) -> None:
-    fake = adapter(ctx)
-    admin = clients()
-    await sign_in(admin, ctx, device_org.admin_email)
+    fake = fake_adapter(ctx)
+    pasted = await managed_admin.post(
+        "/disks",
+        json={
+            "name": "Progetti",
+            "storage": {"bucket": "mine", "accessKeyId": "AKIAMINE0001", "secretKey": "x" * 12},
+        },
+    )
+    assert pasted.json()["details"] == {"field": "storage"}
+    disk = await create_disk(managed_admin, ctx, "Progetti", managed=True)
+    assert disk["state"] == "ready"
+    bucket = managed_bucket(UUID(disk["id"]))
+    assert disk["bucket"] == bucket
+    assert bucket in fake.buckets
+    async with owner_engine.connect() as conn:
+        cp_ref = (await conn.execute(select(S3Key.provider_ref))).scalar_one()
+    assert cp_ref is not None
+    assert fake.grants[(cp_ref, bucket)] == ("write", True)
+    assert formatter(ctx).formats[(instance_url(ctx, disk["id"]), 1)]["access_key_id"] == ""
+    assert (
+        await managed_admin.post(
+            "/settings/storage/probe",
+            json={
+                "endpoint": "https://s3.test",
+                "bucket": "x-bucket",
+                "accessKeyId": "AKIAPROBE0001",
+                "secretKey": "y" * 12,
+            },
+        )
+    ).json()["code"] == "invalid_state"
+
+
+async def test_each_device_gets_its_own_key_granted_per_bucket_and_changed_in_place(
+    managed_org: Org,
+    ctx: Context,
+    managed_admin: httpx.AsyncClient,
+    clients: ClientFactory,
+    owner_engine: AsyncEngine,
+) -> None:
+    fake = fake_adapter(ctx)
+    marco = clients()
+    await invite_and_join(managed_admin, marco, ctx, "marco@m.test")
+    marco_id = await person(managed_admin, "marco@m.test")
+    progetti = await create_disk(managed_admin, ctx, "Progetti", managed=True)
+    archivio = await create_disk(managed_admin, ctx, "Archivio", managed=True)
+    riservato = await create_disk(managed_admin, ctx, "Riservato", managed=True)
+    await set_access(managed_admin, progetti["id"], marco_id, "write")
+    await set_access(managed_admin, archivio["id"], marco_id, "read")
     app = clients()
-    mac = await enrol_mac(app, admin, ctx, device_org.admin_email)
-    assert mac.s3 is not None
-    assert mac.s3["accessKeyId"] in fake.keys
+    device = await enrol_device(app, marco, ctx, "marco@m.test", name="iMac di Marco")
+    assert device.s3 is not None
+    ref = device.s3["accessKeyId"]
+    assert ref in fake.keys
+    assert [(d["name"], d["access"]) for d in device.disks] == [
+        ("Progetti", "write"),
+        ("Archivio", "read"),
+    ]
+    assert fake.grant(ref, progetti["bucket"]) == "write"
+    assert fake.grant(ref, archivio["bucket"]) == "read"
+    assert fake.grant(ref, riservato["bucket"]) == "none"
+    config = (await app.get("/device/config", headers=device.auth)).json()
+    assert (config["storageMode"], config["s3AccessKeyTail"]) == ("managed", ref[-5:])
     async with owner_engine.connect() as conn:
         secret = (
             await conn.execute(select(S3Key.secret_key_enc).where(S3Key.holder == "device"))
         ).scalar_one()
-    assert secret is None  # a Mac's own secret is returned once, never kept
+    assert secret is None  # a device's own secret is returned once, never kept
 
-    # A reissue (Keychain lost) replaces the key and deletes the old one at the provider.
-    again = (
-        await app.post(
-            "/device/register",
-            json={"appVersion": "0.4.0", "macosVersion": "15.5"},
-            headers=mac.auth,
-        )
-    ).json()
-    assert again["s3"]["accessKeyId"] != mac.s3["accessKeyId"]
-    assert mac.s3["accessKeyId"] in fake.deleted
+    # Changed in place: the same key, another grant; to none, no grant at all.
+    await set_access(managed_admin, progetti["id"], marco_id, "read")
+    await set_access(managed_admin, archivio["id"], marco_id, "none")
+    assert (fake.grant(ref, progetti["bucket"]), fake.grant(ref, archivio["bucket"])) == (
+        "read",
+        "none",
+    )
+    assert ref in fake.keys
+    # No window in managed mode.
+    status = (await managed_admin.get("/key")).json()
+    assert all(d["window"] is None and d["accessKeyTail"] is None for d in status["disks"])
+    assert [k["state"] for k in status["keys"]] == ["active"]
+    assert status["controlPlaneKeyTail"] is not None
+
+
+async def test_a_reissue_replaces_the_key_and_a_revocation_deletes_it(
+    managed_org: Org,
+    ctx: Context,
+    managed_admin: httpx.AsyncClient,
+    clients: ClientFactory,
+    owner_engine: AsyncEngine,
+) -> None:
+    fake = fake_adapter(ctx)
+    disk = await create_disk(managed_admin, ctx, "Progetti", managed=True)
+    app = clients()
+    device = await enrol_device(app, managed_admin, ctx, managed_org.admin_email)
+    assert device.s3 is not None
+    again = (await app.post("/device/register", json=BEAT, headers=device.auth)).json()
+    new_ref = again["s3"]["accessKeyId"]
+    assert new_ref != device.s3["accessKeyId"]
+    assert device.s3["accessKeyId"] in fake.deleted
+    assert fake.grant(new_ref, disk["bucket"]) == "write"
 
     fake.down = True
-    revoked = (await admin.post(f"/devices/{mac.id}/revoke")).json()
-    assert revoked["key"]["window"] is None
+    revoked = (await managed_admin.post(f"/devices/{device.id}/revoke")).json()
+    assert revoked["key"]["disks"][0]["window"] is None
     assert [k["state"] for k in revoked["key"]["keys"]] == ["retiring"]
     fake.down = False
-    assert await delete_owed_keys(ctx, device_org.id) == 1
-    assert again["s3"]["accessKeyId"] in fake.deleted
+    assert await delete_owed_keys(ctx, managed_org.id) == 1
+    assert new_ref in fake.deleted
+    assert (fake.grant(new_ref, disk["bucket"])) == "none"
     stored = [k for k in await keys(owner_engine) if k[0] == "device"]
     assert [k[2] for k in stored] == ["retired", "retired"]
     logged = [d for a, d in await actions(owner_engine) if a == "key_deleted"]
     assert [d["by"] for d in logged] == ["adapter", "adapter"]
-    assert (await admin.post("/key/rotations")).json()["code"] == "invalid_state"
+    rotation = await managed_admin.post(
+        "/key/rotations",
+        json={"diskId": disk["id"], "accessKeyId": "AKIAROTATE0001", "secretKey": "z" * 12},
+    )
+    assert rotation.json()["code"] == "invalid_state"
 
 
-async def test_the_schema_holds_the_scopes(device_org: Org, owner_engine: AsyncEngine) -> None:
-    async with owner_engine.connect() as conn:
-        with pytest.raises(IntegrityError, match="ck_organizations_storage_key_scope_manual"):
-            await conn.execute(
-                text("UPDATE organizations SET storage_mode = 'manual', storage_provider = NULL")
-            )
+async def test_a_grant_the_provider_did_not_take_is_owed(
+    managed_org: Org, ctx: Context, managed_admin: httpx.AsyncClient, clients: ClientFactory
+) -> None:
+    fake = fake_adapter(ctx)
+    disk = await create_disk(managed_admin, ctx, "Progetti", managed=True)
+    marco = clients()
+    await invite_and_join(managed_admin, marco, ctx, "marco@m.test")
+    marco_id = await person(managed_admin, "marco@m.test")
+    device = await enrol_device(clients(), marco, ctx, "marco@m.test", name="iMac di Marco")
+    assert device.s3 is not None
+    fake.down = True
+    owed = await set_access(managed_admin, disk["id"], marco_id, "read")
+    assert owed["applied"] is False
+    fake.down = False
+    await reconcile_instances(ctx, managed_org.id)
+    assert fake.grant(device.s3["accessKeyId"], disk["bucket"]) == "read"
+    assert all(e["applied"] for e in (await managed_admin.get("/access")).json())
+
+
+async def test_the_schema_holds_the_holders(managed_org: Org, owner_engine: AsyncEngine) -> None:
     async with owner_engine.connect() as conn:
         with pytest.raises(IntegrityError, match="ck_s3_keys_device_holder"):
             await conn.execute(text("UPDATE s3_keys SET holder = 'device'"))
-
-
-# Managed, a team key the adapter rotates by itself
-
-
-async def test_managed_team_key_rotates_after_revocations_and_closes_itself(
-    ctx: Context, clients: ClientFactory, owner_engine: AsyncEngine
-) -> None:
-    fake = adapter(ctx)
-    org = await make_org(
-        ctx,
-        "studio-t",
-        "tina@t.test",
-        storage_mode="managed",
-        storage_provider="garage",
-        storage_key_scope="team",
-    )
-    admin = clients()
-    await sign_in(admin, ctx, org.admin_email)
     async with owner_engine.connect() as conn:
-        first_ref = (await conn.execute(select(S3Key.provider_ref))).scalar_one()
-    pasted = await admin.post(
-        "/key/rotations", json={"accessKeyId": "AKIAPASTEDKEY0003", "secretKey": "pasted-0003"}
-    )
-    assert pasted.json()["details"] == {"field": "accessKeyId"}
-
-    marco = clients()
-    await invite_and_join(admin, marco, ctx, "marco@t.test")
-    mac = await enrol_mac(clients(), marco, ctx, "marco@t.test")
-    await admin.post(f"/devices/{mac.id}/revoke")
-    assert await rotate_after_revocations(ctx) == 0  # revocations are still coming
-    assert await rotate_after_revocations(ctx, quiet=timedelta(0)) == 1
-    await run_rotations(ctx)
-    key = (await admin.get("/key")).json()
-    assert key["window"] is None
-    assert key["rotation"] is None
-    assert first_ref in fake.deleted
-    async with owner_engine.connect() as conn:
-        states = (
-            (await conn.execute(select(S3Key.state).order_by(S3Key.created_at))).scalars().all()
-        )
-        org_row = (await conn.execute(select(Organization.storage_mode))).scalar_one()
-    assert states == ["retired", "active"]
-    assert org_row == "managed"
-    logged = await actions(owner_engine)
-    started = next(d for a, d in logged if a == "key_rotation_started")
-    assert started["trigger"] == "revocation"
-    assert ("key_window_closed", {"oldKeyTail": started["oldKeyTail"], "reasons": 1}) in logged
+        with pytest.raises(IntegrityError, match="ck_s3_keys_disk_holder"):
+            await conn.execute(text("UPDATE s3_keys SET holder = 'disk'"))

@@ -5,10 +5,17 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from floppy_server.context import Context
-from floppy_server.infra.metadata import FakeMetadataAdmin
-from floppy_server.models import AuditEvent, Device, Invitation, KeyExposure, WebSession
+from floppy_server.models import AuditEvent, Device, Invitation, KeyExposure, MetaUser, WebSession
 from tests.conftest import ClientFactory, Org
-from tests.helpers import enrol_mac, invite_and_join, mailer, token_in
+from tests.helpers import (
+    create_disk,
+    enrol_device,
+    fake_valkey,
+    instance_url,
+    invite_and_join,
+    mailer,
+    token_in,
+)
 
 
 async def test_invite_lists_the_person_as_invited(
@@ -128,7 +135,7 @@ async def test_removing_an_invited_person_revokes_the_invitation_and_opens_no_wi
     body = response.json()
     assert body["person"]["status"] == "removed"
     assert body["revokedDevices"] == 0
-    assert body["key"]["window"] is None
+    assert body["key"]["disks"] == []
     dead = await clients().post("/auth/invitation", json={"token": token})
     assert dead.json()["code"] == "link_invalid"
     # Removed people stay listed; invited again they get a new membership.
@@ -142,7 +149,7 @@ async def test_removing_an_invited_person_revokes_the_invitation_and_opens_no_wi
     assert statuses == ["invited"]
 
 
-async def test_removing_a_person_revokes_macs_sessions_and_opens_the_window(
+async def test_removing_a_person_revokes_devices_sessions_and_opens_each_disks_window(
     org: Org,
     ctx: Context,
     admin: httpx.AsyncClient,
@@ -151,33 +158,45 @@ async def test_removing_a_person_revokes_macs_sessions_and_opens_the_window(
 ) -> None:
     marco = clients()
     person = await invite_and_join(admin, marco, ctx, "marco@studio-a.test")
+    grant = [{"personId": person["id"], "access": "write"}]
+    progetti = await create_disk(admin, ctx, "Progetti", access=grant)
+    archivio = await create_disk(admin, ctx, "Archivio", access=grant)
+    await create_disk(admin, ctx, "Riservato")
     app = clients()
-    active = await enrol_mac(app, marco, ctx, "marco@studio-a.test", name="iMac di Marco")
-    await enrol_mac(app, marco, ctx, "marco@studio-a.test", name="Mini", register=False)
-    metadata = ctx.metadata
-    assert isinstance(metadata, FakeMetadataAdmin)
-    assert active.valkey_user in metadata.users[org.valkey_url]
+    active = await enrol_device(app, marco, ctx, "marco@studio-a.test", name="iMac di Marco")
+    await enrol_device(clients(), marco, ctx, "marco@studio-a.test", name="Portatile")
+    await enrol_device(app, marco, ctx, "marco@studio-a.test", name="Mini", register=False)
+    valkey = fake_valkey(ctx)
+    for disk in (progetti, archivio):
+        assert valkey.access(instance_url(ctx, disk["id"]), active.valkey_user) == "write"
 
     response = await admin.delete(f"/people/{person['id']}")
     assert response.status_code == 200
     body = response.json()
-    assert body["revokedDevices"] == 2
+    assert body["revokedDevices"] == 3
     assert body["person"]["deviceCount"] == 0
-    window = body["key"]["window"]
-    assert [r["kind"] for r in window["reasons"]] == ["person_removed"]
-    assert window["reasons"][0]["label"] == "Marco"
+    # One exposure per disk the person's devices could see, not one per device.
+    windows = {d["diskName"]: d["window"] for d in body["key"]["disks"]}
+    assert windows["Riservato"] is None
+    for name in ("Progetti", "Archivio"):
+        assert [(r["kind"], r["label"]) for r in windows[name]["reasons"]] == [
+            ("person_removed", "Marco")
+        ]
 
-    assert active.valkey_user not in metadata.users[org.valkey_url]
+    for disk in (progetti, archivio):
+        assert valkey.access(instance_url(ctx, disk["id"]), active.valkey_user) is None
     assert (await marco.get("/session")).status_code == 401
     heartbeat = await app.post(
         "/device/heartbeat",
         json={"appVersion": "0.4.0", "macosVersion": "15.5"},
         headers=active.auth,
     )
-    assert heartbeat.json() == {"state": "revoked"}
+    assert heartbeat.json() == {"state": "revoked", "disks": []}
     async with owner_engine.connect() as conn:
         reasons = (await conn.execute(select(Device.revoke_reason))).scalars().all()
-        cleaned = (await conn.execute(select(Device.valkey_user_deleted_at))).scalars().all()
+        cleaned = (
+            await conn.execute(select(MetaUser.access, MetaUser.applied_at.is_not(None)))
+        ).all()
         sessions = (
             (
                 await conn.execute(
@@ -191,12 +210,12 @@ async def test_removing_a_person_revokes_macs_sessions_and_opens_the_window(
         logged = (
             await conn.execute(select(AuditEvent.action, AuditEvent.detail).order_by(AuditEvent.id))
         ).all()
-    assert reasons == ["member_removed", "member_removed"]
-    assert all(cleaned)
+    assert reasons == ["member_removed"] * 3
+    assert {tuple(row) for row in cleaned} == {("none", True)}
     assert sessions == ["membership_removed"]
-    assert exposures == ["person_removed"]
-    assert ("person_removed", {"devices": 2}) in logged
-    assert logged.count(("device_revoked", {"reason": "member_removed"})) == 2
+    assert exposures == ["person_removed", "person_removed"]
+    assert ("person_removed", {"devices": 3}) in logged
+    assert logged.count(("device_revoked", {"reason": "member_removed"})) == 3
     # Removed people cannot sign in again.
     started = await clients().post("/auth/sign-in", json={"email": "marco@studio-a.test"})
     assert started.status_code == 200
