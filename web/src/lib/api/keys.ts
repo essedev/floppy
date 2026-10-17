@@ -6,7 +6,7 @@ import type { AuditQuery } from './types'
 export const queryKeys = {
   session: ['session'] as const,
   people: ['people'] as const,
-  macs: ['macs'] as const,
+  devices: ['devices'] as const,
   disks: ['disks'] as const,
   key: ['key'] as const,
   rotation: (id: string) => ['key', 'rotation', id] as const,

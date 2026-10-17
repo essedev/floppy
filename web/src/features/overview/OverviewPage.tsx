@@ -1,6 +1,6 @@
 /*
   What an admin sees on opening the site (concept-e-admin, "Panoramica"): the key reminder,
-  the disks, the services as the control plane sees them, the Macs connected now and the
+  the disks, the services as the control plane sees them, the devices connected now and the
   latest activity. Each panel loads and fails on its own.
 */
 
@@ -19,7 +19,7 @@ import { useDescribe } from '@/features/audit/describe'
 import { DiskState } from '@/features/disks/DiskState'
 import { useDisks } from '@/features/disks/hooks'
 import { KeyNotice } from '@/features/key/KeyNotice'
-import { useMacs } from '@/features/macs/hooks'
+import { useDevices } from '@/features/devices/hooks'
 import { useHealth } from '@/features/settings/hooks'
 
 const linkClass = 'inline-flex h-10 items-center gap-2 rounded-[11px] bg-ink px-4 text-sm font-semibold text-surface no-underline hover:opacity-90'
@@ -50,7 +50,7 @@ function DiskCard({ disk }: { disk: Disk }) {
         <dl className="mt-2.5 flex flex-wrap gap-x-[22px] gap-y-2">
           {[
             [f.number(disk.fileCount), t.overview.files],
-            [f.number(disk.mountedBy), t.overview.macs],
+            [f.number(disk.mountedBy), t.overview.devices],
           ].map(([value, label]) => (
             <div key={label} className="flex flex-col-reverse text-[12.5px] whitespace-nowrap text-ink-2">
               <dt>{label}</dt>
@@ -147,15 +147,15 @@ function Services() {
   )
 }
 
-function ConnectedMacs() {
+function ConnectedDevices() {
   const { t } = useI18n()
   const f = useFormat()
-  const macs = useMacs()
+  const macs = useDevices()
   useNow(30_000)
   const live = macs.data?.filter((m) => !m.revokedAt) ?? []
   const connected = live.filter((m) => m.connected).length
   return (
-    <Well title={macs.data ? fmt(t.overview.connectedTitle, { n: connected, total: live.length }) : t.nav.macs} className="flex flex-col">
+    <Well title={macs.data ? fmt(t.overview.connectedTitle, { n: connected, total: live.length }) : t.nav.devices} className="flex flex-col">
       <QueryView query={macs} staleNotice={false} loading={<SkeletonLines lines={5} />} isEmpty={() => live.length === 0} empty={<p className="text-sm text-ink-2">{t.overview.noneConnected}</p>}>
         {() => (
           <ul className="m-0 grid list-none gap-[13px] p-0 text-sm">
@@ -203,7 +203,7 @@ function Activity() {
 
 /** One stale notice for the page when any panel keeps old data after a failed refresh. */
 function OverviewStale() {
-  const queries = [useDisks(), useHealth(), useMacs(), useRecentActivity()]
+  const queries = [useDisks(), useHealth(), useDevices(), useRecentActivity()]
   const failed = queries.filter((q) => q.isError && q.data !== undefined)
   if (failed.length === 0) return null
   return <StaleNotice updatedAt={Math.min(...failed.map((q) => q.dataUpdatedAt))} onRetry={() => failed.forEach((q) => void q.refetch())} />
@@ -221,7 +221,7 @@ export function OverviewPage() {
       <Disks />
       <Services />
       <div className="grid gap-3.5 lg:grid-cols-2">
-        <ConnectedMacs />
+        <ConnectedDevices />
         <Activity />
       </div>
     </>

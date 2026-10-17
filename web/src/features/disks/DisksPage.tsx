@@ -196,7 +196,7 @@ function DiskDetail({ disk, onEdit }: { disk: Disk; onEdit(): void }) {
         </div>
       </div>
       <dl className="m-0 grid grid-cols-[auto_minmax(0,1fr)] gap-x-[18px] gap-y-1.5 text-sm">
-        <Row term={t.disks.onMac}><Breakable text={disk.mountPath} /></Row>
+        <Row term={t.disks.inFinder}><Breakable text={disk.mountPath} /></Row>
         <Row term={t.disks.bucket}><Breakable text={disk.bucket} /></Row>
         <Row term={t.disks.region}><span className="num">{disk.region}</span></Row>
         <Row term={t.disks.endpoint}><Breakable text={disk.endpoint} /></Row>

@@ -72,9 +72,9 @@ export const httpApi: Api = {
     remove: (personId) => request('DELETE', `/people/${id(personId)}`),
     resendInvite: (personId) => request('POST', `/people/${id(personId)}/resend`),
   },
-  macs: {
-    list: () => request('GET', '/macs'),
-    revoke: (macId) => request('POST', `/macs/${id(macId)}/revoke`),
+  devices: {
+    list: () => request('GET', '/devices'),
+    revoke: (deviceId) => request('POST', `/devices/${id(deviceId)}/revoke`),
   },
   disks: {
     list: () => request('GET', '/disks'),

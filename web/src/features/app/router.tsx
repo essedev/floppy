@@ -1,12 +1,12 @@
 /* Routes of the admin web, with Italian paths as the concept draws them. */
 
-import { createBrowserRouter } from 'react-router'
+import { createBrowserRouter, Navigate } from 'react-router'
 import { AuditPage } from '@/features/audit/AuditPage'
 import { MagicLinkPage } from '@/features/auth/MagicLinkPage'
 import { SignInPage } from '@/features/auth/SignInPage'
 import { DisksPage } from '@/features/disks/DisksPage'
 import { KeyPage } from '@/features/key/KeyPage'
-import { MacsPage } from '@/features/macs/MacsPage'
+import { DevicesPage } from '@/features/devices/DevicesPage'
 import { PeoplePage } from '@/features/people/PeoplePage'
 import { SettingsPage } from '@/features/settings/SettingsPage'
 import { AppShell } from '@/features/shell/AppShell'
@@ -27,7 +27,9 @@ export const router = createBrowserRouter([
         element: <AppShell />,
         children: [
           { index: true, element: <Home /> },
-          { path: 'mac', element: <MacsPage /> },
+          { path: 'dispositivi', element: <DevicesPage /> },
+          // The old address, kept for bookmarks.
+          { path: 'mac', element: <Navigate to="/dispositivi" replace /> },
           {
             element: <RequireAdmin />,
             children: [

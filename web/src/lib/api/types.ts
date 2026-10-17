@@ -20,7 +20,7 @@ export interface OrganizationSummary {
   name: string
   diskCount: number
   peopleCount: number
-  macCount: number
+  deviceCount: number
 }
 
 /** The signed-in person, their role and their organization. */
@@ -84,8 +84,8 @@ export interface Person {
   email: string
   role: Role
   status: PersonStatus
-  /** Macs not revoked. */
-  macCount: number
+  /** Devices not revoked. */
+  deviceCount: number
   lastSignInAt: Iso | null
   invitedAt: Iso | null
   invitedBy: string | null
@@ -110,12 +110,12 @@ export interface UpdatePersonRequest {
 /** DELETE /people/{id}: the membership is revoked and every Mac of the person with it. */
 export interface RemovePersonResponse {
   person: Person
-  revokedMacs: number
+  revokedDevices: number
   /** The key status after the removal: its window is open now. */
   key: KeyStatus
 }
 
-// Macs
+// Devices
 
 /**
  * Where the Mac's JuiceFS reads its metadata from, as its last heartbeat says: its local
@@ -124,8 +124,8 @@ export interface RemovePersonResponse {
  */
 export type ReplicaMode = 'replica' | 'master' | 'offline'
 
-/** A Mac (a device): one Valkey user each, revoked alone (DECISIONS #7). */
-export interface Mac {
+/** A device (today a Mac): one Valkey user each, revoked alone (DECISIONS #7). The schema's `devices`. */
+export interface Device {
   id: string
   name: string
   owner: { id: string; name: string }
@@ -143,9 +143,9 @@ export interface Mac {
   revokedBy: string | null
 }
 
-/** POST /macs/{id}/revoke: ACL DELUSER and CLIENT KILL on the central Valkey. */
-export interface RevokeMacResponse {
-  mac: Mac
+/** POST /devices/{id}/revoke: ACL DELUSER and CLIENT KILL on the central Valkey. */
+export interface RevokeDeviceResponse {
+  device: Device
   key: KeyStatus
 }
 
@@ -269,7 +269,7 @@ export interface Rotation {
   probe: StepState
   disks: { id: string; name: string; state: StepState }[]
   /** Informative: connected Macs when it started, and those already on the new key. */
-  macs: { updated: number; total: number }
+  devices: { updated: number; total: number }
   /** The provider's answer when the probe write fails (e.g. AccessDenied), or JuiceFS's when
    * a disk fails (step 'disk'). */
   error: { step: 'probe' | 'disk'; code: string; request: string } | null
@@ -323,6 +323,7 @@ export interface AuditEvent {
   actor: { kind: 'person'; id: string; label: string } | { kind: 'system' | 'operator'; id: null; label: string | null }
   action: AuditAction
   category: AuditCategory
+  /** Kinds, actions and categories keep the schema's stored values ('mac', 'mac_revoked', 'macs'). */
   target: { kind: 'person' | 'mac' | 'disk' | 'key' | 'organization'; id: string; label: string }
   /** Small facts from an allowlist per action, e.g. { from: 'member', to: 'admin' },
    * { appVersion: '0.4.0' }, { fields: ['name'] }; never a secret. */

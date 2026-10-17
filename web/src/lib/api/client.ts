@@ -12,12 +12,12 @@ import type {
   Health,
   InviteRequest,
   KeyStatus,
-  Mac,
+  Device,
   MailTestResponse,
   Page,
   Person,
   RemovePersonResponse,
-  RevokeMacResponse,
+  RevokeDeviceResponse,
   Rotation,
   Session,
   Settings,
@@ -69,10 +69,10 @@ export interface Api {
     remove(id: string): Promise<RemovePersonResponse>
     resendInvite(id: string): Promise<Person>
   }
-  macs: {
-    /** Every Mac for an admin, only the caller's own for a member. */
-    list(): Promise<Mac[]>
-    revoke(id: string): Promise<RevokeMacResponse>
+  devices: {
+    /** Every device for an admin, only the caller's own for a member. */
+    list(): Promise<Device[]>
+    revoke(id: string): Promise<RevokeDeviceResponse>
   }
   disks: {
     /** Live disks, `creating` ones included. */

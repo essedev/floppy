@@ -40,7 +40,7 @@ export function useRemovePerson() {
     mutationFn: (id: string) => api.people.remove(id),
     onSuccess: (result) => {
       client.setQueryData(queryKeys.key, result.key)
-      return invalidate(queryKeys.people, queryKeys.macs, queryKeys.session, queryKeys.auditAll)
+      return invalidate(queryKeys.people, queryKeys.devices, queryKeys.session, queryKeys.auditAll)
     },
   })
 }

@@ -24,7 +24,7 @@ export function useDescribe() {
       if (typeof d.appVersion === 'string') parts.push(fmt(t.details.appVersion, { v: d.appVersion }))
       if (typeof d.blockSize === 'string') parts.push(fmt(t.details.blockSize, { v: d.blockSize }))
       if (typeof d.disks === 'number') parts.push(plural(t.details.disks, d.disks, locale))
-      if (typeof d.macs === 'number' && d.macs > 0) parts.push(plural(t.details.macs, d.macs, locale))
+      if (typeof d.macs === 'number' && d.macs > 0) parts.push(plural(t.details.devices, d.macs, locale))
       if (typeof d.reasons === 'number' && d.reasons > 0) parts.push(plural(t.details.reasons, d.reasons, locale))
       if (typeof d.reason === 'string' && d.reason in t.details.revokeReason) parts.push(t.details.revokeReason[d.reason as keyof typeof t.details.revokeReason])
       if (typeof d.code === 'string') parts.push(fmt(t.details.code, { code: d.code }))

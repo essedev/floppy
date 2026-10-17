@@ -7,11 +7,11 @@
 
 import type { AuditEvent, CachePolicy, Disk, KeyWindowReason, Person, ReplicaMode } from '../types'
 
-/** A person as the fake stores it; macCount and isMe are computed on read. */
-export type PersonRow = Omit<Person, 'macCount' | 'isMe'>
+/** A person as the fake stores it; deviceCount and isMe are computed on read. */
+export type PersonRow = Omit<Person, 'deviceCount' | 'isMe'>
 
-/** A Mac as the fake stores it. `live` Macs keep sending heartbeats while the page is open. */
-export interface MacRow {
+/** A device as the fake stores it. `live` ones keep sending heartbeats while the page is open. */
+export interface DeviceRow {
   id: string
   name: string
   ownerId: string
@@ -40,7 +40,7 @@ export interface RotationRow {
   newKeyTail: string
   oldKeyTails: string[]
   startedAt: string
-  macsTotal: number
+  devicesTotal: number
   failCode: string | null
   /** The new key became the active one (every disk configured). */
   applied: boolean
@@ -70,7 +70,7 @@ export interface FakeDb {
   mail: { host: string; port: number; username: string; sender: string; passwordSet: boolean }
   storage: { endpoint: string; region: string; bucket: string }
   people: PersonRow[]
-  macs: MacRow[]
+  devices: DeviceRow[]
   /** Live disks, `creating` included. */
   disks: DiskRow[]
   /** Disks whose creation failed: soft deleted, their name in the bucket and database stay burned. */
@@ -123,7 +123,7 @@ export function seed(scenario: Scenario, now = Date.now()): FakeDb {
     mail: { host: 'smtp.studio.example', port: 587, username: 'floppy@studio.example', sender: 'Floppy · Studio Esempio', passwordSet: true },
     storage: { endpoint: ENDPOINT, region: REGION, bucket: BUCKET },
     people: [],
-    macs: [],
+    devices: [],
     disks: [],
     failedDisks: [],
     key: { accessKeyTail: 'ZT0QK', rotatedAt: null, exposures: [], rotation: null },
@@ -155,19 +155,19 @@ export function seed(scenario: Scenario, now = Date.now()): FakeDb {
     person('u-paolo', 'Paolo Greco', 'paolo@studio.example', 'member', { status: 'removed', lastSignInAt: ago(4 * DAY), removedAt }),
   ]
 
-  const mac = (id: string, name: string, ownerId: string, macosVersion: string, appVersion: string, seenAgo: number | null, extra: Partial<MacRow> = {}): MacRow => ({
+  const device = (id: string, name: string, ownerId: string, macosVersion: string, appVersion: string, seenAgo: number | null, extra: Partial<DeviceRow> = {}): DeviceRow => ({
     id, name, ownerId, valkeyUser: `floppy_d_${id}`, macosVersion, appVersion,
     lastSeenAt: seenAgo === null ? null : ago(seenAgo), live: false, replica: null, revokedAt: null, revokedBy: null, ...extra,
   })
-  base.macs = [
-    mac('7f3a2c', 'MacBook Pro di Giulia', 'u-giulia', '27.0.1', '0.4.2', 20_000, { live: true, replica: { mode: 'replica', lagMs: 12 } }),
-    mac('b81e04', 'Mac Studio di Giulia', 'u-giulia', '26.6', '0.4.2', 12 * MIN),
-    mac('19c6d7', 'MacBook Air di Marco', 'u-marco', '27.0.1', '0.4.1', 35_000, { live: true, replica: { mode: 'master', lagMs: 3400 } }),
-    mac('e2047b', 'MacBook Pro di Sara', 'u-sara', '27.0', '0.4.2', 3 * HOUR),
-    mac('5d93f0', 'iMac di Sara', 'u-sara', '26.6', '0.4.0', 20 * HOUR),
-    mac('a4c71e', 'MacBook Pro di Elena', 'u-elena', '27.0.1', '0.4.2', 10_000, { live: true, replica: { mode: 'replica', lagMs: 8 } }),
-    mac('3be5a9', 'MacBook Air di Anna', 'u-anna', '27.0.1', '0.4.2', 2 * DAY + 3 * HOUR),
-    mac('c0f218', 'MacBook Pro di Paolo', 'u-paolo', '27.0', '0.4.1', 4 * DAY, { revokedAt: removedAt, revokedBy: giulia.name }),
+  base.devices = [
+    device('7f3a2c', 'MacBook Pro di Giulia', 'u-giulia', '27.0.1', '0.4.2', 20_000, { live: true, replica: { mode: 'replica', lagMs: 12 } }),
+    device('b81e04', 'Mac Studio di Giulia', 'u-giulia', '26.6', '0.4.2', 12 * MIN),
+    device('19c6d7', 'MacBook Air di Marco', 'u-marco', '27.0.1', '0.4.1', 35_000, { live: true, replica: { mode: 'master', lagMs: 3400 } }),
+    device('e2047b', 'MacBook Pro di Sara', 'u-sara', '27.0', '0.4.2', 3 * HOUR),
+    device('5d93f0', 'iMac di Sara', 'u-sara', '26.6', '0.4.0', 20 * HOUR),
+    device('a4c71e', 'MacBook Pro di Elena', 'u-elena', '27.0.1', '0.4.2', 10_000, { live: true, replica: { mode: 'replica', lagMs: 8 } }),
+    device('3be5a9', 'MacBook Air di Anna', 'u-anna', '27.0.1', '0.4.2', 2 * DAY + 3 * HOUR),
+    device('c0f218', 'MacBook Pro di Paolo', 'u-paolo', '27.0', '0.4.1', 4 * DAY, { revokedAt: removedAt, revokedBy: giulia.name }),
   ]
 
   const disk = (id: string, name: string, volumeName: string, metaDb: number, used: number, files: number, trash: number, lastWrite: number, mounted: number, created: number, by: string): DiskRow => ({
@@ -199,15 +199,15 @@ function seedAudit(now: number, db: FakeDb): AuditEvent[] {
   }
   const system = { kind: 'system' as const, id: null, label: null }
   const personTarget = (id: string) => ({ kind: 'person' as const, id, label: actor(id).label })
-  const macTarget = (id: string) => ({ kind: 'mac' as const, id, label: db.macs.find((m) => m.id === id)?.name ?? id })
+  const deviceTarget = (id: string) => ({ kind: 'mac' as const, id, label: db.devices.find((m) => m.id === id)?.name ?? id })
   const key = (label: string) => ({ kind: 'key' as const, id: `k-${label}`, label })
   const events: Omit<AuditEvent, 'id'>[] = [
     { at: ago(50 * MIN), actor: actor('u-giulia'), action: 'person_invited', category: 'people', target: { kind: 'person', id: 'u-luca', label: 'luca@studio.example' }, detail: { role: 'member' } },
-    { at: ago(HOUR + 40 * MIN), actor: actor('u-elena'), action: 'mac_registered', category: 'macs', target: macTarget('a4c71e'), detail: { appVersion: '0.4.2' } },
+    { at: ago(HOUR + 40 * MIN), actor: actor('u-elena'), action: 'mac_registered', category: 'macs', target: deviceTarget('a4c71e'), detail: { appVersion: '0.4.2' } },
     { at: ago(2 * HOUR), actor: actor('u-marco'), action: 'signed_in', category: 'access', target: personTarget('u-marco'), detail: { via: 'link', kind: 'web' } },
-    { at: ago(2 * HOUR + 14 * MIN), actor: actor('u-giulia'), action: 'mac_revoked', category: 'macs', target: macTarget('c0f218'), detail: { reason: 'member_removed' } },
+    { at: ago(2 * HOUR + 14 * MIN), actor: actor('u-giulia'), action: 'mac_revoked', category: 'macs', target: deviceTarget('c0f218'), detail: { reason: 'member_removed' } },
     { at: ago(2 * HOUR + 14 * MIN), actor: actor('u-giulia'), action: 'person_removed', category: 'people', target: personTarget('u-paolo'), detail: { macs: 1 } },
-    { at: ago(20 * HOUR), actor: system, action: 'mac_seen_outdated', category: 'macs', target: macTarget('5d93f0'), detail: { appVersion: '0.4.0' } },
+    { at: ago(20 * HOUR), actor: system, action: 'mac_seen_outdated', category: 'macs', target: deviceTarget('5d93f0'), detail: { appVersion: '0.4.0' } },
     { at: ago(5 * DAY), actor: actor('u-anna'), action: 'disk_created', category: 'disks', target: { kind: 'disk', id: 'd-archivio', label: 'Archivio 2025' }, detail: { blockSize: '1 MB' } },
     { at: ago(8 * DAY), actor: actor('u-giulia'), action: 'key_window_closed', category: 'key', target: key('ZT0QK'), detail: { oldKeyTail: 'B7M2Q' } },
     { at: ago(8 * DAY + 3 * MIN), actor: system, action: 'key_rotated', category: 'key', target: key('ZT0QK'), detail: { disks: 1 } },
@@ -221,9 +221,9 @@ function seedAudit(now: number, db: FakeDb): AuditEvent[] {
     events.push({ at: ago(11 * DAY - i * HOUR), actor: actor('u-giulia'), action: 'person_invited', category: 'people', target: { kind: 'person', id: p, label: db.people.find((x) => x.id === p)?.email ?? p }, detail: { role: 'member' } })
     events.push({ at: ago(10 * DAY + 20 * HOUR - i * HOUR), actor: actor(p), action: 'invite_accepted', category: 'people', target: personTarget(p), detail: {} })
   }
-  for (const [i, m] of db.macs.entries()) {
+  for (const [i, m] of db.devices.entries()) {
     if (m.id === 'a4c71e') continue
-    events.push({ at: ago(10 * DAY - i * 3 * HOUR), actor: actor(m.ownerId), action: 'mac_registered', category: 'macs', target: macTarget(m.id), detail: { appVersion: '0.4.0' } })
+    events.push({ at: ago(10 * DAY - i * 3 * HOUR), actor: actor(m.ownerId), action: 'mac_registered', category: 'macs', target: deviceTarget(m.id), detail: { appVersion: '0.4.0' } })
   }
   // Older sign-ins, so the log has pages and the 90-day filter means something.
   const active = ['u-giulia', 'u-anna', 'u-marco', 'u-sara', 'u-elena']

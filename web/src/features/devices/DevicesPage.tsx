@@ -1,7 +1,7 @@
 /*
-  Macs (concept-e-admin, "Mac"; DECISIONS #7, #12): one Valkey user per Mac, its last contact
+  Devices (concept-e-admin, "Mac"; DECISIONS #7, #12): one Valkey user per device, its last contact
   and how its replica keeps up; revoking one leaves the others alone. Members see only their
-  own Macs, as "I miei Mac", and can revoke a lost one themselves.
+  own, as "I miei dispositivi", and can revoke a lost one themselves.
 */
 
 import { Users } from 'lucide-react'
@@ -14,21 +14,21 @@ import { Faceplate } from '@/components/marks'
 import { useErrorText } from '@/components/error-text'
 import { EmptyState, PageHeader, QueryView, SkeletonRows } from '@/components/states'
 import { fmt, rich, useI18n } from '@/i18n'
-import type { Mac } from '@/lib/api'
+import type { Device } from '@/lib/api'
 import { useFormat } from '@/lib/format'
 import { useFlash, useNow } from '@/lib/hooks'
 import { useCurrentSession } from '@/features/auth/hooks'
 import { KeyNotice } from '@/features/key/KeyNotice'
-import { useMacs, useRevokeMac } from './hooks'
+import { useDevices, useRevokeDevice } from './hooks'
 
-function ReplicaCell({ mac }: { mac: Mac }) {
+function ReplicaCell({ device }: { device: Device }) {
   const { t } = useI18n()
   const f = useFormat()
-  if (!mac.replica) return <span className="text-ink-3">{t.macs.notConnected}</span>
-  const { mode, lagMs } = mac.replica
+  if (!device.replica) return <span className="text-ink-3">{t.devices.notConnected}</span>
+  const { mode, lagMs } = device.replica
   const lag = lagMs === null ? '' : f.latency(lagMs)
-  const text = mode === 'replica' ? fmt(t.macs.replica, { lag }) : mode === 'master' ? fmt(t.macs.master, { lag }) : t.macs.offline
-  const help = mode === 'replica' ? t.macs.replicaHelp : mode === 'master' ? t.macs.masterHelp : t.macs.offlineHelp
+  const text = mode === 'replica' ? fmt(t.devices.replica, { lag }) : mode === 'master' ? fmt(t.devices.master, { lag }) : t.devices.offline
+  const help = mode === 'replica' ? t.devices.replicaHelp : mode === 'master' ? t.devices.masterHelp : t.devices.offlineHelp
   return (
     <span title={help}>
       <Readout>{text}</Readout>
@@ -37,14 +37,14 @@ function ReplicaCell({ mac }: { mac: Mac }) {
   )
 }
 
-function RevokeDialog({ mac, all, admin, onClose, onDone }: { mac: Mac; all: Mac[]; admin: boolean; onClose(): void; onDone(name: string): void }) {
+function RevokeDialog({ device, all, admin, onClose, onDone }: { device: Device; all: Device[]; admin: boolean; onClose(): void; onDone(name: string): void }) {
   const { t } = useI18n()
   const errorText = useErrorText()
-  const revoke = useRevokeMac()
-  const other = all.find((m) => m.owner.id === mac.owner.id && m.id !== mac.id && !m.revokedAt)
+  const revoke = useRevokeDevice()
+  const other = all.find((m) => m.owner.id === device.owner.id && m.id !== device.id && !m.revokedAt)
   return (
     <Dialog
-      title={fmt(t.macs.revokeTitle, { name: mac.name })}
+      title={fmt(t.devices.revokeTitle, { name: device.name })}
       onClose={onClose}
       busy={revoke.isPending}
       actions={
@@ -52,15 +52,15 @@ function RevokeDialog({ mac, all, admin, onClose, onDone }: { mac: Mac; all: Mac
           <Button variant="ghost" onClick={onClose} disabled={revoke.isPending}>
             {t.common.cancel}
           </Button>
-          <Button variant="danger" busy={revoke.isPending} onClick={() => revoke.mutate(mac.id, { onSuccess: () => onDone(mac.name) })}>
-            {t.macs.revokeConfirm}
+          <Button variant="danger" busy={revoke.isPending} onClick={() => revoke.mutate(device.id, { onSuccess: () => onDone(device.name) })}>
+            {t.devices.revokeConfirm}
           </Button>
         </>
       }
     >
-      <p>{t.macs.revokeBody}</p>
-      {other && <p>{rich(t.macs.revokeOther, { owner: mac.owner.name, other: <b className="font-semibold text-ink">{other.name}</b> })}</p>}
-      <p>{admin ? t.macs.revokeKeyAdmin : t.macs.revokeKeyMember}</p>
+      <p>{t.devices.revokeBody}</p>
+      {other && <p>{rich(t.devices.revokeOther, { owner: device.owner.name, other: <b className="font-semibold text-ink">{other.name}</b> })}</p>}
+      <p>{admin ? t.devices.revokeKeyAdmin : t.devices.revokeKeyMember}</p>
       {revoke.isError && (
         <div className="notice grid gap-1 px-4 py-3" role="alert">
           <State led="err">{t.common.failed}</State>
@@ -71,28 +71,28 @@ function RevokeDialog({ mac, all, admin, onClose, onDone }: { mac: Mac; all: Mac
   )
 }
 
-/** The Macs page, for admins and members. */
-export function MacsPage() {
+/** The devices page, for admins and members. */
+export function DevicesPage() {
   const { t } = useI18n()
   const f = useFormat()
   const session = useCurrentSession()
   const admin = session.role === 'admin'
-  const macs = useMacs()
+  const devices = useDevices()
   useNow(30_000)
-  const [revoking, setRevoking] = useState<Mac | null>(null)
+  const [revoking, setRevoking] = useState<Device | null>(null)
   const [flash, setFlash] = useFlash<string>()
   const cols = admin ? [190, 110, 50, 50, 110, 80, 60] : [190, 50, 50, 110, 80, 60]
 
   return (
     <>
       <PageHeader
-        title={admin ? t.macs.titleAdmin : t.macs.titleMember}
-        lead={admin ? t.macs.leadAdmin : fmt(t.macs.leadMember, { org: session.organization.name })}
+        title={admin ? t.devices.titleAdmin : t.devices.titleMember}
+        lead={admin ? t.devices.leadAdmin : fmt(t.devices.leadMember, { org: session.organization.name })}
       />
       {admin && <KeyNotice />}
-      {flash && <Notice className="mb-3.5" state={<State led="ok">{t.macs.revokedState}</State>} text={fmt(t.macs.revokedDone, { name: flash })} />}
+      {flash && <Notice className="mb-3.5" state={<State led="ok">{t.devices.revokedState}</State>} text={fmt(t.devices.revokedDone, { name: flash })} />}
       <QueryView
-        query={macs}
+        query={devices}
         loading={
           <table className="tbl">
             <tbody>
@@ -105,17 +105,17 @@ export function MacsPage() {
           admin ? (
             <EmptyState
               art={<Faceplate state="off" />}
-              title={t.macs.emptyTitle}
-              body={t.macs.emptyBody}
+              title={t.devices.emptyTitle}
+              body={t.devices.emptyBody}
               action={
                 <Link to="/persone" className="inline-flex h-10 items-center gap-2 rounded-[11px] bg-ink px-4 text-sm font-semibold text-surface no-underline hover:opacity-90">
                   <Users size={17} aria-hidden />
-                  {t.macs.emptyAction}
+                  {t.devices.emptyAction}
                 </Link>
               }
             />
           ) : (
-            <EmptyState art={<Faceplate state="off" />} title={t.macs.emptyMemberTitle} body={t.macs.emptyMemberBody} />
+            <EmptyState art={<Faceplate state="off" />} title={t.devices.emptyMemberTitle} body={t.devices.emptyMemberBody} />
           )
         }
       >
@@ -124,14 +124,14 @@ export function MacsPage() {
             <table className="tbl">
               <thead>
                 <tr>
-                  <th>{t.macs.colMac}</th>
-                  {admin && <th>{t.macs.colOwner}</th>}
-                  <th>{t.macs.colMacos}</th>
-                  <th>{t.macs.colApp}</th>
-                  <th>{t.macs.colReplica}</th>
-                  <th>{t.macs.colLastSeen}</th>
+                  <th>{t.devices.colDevice}</th>
+                  {admin && <th>{t.devices.colOwner}</th>}
+                  <th>{t.devices.colMacos}</th>
+                  <th>{t.devices.colApp}</th>
+                  <th>{t.devices.colReplica}</th>
+                  <th>{t.devices.colLastSeen}</th>
                   <th>
-                    <span className="sr-only">{t.macs.revoke}</span>
+                    <span className="sr-only">{t.devices.revoke}</span>
                   </th>
                 </tr>
               </thead>
@@ -143,7 +143,7 @@ export function MacsPage() {
                         {!m.revokedAt && <Led state={m.connected ? 'ok' : 'off'} />}
                         <div>
                           <b className="block font-semibold">{m.name}</b>
-                          <span className="num text-xs text-ink-3" title={fmt(t.macs.valkeyUser, { user: m.valkeyUser })}>
+                          <span className="num text-xs text-ink-3" title={fmt(t.devices.valkeyUser, { user: m.valkeyUser })}>
                             {m.valkeyUser}
                           </span>
                         </div>
@@ -153,12 +153,12 @@ export function MacsPage() {
                     <td className="num">{m.macosVersion}</td>
                     <td>
                       <span className="num">{m.appVersion}</span>
-                      {m.appOutdated && !m.revokedAt && <Readout className="ml-2">{t.macs.outdated}</Readout>}
+                      {m.appOutdated && !m.revokedAt && <Readout className="ml-2">{t.devices.outdated}</Readout>}
                     </td>
-                    <td>{m.revokedAt ? null : <ReplicaCell mac={m} />}</td>
+                    <td>{m.revokedAt ? null : <ReplicaCell device={m} />}</td>
                     <td>
                       {m.revokedAt ? (
-                        <State led="err">{fmt(t.macs.revoked, { date: f.relative(m.revokedAt) })}</State>
+                        <State led="err">{fmt(t.devices.revoked, { date: f.relative(m.revokedAt) })}</State>
                       ) : m.lastSeenAt ? (
                         f.relative(m.lastSeenAt)
                       ) : (
@@ -168,7 +168,7 @@ export function MacsPage() {
                     <td className="text-right">
                       {!m.revokedAt && (
                         <Button size="sm" onClick={() => setRevoking(m)}>
-                          {t.macs.revoke}
+                          {t.devices.revoke}
                         </Button>
                       )}
                     </td>
@@ -181,8 +181,8 @@ export function MacsPage() {
       </QueryView>
       {revoking && (
         <RevokeDialog
-          mac={revoking}
-          all={macs.data ?? []}
+          device={revoking}
+          all={devices.data ?? []}
           admin={admin}
           onClose={() => setRevoking(null)}
           onDone={(name) => {

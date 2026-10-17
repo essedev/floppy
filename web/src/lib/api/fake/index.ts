@@ -20,8 +20,8 @@
 */
 
 import { ApiError, type Api } from '../client'
-import { DISK_NAME, type AuditEvent, type AuditQuery, type Disk, type KeyStatus, type Mac, type Person, type Rotation, type Session, type StepState } from '../types'
-import { DEFAULT_CACHE, INVITE_TTL, LATEST_APP, mountPathOf, seed, type DiskRow, type FakeDb, type MacRow, type PersonRow, type Scenario } from './seed'
+import { DISK_NAME, type AuditEvent, type AuditQuery, type Disk, type KeyStatus, type Device, type Person, type Rotation, type Session, type StepState } from '../types'
+import { DEFAULT_CACHE, INVITE_TTL, LATEST_APP, mountPathOf, seed, type DiskRow, type FakeDb, type DeviceRow, type PersonRow, type Scenario } from './seed'
 
 const DB_KEY = 'floppy.fake.db.v3'
 const SESSION_KEY = 'floppy.fake.session'
@@ -120,7 +120,7 @@ function sessionOf(user: PersonRow): Session {
       name: db.organizationName,
       diskCount: db.disks.length,
       peopleCount: db.people.filter((p) => p.status !== 'removed').length,
-      macCount: db.macs.filter((m) => !m.revokedAt).length,
+      deviceCount: db.devices.filter((m) => !m.revokedAt).length,
     },
   }
 }
@@ -147,10 +147,10 @@ function startSession(userId: string, via: 'link' | 'code'): Session {
 
 function heartbeat(): void {
   // Live Macs keep reporting while the page is open, as the app's heartbeat would.
-  for (const m of db.macs) if (m.live && !m.revokedAt) m.lastSeenAt = iso(now() - 5_000 - Math.random() * 20_000)
+  for (const m of db.devices) if (m.live && !m.revokedAt) m.lastSeenAt = iso(now() - 5_000 - Math.random() * 20_000)
 }
 
-function toMac(m: MacRow): Mac {
+function toDevice(m: DeviceRow): Device {
   const owner = db.people.find((p) => p.id === m.ownerId)
   const connected = !m.revokedAt && m.lastSeenAt !== null && now() - Date.parse(m.lastSeenAt) < CONNECTED_WITHIN
   return {
@@ -172,7 +172,7 @@ function toMac(m: MacRow): Mac {
 function toPerson(p: PersonRow, me: PersonRow): Person {
   return {
     ...p,
-    macCount: db.macs.filter((m) => m.ownerId === p.id && !m.revokedAt).length,
+    deviceCount: db.devices.filter((m) => m.ownerId === p.id && !m.revokedAt).length,
     isMe: p.id === me.id,
   }
 }
@@ -226,7 +226,7 @@ function rotationOf(): Rotation | null {
     return {
       id: r.id, state: 'failed', newKeyTail: r.newKeyTail, oldKeyTails: r.oldKeyTails, probe,
       disks: disksAtStart.map((d) => ({ id: d.id, name: d.name, state: 'pending' })),
-      macs: { updated: 0, total: r.macsTotal },
+      devices: { updated: 0, total: r.devicesTotal },
       error: { step: 'probe', code: r.failCode ?? 'AccessDenied', request: `PUT /${db.storage.bucket}/floppy-probe-${r.id.slice(-4)}` },
       startedAt: r.startedAt,
     }
@@ -237,7 +237,7 @@ function rotationOf(): Rotation | null {
     return { id: d.id, name: d.name, state }
   })
   const macsStart = PROBE_MS + disks.length * DISK_MS
-  const updated = Math.max(0, Math.min(r.macsTotal, Math.floor((elapsed - macsStart) / MAC_MS)))
+  const updated = Math.max(0, Math.min(r.devicesTotal, Math.floor((elapsed - macsStart) / MAC_MS)))
   // Every disk configured is enough: the Macs are counted, not waited for.
   const configured = disks.every((d) => d.state === 'done') && elapsed >= macsStart
   if (configured && !r.applied) {
@@ -249,7 +249,7 @@ function rotationOf(): Rotation | null {
   }
   return {
     id: r.id, state: configured ? 'awaiting_old_key_deletion' : 'applying', newKeyTail: r.newKeyTail, oldKeyTails: r.oldKeyTails,
-    probe, disks, macs: { updated, total: r.macsTotal }, error: null, startedAt: r.startedAt,
+    probe, disks, devices: { updated, total: r.devicesTotal }, error: null, startedAt: r.startedAt,
   }
 }
 
@@ -270,7 +270,7 @@ function openExposure(kind: 'person_removed' | 'mac_revoked', label: string): vo
   db.key.exposures.push({ id: uid('x'), kind, label, at: iso() })
 }
 
-function revokeMacRow(m: MacRow, by: PersonRow, reason: 'admin' | 'owner' | 'member_removed'): void {
+function revokeDeviceRow(m: DeviceRow, by: PersonRow, reason: 'admin' | 'owner' | 'member_removed'): void {
   m.revokedAt = iso()
   m.revokedBy = by.name ?? by.email
   m.live = false
@@ -438,8 +438,8 @@ export const fakeApi: Api = {
       if (person.role === 'admin' && person.status === 'active' && activeAdmins().length === 1) {
         throw new ApiError(409, 'last_admin', 'The organization needs an admin')
       }
-      const macs = db.macs.filter((m) => m.ownerId === id && !m.revokedAt)
-      macs.forEach((m) => revokeMacRow(m, me, 'member_removed'))
+      const macs = db.devices.filter((m) => m.ownerId === id && !m.revokedAt)
+      macs.forEach((m) => revokeDeviceRow(m, me, 'member_removed'))
       person.status = 'removed'
       person.removedAt = iso()
       person.inviteExpiresAt = null
@@ -448,7 +448,7 @@ export const fakeApi: Api = {
       if (macs.length > 0) openExposure('person_removed', person.name ?? person.email)
       log({ actor: actorOf(me), action: 'person_removed', category: 'people', target: { kind: 'person', id, label: person.name ?? person.email }, detail: { macs: macs.length } })
       save()
-      return { person: toPerson(person, me), revokedMacs: macs.length, key: keyStatus() }
+      return { person: toPerson(person, me), revokedDevices: macs.length, key: keyStatus() }
     },
     async resendInvite(id) {
       await latency()
@@ -464,23 +464,23 @@ export const fakeApi: Api = {
     },
   },
 
-  macs: {
+  devices: {
     async list() {
       await latency()
       const me = requireUser()
       heartbeat()
-      const rows = me.role === 'admin' ? db.macs : db.macs.filter((m) => m.ownerId === me.id)
-      return rows.map(toMac).sort((a, b) => Number(!!a.revokedAt) - Number(!!b.revokedAt) || Number(b.connected) - Number(a.connected))
+      const rows = me.role === 'admin' ? db.devices : db.devices.filter((m) => m.ownerId === me.id)
+      return rows.map(toDevice).sort((a, b) => Number(!!a.revokedAt) - Number(!!b.revokedAt) || Number(b.connected) - Number(a.connected))
     },
     async revoke(id) {
       await latency(400, 800)
       const me = requireUser()
-      const m = db.macs.find((x) => x.id === id && !x.revokedAt)
-      if (!m || (me.role !== 'admin' && m.ownerId !== me.id)) throw new ApiError(404, 'not_found', 'No such Mac')
-      revokeMacRow(m, me, m.ownerId === me.id && me.role !== 'admin' ? 'owner' : 'admin')
+      const m = db.devices.find((x) => x.id === id && !x.revokedAt)
+      if (!m || (me.role !== 'admin' && m.ownerId !== me.id)) throw new ApiError(404, 'not_found', 'No such device')
+      revokeDeviceRow(m, me, m.ownerId === me.id && me.role !== 'admin' ? 'owner' : 'admin')
       openExposure('mac_revoked', m.name)
       save()
-      return { mac: toMac(m), key: keyStatus() }
+      return { device: toDevice(m), key: keyStatus() }
     },
   },
 
@@ -569,7 +569,7 @@ export const fakeApi: Api = {
       const newKeyTail = accessKeyId.trim().slice(-5).toUpperCase()
       db.key.rotation = {
         id: uid('rot'), newKeyTail, oldKeyTails, startedAt: iso(),
-        macsTotal: db.macs.map(toMac).filter((m) => m.connected).length,
+        devicesTotal: db.devices.map(toDevice).filter((m) => m.connected).length,
         failCode: accessKeyId.toUpperCase().includes('DENIED') ? 'AccessDenied' : null, applied: false, failLogged: false,
       }
       log({ actor: actorOf(me), action: 'key_rotation_started', category: 'key', target: { kind: 'key', id: db.key.rotation.id, label: newKeyTail }, detail: { newKeyTail, oldKeyTail: oldKeyTails.join(', ') } })

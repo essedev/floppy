@@ -1,7 +1,7 @@
 /*
   The signed-in layout (concept-e-admin, DECISIONS #12): a left sidebar with the wordmark, the
   organization, the sections and the person; the page on the right. Members see only their
-  own Macs. On a narrow screen the sidebar folds into a bar on top.
+  own devices. On a narrow screen the sidebar folds into a bar on top.
 */
 
 import { HardDrive, KeyRound, LaptopMinimal, LayoutGrid, LogOut, Monitor, Moon, ScrollText, SlidersHorizontal, Sun, Users, type LucideIcon } from 'lucide-react'
@@ -78,14 +78,14 @@ export function AppShell() {
               <>
                 <NavItem to="/" end icon={LayoutGrid} label={t.nav.overview} />
                 <NavItem to="/persone" icon={Users} label={t.nav.people} extra={count(org.peopleCount)} />
-                <NavItem to="/mac" icon={LaptopMinimal} label={t.nav.macs} extra={count(org.macCount)} />
+                <NavItem to="/dispositivi" icon={LaptopMinimal} label={t.nav.devices} extra={count(org.deviceCount)} />
                 <NavItem to="/dischi" icon={HardDrive} label={t.nav.disks} />
                 <NavItem to="/chiave" icon={KeyRound} label={t.nav.key} extra={<KeyNavLed />} />
                 <NavItem to="/registro" icon={ScrollText} label={t.nav.audit} />
                 <NavItem to="/impostazioni" icon={SlidersHorizontal} label={t.nav.settings} />
               </>
             ) : (
-              <NavItem to="/mac" icon={LaptopMinimal} label={t.nav.myMacs} />
+              <NavItem to="/dispositivi" icon={LaptopMinimal} label={t.nav.myDevices} />
             )}
           </nav>
           <div className="mt-auto flex items-center gap-2.5 px-2.5 pt-3 max-md:hidden">

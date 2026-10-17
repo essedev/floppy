@@ -76,7 +76,7 @@ function RiskBox({ status }: { status: KeyStatus }) {
       <p className="max-w-[66ch] text-sm text-ink-2">{t.key.openBody}</p>
       <SlotList
         className="text-[13.5px] text-ink-2"
-        items={w.reasons.map((r) => fmt(r.kind === 'person_removed' ? t.key.reasonPerson : t.key.reasonMac, { label: r.label, date: f.relative(r.at, now) }))}
+        items={w.reasons.map((r) => fmt(r.kind === 'person_removed' ? t.key.reasonPerson : t.key.reasonDevice, { label: r.label, date: f.relative(r.at, now) }))}
       />
     </div>
   )
@@ -161,13 +161,13 @@ function Steps({ status }: { status: KeyStatus }) {
                 { label: t.key.progressProbe, state: r.probe },
                 ...r.disks.map((d) => ({ label: fmt(t.key.progressDisk, { name: d.name }), state: d.state })),
                 {
-                  label: t.key.progressMacs,
-                  state: r.macs.updated >= r.macs.total && r.disks.every((d) => d.state === 'done') ? 'done' : r.disks.every((d) => d.state === 'done') ? 'running' : 'pending',
-                  aside: r.disks.every((d) => d.state === 'done') ? fmt(t.key.progressCount, { n: r.macs.updated, total: r.macs.total }) : '',
+                  label: t.key.progressDevices,
+                  state: r.devices.updated >= r.devices.total && r.disks.every((d) => d.state === 'done') ? 'done' : r.disks.every((d) => d.state === 'done') ? 'running' : 'pending',
+                  aside: r.disks.every((d) => d.state === 'done') ? fmt(t.key.progressCount, { n: r.devices.updated, total: r.devices.total }) : '',
                 },
               ]}
             />
-            {r.state === 'awaiting_old_key_deletion' && r.macs.updated < r.macs.total && <SlotNote className="text-[13px] text-ink-2">{t.key.macsInformative}</SlotNote>}
+            {r.state === 'awaiting_old_key_deletion' && r.devices.updated < r.devices.total && <SlotNote className="text-[13px] text-ink-2">{t.key.devicesInformative}</SlotNote>}
             </>
           )}
         </Step>

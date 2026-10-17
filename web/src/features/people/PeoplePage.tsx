@@ -20,7 +20,7 @@ import { useFormat } from '@/lib/format'
 import { useFlash, useNow } from '@/lib/hooks'
 import { useCurrentSession } from '@/features/auth/hooks'
 import { KeyNotice } from '@/features/key/KeyNotice'
-import { useMacs } from '@/features/macs/hooks'
+import { useDevices } from '@/features/devices/hooks'
 import { useChangeRole, useInvite, usePeople, useRemovePerson, useResendInvite } from './hooks'
 
 const displayName = (p: Person) => p.name ?? p.email
@@ -85,11 +85,11 @@ function RemoveDialog({ person, onClose, onDone }: { person: Person; onClose(): 
   const { t } = useI18n()
   const errorText = useErrorText()
   const remove = useRemovePerson()
-  const macs = useMacs()
+  const macs = useDevices()
   const theirs = macs.data?.filter((m) => m.owner.id === person.id && !m.revokedAt) ?? []
   const invited = person.status === 'invited'
   const name = displayName(person)
-  const macNames = rich(theirs.map((_, i) => `{m${i}}`).join(t.people.and), Object.fromEntries(theirs.map((m, i) => [`m${i}`, <b key={m.id} className="font-semibold text-ink">{m.name}</b>])))
+  const deviceNames = rich(theirs.map((_, i) => `{m${i}}`).join(t.people.and), Object.fromEntries(theirs.map((m, i) => [`m${i}`, <b key={m.id} className="font-semibold text-ink">{m.name}</b>])))
 
   return (
     <Dialog
@@ -109,10 +109,10 @@ function RemoveDialog({ person, onClose, onDone }: { person: Person; onClose(): 
     >
       {invited ? (
         <p>{t.people.cancelInviteBody}</p>
-      ) : person.macCount > 0 ? (
-        <SlotList items={[rich(t.people.removeMacs, { macs: macNames }), t.people.removeCache, t.people.removeKey]} />
+      ) : person.deviceCount > 0 ? (
+        <SlotList items={[rich(t.people.removeDevices, { devices: deviceNames }), t.people.removeCache, t.people.removeKey]} />
       ) : (
-        <SlotList items={[t.people.removeNoMacs]} />
+        <SlotList items={[t.people.removeNoDevices]} />
       )}
       {remove.isError && (
         <div className="notice grid gap-1 px-4 py-3" role="alert">
@@ -203,7 +203,7 @@ function PersonRow({ person, onRemove, onFlash }: { person: Person; onRemove(): 
         )}
       </td>
       <td>{status}</td>
-      <td className="num text-right">{person.macCount}</td>
+      <td className="num text-right">{person.deviceCount}</td>
       <td>{last}</td>
       <td className="text-right">
         {!removed && (
@@ -278,7 +278,7 @@ export function PeoplePage() {
                   <th>{t.people.colPerson}</th>
                   <th>{t.people.colRole}</th>
                   <th>{t.people.colStatus}</th>
-                  <th className="text-right">{t.people.colMacs}</th>
+                  <th className="text-right">{t.people.colDevices}</th>
                   <th>{t.people.colLastSignIn}</th>
                   <th>
                     <span className="sr-only">{t.common.edit}</span>

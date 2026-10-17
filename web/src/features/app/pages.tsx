@@ -22,8 +22,8 @@ export function NotFound() {
   )
 }
 
-/** The overview for admins; members have only their Macs. */
+/** The overview for admins; members have only their devices. */
 export function Home() {
   const session = useSession()
-  return session.data?.role === 'admin' ? <OverviewPage /> : <Navigate to="/mac" replace />
+  return session.data?.role === 'admin' ? <OverviewPage /> : <Navigate to="/dispositivi" replace />
 }
