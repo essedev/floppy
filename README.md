@@ -47,7 +47,7 @@ A launchd agent checks every 2 minutes that the VM, JuiceFS and Samba are runnin
 
 ## Status
 
-Early: a test package for macOS, tried on OVH Object Storage in Milan, with the metadata in SQLite inside each VM, so every Mac has its own disk. The team version is designed and proven in a local spike: one disk shared by every Mac, metadata in a central Valkey with a replica in each VM, sign-in in the browser, a menu bar app (`docs/architecture.html`, `docs/concepts/`). It is not built yet. Measurements, decisions and alternatives are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), plans in [docs/ROADMAP.md](docs/ROADMAP.md).
+Early: a test package for macOS, tried on OVH Object Storage in Milan, with the metadata in SQLite inside each VM, so every Mac has its own disk. The team version is being built: the control plane (`server/`, sign-in, people, devices, disks, key rotation, storage modes) and its admin web (`web/`) work end to end on a local stack; the menu bar app (`app/`) has its interface but is not connected yet; the engine for the team version (a Valkey replica in each VM, the patched JuiceFS, disks as folders) is next. Measurements, decisions and alternatives are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), plans in [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## License
 

@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Floppy is a shared remote disk for video teams on macOS: it shows up in the Finder as **Floppy**, and the files live on S3 object storage (OVH) through JuiceFS. On macOS JuiceFS runs in a Lima VM (Debian) and reaches the Mac over SMB, because mounting it directly would need macFUSE's kernel extension. The engine is a bash command (`macos/bin/floppy`) shipped in a private zip. The team architecture (a central Valkey with a metadata replica in each VM, a patched JuiceFS, a control plane, a Tauri app) is drawn in `docs/architecture.html` and the concepts in `docs/concepts/`, proven in `spike/`, not built yet.
+Floppy is a shared remote disk for teams on macOS that share big files, video first: it shows up in the Finder as **Floppy**, and the files live on S3 object storage (OVH) through JuiceFS. On macOS JuiceFS runs in a Lima VM (Debian) and reaches the Mac over SMB, because mounting it directly would need macFUSE's kernel extension. The engine is a bash command (`macos/bin/floppy`) shipped in a private zip. The team version is being built: the control plane in `server/`, its admin web in `web/`, the menu bar app in `app/`, the site in `site/`, shared tokens in `design/`; its engine (a Valkey replica per VM, the patched JuiceFS from `spike/juicefs-replica`) is proven in `spike/` and drawn in `docs/architecture.html`.
 
 Public repository: code, comments, docs and commits in English; README.md is mirrored in README.it.md in the same commit.
 
