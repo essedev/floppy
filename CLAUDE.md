@@ -22,6 +22,8 @@ scripts/release-app.sh                   # tag, GitHub release, cask into essede
 scripts/package.sh my-test.env [dist]    # zip for a tester (holds the keys), until the cask replaces it
 bash floppy/install.sh                    # from the unpacked package: installs into ~/.floppy and mounts
 ~/.floppy/bin/floppy status                # setup|start|stop|status|warmup <path>|free <path>|uninstall
+~/.floppy/bin/floppy disks apply <secrets.json  # team disks from ~/.floppy/disks.json; `disks clear` on revocation
+FLOPPY_HOME=/tmp/fd FLOPPY_VM=floppy-dev macos/install.sh   # a development VM beside the real one
 
 # Apply repo changes to this Mac's install (keeps VM and volume)
 cp macos/bin/floppy ~/.floppy/bin/ && cp macos/vm/guest/* ~/.floppy/vm/guest/ \
@@ -61,6 +63,12 @@ cd web && pnpm dev             # http://localhost:4508; pnpm typecheck, lint, bu
 **macOS `/bin/bash` is 3.2**: with `set -u` an empty array expanded as `"${a[@]}"` is an error. Write `${a[@]+"${a[@]}"}`.
 
 **No external network during install.** An office DNS did not resolve `cloud.debian.org`: the Debian image, the patched JuiceFS (built by `package.sh` from `spike/juicefs-replica`) and the Samba and FUSE `.deb` files are in the zip (`scripts/package.sh`). The `.deb` files are the whole dependency closure, taken in a `debian:trixie` container with an empty dpkg status: a plain `--download-only` would miss the libraries the container already has and the image may have in an older version. The list is `PACKAGES` in `guest-install.sh`, which `package.sh` reads; `deb.debian.org` stays as a fallback if the local repository fails.
+
+**Samba's directory leases stay off** (`smb3 directory leases = no`): with them the macOS client keeps every folder it listed open, and a team disk can never be unmounted to apply lowered access.
+
+**Team disks change mount options only in `disks apply`, with a plain unmount**: a busy disk is reported `pending` and retried, never forced (see the gotcha on remounting).
+
+**Lima's socket paths must fit in 104 characters**: a test `FLOPPY_HOME` needs a short real path, since Lima resolves symlinks.
 
 **`systemctl is-active` with several units says yes if at least one is active.** A check on `floppy-mount smbd` together missed a stopped Samba. One unit per call.
 
