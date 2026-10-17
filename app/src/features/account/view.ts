@@ -5,7 +5,22 @@
  */
 
 import { it } from "@/i18n/it";
-import type { AuthError, AuthView } from "@/lib/types";
+import type { AuthError, AuthView, OutNotice } from "@/lib/types";
+
+/** The red notice for a Mac that lost its access, by reason; null for the person's own sign-out. */
+export function lostAccess(notice: OutNotice | null): { title: string; body: string } | null {
+  const t = it.account;
+  switch (notice) {
+    case "revoked":
+      return t.revoked;
+    case "unknown":
+      return t.unknown;
+    case "already_signed_out":
+      return t.alreadySignedOut;
+    default:
+      return null;
+  }
+}
 
 /** The six digits of a typed or pasted code. */
 export function cleanCode(value: string): string {
@@ -61,7 +76,8 @@ export function authFace(view: AuthView): { led: "ok" | "dl" | "err" | "off"; bl
   const working = view.busy != null;
   switch (view.phase) {
     case "signed_out":
-      if (view.notice === "revoked") return { led: "err", blink: false, readout: f.revoked };
+      if (view.busy === "clearing") return { led: "dl", blink: true, readout: f.clearing };
+      if (lostAccess(view.notice)) return { led: "err", blink: false, readout: f.revoked };
       if (view.error && !working) return { led: "err", blink: false, readout: f.error };
       return { led: working ? "dl" : "off", blink: working, readout: working ? f.checking : f.signedOut };
     case "code_sent":
@@ -74,6 +90,7 @@ export function authFace(view: AuthView): { led: "ok" | "dl" | "err" | "off"; bl
         ? { led: "dl", blink: true, readout: f.registering }
         : { led: view.error ? "err" : "dl", blink: false, readout: view.error ? f.error : f.registering };
     case "signed_in":
+      if (view.busy === "clearing") return { led: "dl", blink: true, readout: f.clearing };
       return { led: "ok", blink: false, readout: f.signedIn };
   }
 }

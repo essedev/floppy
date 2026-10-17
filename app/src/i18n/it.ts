@@ -20,6 +20,7 @@ export const it = {
     off: "SPENTO",
     notInstalled: "NUOVO",
     needsSetup: "DA PREPARARE",
+    noDisks: "NESSUN DISCO",
     error: "ERRORE",
     ready: "PRONTO",
     usage: (used: string, limit: string) => `${used} / ${limit} GB`,
@@ -29,6 +30,20 @@ export const it = {
   panel: {
     label: "Pannello di Floppy",
     connected: { title: "Floppy è collegato", body: "I progetti sono nel Finder, sotto Floppy." },
+    connectedTeam: { title: "Floppy è collegato", body: "I dischi del team sono nel Finder, dentro Floppy." },
+    noDisks: {
+      signed_out: {
+        title: "Accedi per vedere i dischi",
+        body: "Floppy è pronto su questo Mac: i dischi del team arrivano dopo l'accesso.",
+      },
+      registering: { title: "Collego questo Mac al team", body: "Ancora un momento: poi arrivano i dischi." },
+      none: {
+        title: "Nessun disco per te, per ora",
+        body: "Quando chi gestisce il team ti dà un disco, compare qui da solo.",
+      },
+      all_off: { title: "Hai spento tutti i dischi", body: "Riaccendine uno qui sotto per ritrovarlo nel Finder." },
+      signIn: "Accedi",
+    },
     activity: {
       warmup: (name: string) => `Rendo disponibile ${name}`,
       warmupBody: "Puoi già montare: i file arrivano mentre lavori.",
@@ -117,6 +132,8 @@ export const it = {
             return "Non sono riuscito ad accendere Floppy";
           case "stop":
             return "Non sono riuscito a spegnere Floppy";
+          case "restart":
+            return "Non sono riuscito a riavviare Floppy";
           case "setup":
             return "La preparazione non è andata a buon fine";
           case "install":
@@ -125,6 +142,66 @@ export const it = {
       },
     },
     engineDetail: "Dettaglio del comando",
+  },
+
+  team: {
+    restart: {
+      title: "Floppy va riavviato",
+      body: "Con i nuovi dischi gli serve più memoria. Riavvia quando non stai lavorando.",
+      action: "Riavvia",
+      confirmTitle: "Riavviare Floppy adesso?",
+      confirmBody: "Salva e chiudi i progetti aperti: per qualche secondo i dischi spariscono dal Finder.",
+      confirm: "Riavvia",
+    },
+    single: {
+      title: "Questo Mac usa ancora il disco di prova",
+      body: "I dischi del team non possono stare accanto al disco di prova. Chiedi a chi ti ha installato Floppy di toglierlo: dopo arrivano da soli.",
+    },
+    error: { title: "Non riesco ad aggiornare i dischi", body: "Riprovo da solo tra un minuto." },
+    rejected: (name: string) => `«${name}» non si può collegare su questo Mac: avvisa chi gestisce il team.`,
+    applying: "Aggiorno i dischi…",
+  },
+
+  disks: {
+    heading: "Dischi del team",
+    readout: {
+      mounted: "COLLEGATO",
+      readOnly: "SOLA LETTURA",
+      offline: "OFFLINE",
+      waiting: "IN ATTESA",
+      starting: "AVVIO",
+      failed: "ERRORE",
+      off: "SPENTO",
+      leaving: "IN USO",
+      unknown: "IN VERIFICA",
+    },
+    line: {
+      mounted: "Pronto",
+      readOnly: "Puoi aprire i file, non modificarli",
+      offline: "Il team non risponde: puoi aprire i file, non salvarli",
+      offlineRead: "Il team non risponde: i file si aprono lo stesso",
+      becomingReadOnly: "Diventa di sola lettura appena chiudi i file aperti",
+      becomingWritable: "Potrai modificarlo appena chiudi i file aperti",
+      updating: "Si aggiorna appena chiudi i file aperti",
+      starting: "Lo sto collegando…",
+      failed: "Non si è collegato: riprovo da solo",
+      stopped: "Non è collegato: riprovo da solo",
+      off: "Spento su questo Mac",
+      leaving: "Si spegne appena chiudi i file aperti",
+    },
+    cache: (size: string) => `${size} su questo Mac`,
+    actions: (name: string) => `Azioni per ${name}`,
+    projects: (name: string) => `Progetti di ${name}`,
+    showInFinder: "Mostra nel Finder",
+    freeSpace: "Libera spazio",
+    turnOff: "Spegni su questo Mac",
+    turnOn: "Accendi su questo Mac",
+    offConfirm: {
+      title: (name: string) => `Spegnere ${name} su questo Mac?`,
+      body: "Sparisce dal Finder e le sue copie locali vengono cancellate. I file restano sul cloud del team: lo riaccendi quando vuoi.",
+      confirm: "Spegni",
+    },
+    empty: "Il disco è vuoto.",
   },
 
   space: {
@@ -165,6 +242,7 @@ export const it = {
       registering: "COLLEGO",
       signedIn: "COLLEGATO",
       revoked: "SCOLLEGATO",
+      clearing: "TOLGO I DISCHI",
       error: "ERRORE",
     },
     form: {
@@ -223,15 +301,23 @@ export const it = {
     },
     revoked: {
       title: "Questo Mac è stato scollegato dal team",
-      body: "Chi gestisce il team gli ha tolto l'accesso. Il disco e i file su questo Mac non sono stati toccati: per tornare, accedi di nuovo.",
+      body: "Chi gestisce il team gli ha tolto l'accesso: i dischi del team e le loro copie su questo Mac sono stati tolti. I file restano sul cloud del team. Per tornare, accedi di nuovo.",
       signIn: "Accedi di nuovo",
     },
-    signedOutNote: "Sei uscito: questo Mac non è più collegato al team.",
+    unknown: {
+      title: "Il server non riconosce questo Mac",
+      body: "Forse è stato tolto dal team, o all'indirizzo risponde un altro server. I dischi del team sono stati tolti da questo Mac: per tornare, accedi di nuovo.",
+    },
+    alreadySignedOut: {
+      title: "Questo Mac era già uscito dal team",
+      body: "I dischi del team sono stati tolti da questo Mac. Per tornare, accedi di nuovo.",
+    },
+    signedOutNote: "Sei uscito: questo Mac non è più collegato al team e i suoi dischi sono stati tolti.",
     signOut: {
       action: "Esci",
       signingOut: "Esco…",
       title: "Uscire da Floppy su questo Mac?",
-      body: "Il Mac viene scollegato dal team e le sue chiavi tolte dal portachiavi. Il disco e i file non vengono toccati. Per tornare serve un nuovo accesso.",
+      body: "Il Mac viene scollegato dal team: i dischi spariscono dal Finder e le loro copie locali vengono cancellate. I file restano sul cloud del team. Prima salva e chiudi i progetti aperti.",
       confirm: "Esci",
       localOnly: "Esci solo da questo Mac",
       localOnlyNote:
@@ -250,6 +336,7 @@ export const it = {
       invalid_code: "Codice sbagliato.",
       attemptsLeft: (n: number) => (n === 1 ? "Codice sbagliato. Ti resta un tentativo." : `Codice sbagliato. Ti restano ${n} tentativi.`),
       sign_out_failed: "Il server non risponde, quindi il Mac è ancora collegato al team.",
+      disks_not_cleared: "Non sono riuscito a togliere i dischi del team da questo Mac: riprovo da solo.",
       keychain: "Il portachiavi del Mac non ha accettato le chiavi di Floppy.",
       settings: "Non sono riuscito a salvare l'impostazione.",
       server: "Il server ha risposto in modo inatteso.",
@@ -264,7 +351,11 @@ export const it = {
   settings: {
     title: "Impostazioni",
     account: "Account",
-    accountLine: (org: string | null, device: string) => (org ? `${org} · ${device}` : device),
+    accountLine: (org: string | null, email: string) => (org ? `${org} · ${email}` : email),
+    disks: "Dischi",
+    disksLine: "Spegni un disco che non ti serve: sparisce dal Finder e libera spazio su questo Mac.",
+    disksNone: "Nessun disco del team su questo Mac.",
+    diskToggle: (name: string) => `Usa ${name} su questo Mac`,
     server: "Server",
     serverLine: "L'indirizzo del pannello di controllo del team. Si cambia solo da disconnessi.",
     serverDefault: "predefinito",
@@ -354,6 +445,17 @@ export const it = {
       title: "Floppy è installato ed è spento",
       body: "Accendilo dal pannello nella barra dei menu quando ti serve.",
     },
+    starting: {
+      title: "Collego i dischi del team",
+      body: "Pochi secondi e li trovi nel Finder, dentro Floppy.",
+    },
+    noDisks: {
+      signedIn: {
+        title: "Floppy è pronto",
+        body: "I dischi del team arrivano nel Finder appena chi gestisce il team te ne dà uno.",
+      },
+      signedOut: { title: "Floppy è installato", body: "Accedi al tuo team per vedere i suoi dischi nel Finder." },
+    },
   },
 
   notifications: {
@@ -371,6 +473,8 @@ export const it = {
     nothing_to_cancel: "Non c'è niente da interrompere.",
     list_timeout: "Il disco non ha risposto in tempo.",
     no_bundle: "Questa copia dell'app non contiene il motore di Floppy.",
+    not_team: "Questo Mac non usa ancora i dischi del team.",
+    no_such_disk: "Questo disco non c'è più su questo Mac.",
     engine: "Il comando di Floppy non ha risposto.",
     io: "Qualcosa non ha funzionato sul Mac.",
     auth_busy: "Floppy sta già facendo un passo dell'accesso: aspetta che finisca.",

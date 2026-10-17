@@ -10,7 +10,7 @@ import { type FormEvent, type ReactNode, useEffect, useId, useState } from "reac
 import { Mail } from "lucide-react";
 import { Button, CodeInput, Led, Notice, Readout, TextInput } from "@/components/ui";
 import { useAuthStep } from "@/features/account/hooks";
-import { countdown, errorDetail, errorText, secondsUntil, serverEditable } from "@/features/account/view";
+import { countdown, errorDetail, errorText, lostAccess, secondsUntil, serverEditable } from "@/features/account/view";
 import { it } from "@/i18n/it";
 import { backend } from "@/lib/backend";
 import type { AuthError, AuthView, CommandError } from "@/lib/types";
@@ -124,16 +124,17 @@ function EmailStep({
     start.mutate({ email: email.trim(), deviceName: name.trim() });
   };
 
+  const lost = lostAccess(view.notice);
   return (
     <form className="flex flex-col gap-3.5" onSubmit={(e) => void submit(e)} noValidate>
-      {view.notice === "revoked" && (
-        <Notice led="err" title={t.revoked.title}>
-          {t.revoked.body}
+      {lost && (
+        <Notice led="err" title={lost.title}>
+          {lost.body}
         </Notice>
       )}
       {view.notice === "signed_out" && <Notice>{t.signedOutNote}</Notice>}
       {/* After a revocation the notice says what happened; the heading would repeat it. */}
-      {view.notice !== "revoked" && <Heading title={t.form.title} body={t.form.body} size={size} />}
+      {!lost && <Heading title={t.form.title} body={t.form.body} size={size} />}
       <label htmlFor={emailId} className="flex flex-col gap-1.5">
         <span className="text-[13px] font-semibold">{t.form.email}</span>
         <TextInput

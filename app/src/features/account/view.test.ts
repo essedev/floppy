@@ -19,7 +19,7 @@ const waiting: AuthView = {
   expires_at: "2026-10-17T20:30:00.123456Z",
   resend_at: "2026-10-17T20:16:00Z",
 };
-const inside: AuthView = { ...base, phase: "signed_in", email: "g@x.it", device_name: "Mac", organization: null };
+const inside: AuthView = { ...base, phase: "signed_in", email: "g@x.it", device_name: "Mac", organization: null, user_name: null };
 
 describe("cleanCode", () => {
   test("keeps six digits from what was typed or pasted", () => {
@@ -69,6 +69,11 @@ describe("authFace", () => {
     expect(authFace({ ...waiting, error: { code: "invalid_code", attempts_left: 2 } }).led).toBe("err");
     expect(authFace({ ...base, phase: "ended", reason: "locked", email: "g@x.it", device_name: "Mac" }).led).toBe("err");
     expect(authFace(inside).led).toBe("ok");
+    expect(authFace({ ...inside, busy: "clearing" })).toMatchObject({ led: "dl", blink: true });
+    for (const notice of ["unknown", "already_signed_out"] as const) {
+      expect(authFace({ ...out, notice }).led).toBe("err");
+    }
+    expect(authFace({ ...out, notice: "signed_out" }).led).toBe("off");
   });
 });
 

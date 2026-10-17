@@ -35,11 +35,11 @@ export function useAppInfo() {
   return useQuery({ queryKey: keys.info, queryFn: backend.appInfo, staleTime: Infinity });
 }
 
-/** The folders at the top of the disk, read only while it is connected. */
-export function useFolders(enabled: boolean) {
+/** The folders at the top of the disk, or of `path` on it, read only while it is connected. */
+export function useFolders(enabled: boolean, path?: string) {
   return useQuery({
-    queryKey: keys.folders,
-    queryFn: backend.listFolders,
+    queryKey: [...keys.folders, path ?? null],
+    queryFn: () => backend.listFolders(path),
     enabled,
     retry: false,
     staleTime: 10_000,

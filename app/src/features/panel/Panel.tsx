@@ -1,29 +1,35 @@
 /**
  * The panel under the menu bar icon (concept-c-app, DECISIONS #12): the
  * faceplate first, then the state in one sentence with one large action, the
- * space on this Mac, the projects with their row menu, and the footer.
+ * space on this Mac, the projects with their row menu, and the footer. In the
+ * team version the rows are the team's disks (DECISIONS #20: folders of the
+ * one share), each with its state on its LED and its projects inside.
  */
 
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Ellipsis, ExternalLink, Folder as FolderIcon, Power, RefreshCw, Settings } from "lucide-react";
+import { ChevronRight, Ellipsis, ExternalLink, Folder as FolderIcon, Power, RefreshCw, Settings } from "lucide-react";
 import { Faceplate } from "@/components/Faceplate";
 import { Button, Confirm, Led, Notice, Readout, SlotMark } from "@/components/ui";
 import { useAuth } from "@/features/account/hooks";
+import { lostAccess } from "@/features/account/view";
 import { faceFor, isBusy } from "@/features/disk/face";
 import { keys, useAppInfo, useCountdown, useDiskAction, useFolders, useStatus } from "@/features/disk/hooks";
+import { diskLook, noDisksCase, teamOf } from "@/features/disk/team";
 import { it } from "@/i18n/it";
 import { backend } from "@/lib/backend";
 import { gb, gbUnit } from "@/lib/format";
-import type { CommandError, DiskStatus, Folder } from "@/lib/types";
+import type { CommandError, DiskStatus, DiskView, Folder, TeamView } from "@/lib/types";
 
 const WITH_SPACE = new Set(["connected", "unreachable", "starting", "stopping"]);
+const WITH_DISKS = new Set(["connected", "unreachable", "starting", "no_disks"]);
 
 export function Panel() {
   const { data: status } = useStatus();
   const info = useAppInfo();
   const qc = useQueryClient();
   const root = useRef<HTMLDivElement>(null);
+  const team = status ? teamOf(status) : null;
 
   // The window takes the panel's height: its content changes with the state.
   useEffect(() => {
@@ -63,7 +69,11 @@ export function Panel() {
           <StatusSection status={status} />
           <RevokedSection />
           {WITH_SPACE.has(status.state) && status.space?.cache_used_mb != null && <SpaceSection status={status} />}
-          {status.state === "connected" && <FolderList status={status} />}
+          {team && !team.refused_single ? (
+            WITH_DISKS.has(status.state) && team.disks.length > 0 && <DiskList status={status} team={team} />
+          ) : (
+            status.state === "connected" && <FolderList status={status} />
+          )}
           <Footer status={status} version={info.data?.version} />
         </>
       ) : (
@@ -81,11 +91,12 @@ export function Panel() {
 /** An admin took this Mac off the team: say so here too, with the way back. */
 function RevokedSection() {
   const { data: auth } = useAuth();
-  if (auth?.phase !== "signed_out" || auth.notice !== "revoked") return null;
+  const lost = auth?.phase === "signed_out" ? lostAccess(auth.notice) : null;
+  if (!lost) return null;
   return (
     <div className="px-4 pb-3">
-      <Notice led="err" title={it.account.revoked.title}>
-        {it.account.revoked.body}
+      <Notice led="err" title={lost.title}>
+        {lost.body}
         <span className="mt-2.5 block">
           <Button size="sm" variant="primary" onClick={() => void backend.openSettings()}>
             {it.account.revoked.signIn}
@@ -103,12 +114,16 @@ function ActionError({ error }: { error: CommandError | null }) {
 
 function StatusSection({ status }: { status: DiskStatus }) {
   const seconds = useCountdown(status);
+  const { data: auth } = useAuth();
+  const team = teamOf(status);
   const start = useDiskAction(backend.start);
+  const restart = useDiskAction(backend.restart);
   const install = useDiskAction(backend.installEngine);
   const cancel = useDiskAction(backend.cancel);
   const openFinder = useDiskAction<string | undefined>(backend.openInFinder);
   const freeAll = useDiskAction<string>(backend.free);
   const [confirmFree, setConfirmFree] = useState(false);
+  const [confirmRestart, setConfirmRestart] = useState(false);
 
   let title: string;
   let body: string | null = null;
@@ -138,10 +153,23 @@ function StatusSection({ status }: { status: DiskStatus }) {
           </>
         );
       } else {
-        title = it.panel.connected.title;
-        body = it.panel.connected.body;
+        const copy = status.mode === "team" ? it.panel.connectedTeam : it.panel.connected;
+        title = copy.title;
+        body = copy.body;
         actions = finder;
       }
+      break;
+    }
+    case "no_disks": {
+      const which = noDisksCase(team, auth);
+      title = it.panel.noDisks[which].title;
+      body = it.panel.noDisks[which].body;
+      actions =
+        which === "signed_out" ? (
+          <Button variant="primary" size="lg" className="flex-1" onClick={() => void backend.openSettings()}>
+            {it.panel.noDisks.signIn}
+          </Button>
+        ) : null;
       break;
     }
     case "starting":
@@ -218,6 +246,50 @@ function StatusSection({ status }: { status: DiskStatus }) {
       </Notice>,
     );
   }
+  if (team?.refused_single) {
+    extra.push(
+      <Notice key="single" led="err" title={it.team.single.title}>
+        {it.team.single.body}
+      </Notice>,
+    );
+  } else if (team?.error && !team.applying) {
+    extra.push(
+      <Notice key="team-error" led="err" title={it.team.error.title}>
+        <span className="block">{it.team.error.body}</span>
+        <span className="mt-1 block font-ro text-[11.5px] text-ink-2">{team.error}</span>
+      </Notice>,
+    );
+  }
+  for (const r of team?.rejected ?? []) {
+    extra.push(<Notice key={`rejected-${r.id}`}>{it.team.rejected(r.name)}</Notice>);
+  }
+  // The new memory comes only with a restart, and the app never restarts the
+  // disk by itself: the person picks the moment.
+  if (team?.restart_needed && !status.job && ["connected", "no_disks", "unreachable"].includes(status.state)) {
+    extra.push(
+      confirmRestart ? (
+        <Confirm
+          key="restart"
+          title={it.team.restart.confirmTitle}
+          body={it.team.restart.confirmBody}
+          confirm={it.team.restart.confirm}
+          cancel={it.panel.cancel}
+          onConfirm={() => {
+            setConfirmRestart(false);
+            restart.mutate();
+          }}
+          onCancel={() => setConfirmRestart(false)}
+        />
+      ) : (
+        <Notice key="restart" led="dl" title={it.team.restart.title}>
+          <span className="block">{it.team.restart.body}</span>
+          <Button size="sm" className="mt-2 bg-raised shadow-[0_0_0_0.5px_rgba(0,0,0,0.12)]" onClick={() => setConfirmRestart(true)}>
+            {it.team.restart.action}
+          </Button>
+        </Notice>
+      ),
+    );
+  }
   if (status.state === "connected" && status.wrong_mount_point && status.mount_point) {
     extra.push(
       <Notice key="mount" led="err" title={it.notices.wrongMount.title(status.mount_point)}>
@@ -263,7 +335,7 @@ function StatusSection({ status }: { status: DiskStatus }) {
     );
   }
 
-  const failure = start.error ?? install.error ?? cancel.error ?? openFinder.error ?? freeAll.error ?? null;
+  const failure = start.error ?? restart.error ?? install.error ?? cancel.error ?? openFinder.error ?? freeAll.error ?? null;
   return (
     <section className="flex flex-col gap-4 px-5 pt-5 pb-[22px]">
       <div>
@@ -271,7 +343,7 @@ function StatusSection({ status }: { status: DiskStatus }) {
         {body && <p className="mt-1 mb-0 text-[13.5px] text-ink-2">{body}</p>}
       </div>
       {extra}
-      <div className="flex gap-2">{actions}</div>
+      {actions && <div className="flex gap-2">{actions}</div>}
       <ActionError error={failure} />
     </section>
   );
@@ -312,8 +384,9 @@ function LegendRow({ color, label, value }: { color: string; label: string; valu
   );
 }
 
-function FolderList({ status }: { status: DiskStatus }) {
-  const folders = useFolders(status.state === "connected" && !!status.mount_point);
+/** The projects at the top of the disk, or inside one team disk (`path`, nested in its row). */
+function FolderList({ status, path }: { status: DiskStatus; path?: string }) {
+  const folders = useFolders(status.state === "connected" && !!status.mount_point, path);
   const [open, setOpen] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<string | null>(null);
   const warmup = useDiskAction<string>(backend.warmup);
@@ -337,7 +410,7 @@ function FolderList({ status }: { status: DiskStatus }) {
       </div>
     );
   } else if (list.length === 0) {
-    content = <p className="m-0 px-3 py-2 text-[13px] text-ink-2">{it.folders.empty}</p>;
+    content = <p className="m-0 px-3 py-2 text-[13px] text-ink-2">{path ? it.disks.empty : it.folders.empty}</p>;
   } else {
     content = list.map((f) => (
       <FolderRow
@@ -374,6 +447,18 @@ function FolderList({ status }: { status: DiskStatus }) {
   }
 
   const failure = warmup.error ?? free.error ?? reveal.error ?? null;
+  if (path) {
+    return (
+      <div className="pb-1 pl-5" role="group" aria-label={it.disks.projects(path.split("/").pop() ?? "")}>
+        {content}
+        {failure && (
+          <div className="px-1 pt-1">
+            <ActionError error={failure} />
+          </div>
+        )}
+      </div>
+    );
+  }
   return (
     <section className="mx-2 rounded-[14px] bg-sunken px-1 pt-3.5 pb-1.5">
       <div className="mb-1 flex items-baseline justify-between px-3 text-[11px] font-semibold tracking-[0.1em] text-ink-2 uppercase">
@@ -387,6 +472,177 @@ function FolderList({ status }: { status: DiskStatus }) {
         </div>
       )}
     </section>
+  );
+}
+
+/** The team's disks: one row each, its state on the LED, its projects inside. */
+function DiskList({ status, team }: { status: DiskStatus; team: TeamView }) {
+  const [open, setOpen] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<string | null>(null);
+  return (
+    <section className="mx-2 rounded-[14px] bg-sunken px-1 pt-3.5 pb-1.5" aria-label={it.disks.heading}>
+      <div className="mb-1 flex items-baseline justify-between px-3 text-[11px] font-semibold tracking-[0.1em] text-ink-2 uppercase">
+        <span>{it.disks.heading}</span>
+        {team.applying ? (
+          <span className="text-[12px] font-normal tracking-normal normal-case">{it.team.applying}</span>
+        ) : (
+          <b className="font-ro text-[12px] font-normal tracking-[0.02em] text-ink">{team.disks.length}</b>
+        )}
+      </div>
+      {team.disks.map((d) => (
+        <DiskRow
+          key={d.id}
+          disk={d}
+          status={status}
+          applying={team.applying}
+          menuOpen={open === d.id}
+          expanded={expanded === d.id && !!d.path}
+          onMenu={() => setOpen(open === d.id ? null : d.id)}
+          onCloseMenu={() => setOpen(null)}
+          onExpand={() => setExpanded(expanded === d.id ? null : d.id)}
+        />
+      ))}
+    </section>
+  );
+}
+
+interface DiskRowProps {
+  disk: DiskView;
+  status: DiskStatus;
+  applying: boolean;
+  menuOpen: boolean;
+  expanded: boolean;
+  onMenu: () => void;
+  onCloseMenu: () => void;
+  onExpand: () => void;
+}
+
+function DiskRow({ disk, status, applying, menuOpen, expanded, onMenu, onCloseMenu, onExpand }: DiskRowProps) {
+  const look = diskLook(disk, applying);
+  const [confirm, setConfirm] = useState<"off" | "free" | null>(null);
+  const toggle = useDiskAction<boolean>((on) => backend.setDiskEnabled(disk.id, on));
+  const free = useDiskAction<string>(backend.free);
+  const reveal = useDiskAction<string | undefined>(backend.openInFinder);
+  const busy = !!status.job;
+  const working = !!disk.path && status.job?.path === disk.path;
+  const failure = toggle.error ?? free.error ?? reveal.error ?? null;
+  return (
+    <>
+      <div className={`flex min-h-12 items-center rounded-[10px] pr-1 pl-3 hover:bg-raised ${menuOpen || confirm ? "bg-raised" : ""}`}>
+        <span className="mr-[9px] -ml-px flex">
+          <Led state={working ? "dl" : (look.led ?? undefined)} blink={working || look.blink} />
+        </span>
+        <div className="min-w-0 flex-1 py-1.5">
+          <div className="flex items-baseline gap-2">
+            <button
+              type="button"
+              className="flex min-w-0 items-center gap-1 border-0 bg-transparent p-0 text-left text-ink disabled:cursor-default"
+              disabled={!disk.path}
+              aria-expanded={disk.path ? expanded : undefined}
+              aria-label={disk.path ? it.disks.projects(disk.folder) : undefined}
+              onClick={onExpand}
+            >
+              <span className={`truncate text-[13px] font-medium ${look.dim ? "text-ink-2" : ""}`}>{disk.folder}</span>
+              {disk.path && (
+                <ChevronRight
+                  size={13}
+                  strokeWidth={1.7}
+                  aria-hidden="true"
+                  className={`shrink-0 text-ink-3 transition-transform ${expanded ? "rotate-90" : ""}`}
+                />
+              )}
+            </button>
+            <Readout className="ml-auto shrink-0 text-[11px]">{working ? it.folders.working : look.readout}</Readout>
+          </div>
+          <span className="mt-px block text-[12px] leading-[1.35] text-ink-2">{look.line}</span>
+        </div>
+        <button
+          type="button"
+          className="grid size-[30px] place-items-center rounded-lg border-0 bg-transparent text-ink-2 hover:bg-sunken hover:text-ink"
+          aria-label={it.disks.actions(disk.folder)}
+          aria-expanded={menuOpen}
+          onClick={() => {
+            setConfirm(null);
+            onMenu();
+          }}
+        >
+          <Ellipsis size={16} strokeWidth={1.7} aria-hidden="true" />
+        </button>
+      </div>
+      {menuOpen && (
+        <div
+          role="menu"
+          className="mx-1 mt-1 mb-2 flex flex-col rounded-xl bg-raised p-1.5 shadow-[0_0_0_0.5px_rgba(0,0,0,0.12),0_12px_28px_-12px_rgba(40,30,20,0.35)]"
+        >
+          {disk.path && (
+            <>
+              <MenuItem
+                onClick={() => {
+                  onCloseMenu();
+                  reveal.mutate(disk.path!);
+                }}
+                aside={<FolderIcon size={14} strokeWidth={1.7} aria-hidden="true" />}
+              >
+                {it.disks.showInFinder}
+              </MenuItem>
+              <MenuItem
+                disabled={busy}
+                onClick={() => {
+                  onCloseMenu();
+                  setConfirm("free");
+                }}
+              >
+                {it.disks.freeSpace}
+              </MenuItem>
+            </>
+          )}
+          <MenuItem
+            disabled={toggle.isPending}
+            onClick={() => {
+              onCloseMenu();
+              if (disk.enabled) setConfirm("off");
+              else toggle.mutate(true);
+            }}
+          >
+            {disk.enabled ? it.disks.turnOff : it.disks.turnOn}
+          </MenuItem>
+        </div>
+      )}
+      {confirm === "off" && (
+        <Confirm
+          className="mx-1 mt-1 mb-2"
+          title={it.disks.offConfirm.title(disk.folder)}
+          body={it.disks.offConfirm.body}
+          confirm={it.disks.offConfirm.confirm}
+          cancel={it.panel.cancel}
+          onConfirm={() => {
+            setConfirm(null);
+            toggle.mutate(false);
+          }}
+          onCancel={() => setConfirm(null)}
+        />
+      )}
+      {confirm === "free" && disk.path && (
+        <Confirm
+          className="mx-1 mt-1 mb-2"
+          title={it.folders.freeConfirm.title(disk.folder)}
+          body={it.folders.freeConfirm.body}
+          confirm={it.folders.freeConfirm.confirm}
+          cancel={it.panel.cancel}
+          onConfirm={() => {
+            setConfirm(null);
+            free.mutate(disk.path!);
+          }}
+          onCancel={() => setConfirm(null)}
+        />
+      )}
+      {failure && (
+        <div className="px-1 pt-1">
+          <ActionError error={failure} />
+        </div>
+      )}
+      {expanded && disk.path && <FolderList status={status} path={disk.path} />}
+    </>
   );
 }
 
@@ -479,7 +735,7 @@ function MenuItem({ children, aside, disabled, onClick }: { children: ReactNode;
 function Footer({ status, version }: { status: DiskStatus; version: string | undefined }) {
   const [confirm, setConfirm] = useState(false);
   const stop = useDiskAction(backend.stop);
-  const canStop = status.state === "connected" || status.state === "unreachable";
+  const canStop = status.state === "connected" || status.state === "unreachable" || status.state === "no_disks";
   return (
     <>
       {confirm && (

@@ -32,6 +32,8 @@ export function faceFor(s: DiskStatus): FaceProps {
       return { led: "err", readout: it.face.unreachable, fill, right };
     case "off":
       return { led: "off", readout: it.face.off, fill, right, dim: true };
+    case "no_disks":
+      return { led: "off", readout: it.face.noDisks, fill, right };
     case "needs_setup":
       return { led: "off", readout: it.face.needsSetup, fill: 0 };
     case "not_installed":

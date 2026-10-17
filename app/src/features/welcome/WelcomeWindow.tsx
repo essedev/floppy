@@ -52,7 +52,9 @@ export function WelcomeWindow() {
       {stage === "signin" && auth && (
         <SignInStage view={auth} computerName={info.data?.computer_name ?? null} version={info.data?.version} onNext={() => setStage("engine")} />
       )}
-      {stage === "engine" && status && setup && <EngineStage status={status} setup={setup} version={info.data?.version} />}
+      {stage === "engine" && status && setup && (
+        <EngineStage status={status} setup={setup} signedIn={signedIn} version={info.data?.version} />
+      )}
     </main>
   );
 }
@@ -83,7 +85,17 @@ function SignInStage({ view, computerName, version, onNext }: { view: AuthView; 
   );
 }
 
-function EngineStage({ status, setup, version }: { status: DiskStatus; setup: SetupProgress; version?: string }) {
+function EngineStage({
+  status,
+  setup,
+  signedIn,
+  version,
+}: {
+  status: DiskStatus;
+  setup: SetupProgress;
+  signedIn: boolean;
+  version?: string;
+}) {
   const install = useDiskAction(backend.installEngine);
   const setupOnly = useDiskAction(backend.runSetup);
   const openFinder = useDiskAction<string | undefined>(backend.openInFinder);
@@ -180,17 +192,28 @@ function EngineStage({ status, setup, version }: { status: DiskStatus; setup: Se
     );
   }
 
+  const close = { open: null, close: it.welcome.ready.close };
+  const noDisks = signedIn ? it.welcome.noDisks.signedIn : it.welcome.noDisks.signedOut;
   const copy =
     status.state === "connected"
       ? it.welcome.ready
       : status.state === "off"
-        ? { ...it.welcome.off, open: null, close: it.welcome.ready.close }
-        : { ...it.welcome.unreachable, open: null, close: it.welcome.ready.close };
+        ? { ...it.welcome.off, ...close }
+        : status.state === "no_disks"
+          ? { ...noDisks, ...close }
+          : status.state === "starting"
+            ? { ...it.welcome.starting, ...close }
+            : { ...it.welcome.unreachable, ...close };
   return (
     <>
       <Face {...faceFor(status)} />
       <Body>
         <Heading title={copy.title} body={copy.body} />
+        {status.team?.refused_single && (
+          <Notice led="err" title={it.team.single.title}>
+            {it.team.single.body}
+          </Notice>
+        )}
         <div className="flex gap-2">
           {copy.open && (
             <Button variant="primary" size="lg" className="flex-1" onClick={() => openFinder.mutate(undefined)}>

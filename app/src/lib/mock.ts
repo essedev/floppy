@@ -3,12 +3,13 @@
  * views run on these invented states to be looked at and checked with
  * Playwright: `?view=panel|settings|welcome&scenario=<name>`. The account has
  * its own scenarios, `auth_<phase or error>` (signed in otherwise), and steps
- * through them on clicks: code 123456 signs in, any other is wrong. The app
- * itself never uses this module. Folder names come from concept-a-panel.
+ * through them on clicks: code 123456 signs in, any other is wrong. The team
+ * version's are `team_<case>`. The app itself never uses this module. Folder
+ * names come from concept-a-panel.
  */
 
 import type { Backend } from "@/lib/backend";
-import type { AuthView, DiskStatus, Folder, Notice, SetupProgress } from "@/lib/types";
+import type { AuthView, DiskStatus, DiskView, Folder, Notice, SetupProgress, TeamView } from "@/lib/types";
 
 const params = new URLSearchParams(globalThis.location?.search ?? "");
 const scenario = params.get("scenario") ?? "connected";
@@ -34,6 +35,8 @@ const base: DiskStatus = {
   engine_path: "/Users/giulia/.floppy/bin/floppy",
   install: null,
   bundled: true,
+  mode: "single",
+  team: null,
 };
 
 const FOLDERS: Folder[] = [
@@ -45,6 +48,40 @@ const FOLDERS: Folder[] = [
 ].map((name) => ({ name, path: `/Volumes/Floppy/${name}` }));
 
 const unmounted = { mount_point: null, space: { ...base.space!, cache_used_mb: null, cache_limit_mb: null } };
+
+/** A mounted read-write team disk; the scenarios change what they need. */
+function disk(folder: string, over: Partial<DiskView> = {}): DiskView {
+  return {
+    id: folder.toLowerCase().replace(/[^a-z0-9]+/g, "-"),
+    folder,
+    path: `/Volumes/Floppy/${folder}`,
+    access: "write",
+    enabled: true,
+    state: "mounted",
+    mounted_access: "write",
+    pending: null,
+    cache_used_mb: 3.2 * GB,
+    cache_size_mb: 25 * GB,
+    replica: "up",
+    meta_mode: "replica",
+    online: true,
+    ...over,
+  };
+}
+const off = { path: null, enabled: false, state: "disabled", mounted_access: null, cache_used_mb: null, replica: "stopped", meta_mode: null, online: null } as const;
+const teamBase: TeamView = {
+  disks: [
+    disk("Archivio 2025", { access: "read", mounted_access: "read", cache_used_mb: 812 }),
+    disk("Showreel 2026", { cache_used_mb: 12.4 * GB }),
+    disk("Pastificio Moretti - Spot Natale", { cache_used_mb: 31.6 * GB }),
+  ],
+  rejected: [],
+  applying: false,
+  error: null,
+  restart_needed: false,
+  refused_single: false,
+};
+const team = (over: Partial<TeamView> = {}): Partial<DiskStatus> => ({ mode: "team", team: { ...teamBase, ...over } });
 
 const SCENARIOS: Record<string, Partial<DiskStatus>> = {
   connected: {},
@@ -76,6 +113,26 @@ const SCENARIOS: Record<string, Partial<DiskStatus>> = {
     },
   },
   full_cache: { space: { ...base.space!, cache_used_mb: 97.4 * GB } },
+  team_connected: team(),
+  team_states: team({
+    disks: [
+      disk("Archivio 2025", { access: "read", mounted_access: "read", cache_used_mb: 812 }),
+      disk("Showreel 2026", { access: "read", pending: "remount", cache_used_mb: 12.4 * GB }),
+      disk("Cantine Arnaldi - Vendemmia", { online: false, meta_mode: "offline", cache_used_mb: 4.1 * GB }),
+      disk("Fondazione Lirica - Backstage", { path: null, state: "failed", mounted_access: null, cache_used_mb: null }),
+      disk("Pastificio Moretti - Spot Natale", { ...off }),
+    ],
+  }),
+  team_starting: { state: "starting", ...unmounted, ...team({ applying: true, disks: teamBase.disks.map((d) => ({ ...d, path: null, state: null })) }) },
+  team_restart: team({ restart_needed: true }),
+  team_error: team({ error: "the floppy command failed: the VM is not responding, run: floppy status" }),
+  team_no_disks: { state: "no_disks", ...unmounted, ...team({ disks: [] }) },
+  team_all_off: {
+    state: "no_disks",
+    ...unmounted,
+    ...team({ disks: teamBase.disks.map((d) => ({ ...d, ...off })) }),
+  },
+  team_single: { ...team({ refused_single: true }), mode: "single" },
 };
 
 let status: DiskStatus = { ...base, ...(SCENARIOS[scenario] ?? {}) };
@@ -140,8 +197,8 @@ const signedIn: AuthView = {
   phase: "signed_in",
   email: EMAIL,
   device_name: MAC,
-  // The server does not tell the app the organization yet (see auth_signed_in_org).
-  organization: null,
+  organization: "Studio Esempio",
+  user_name: "Giulia Ferri",
 };
 const signedOut: AuthView = { ...authBase, phase: "signed_out", notice: null };
 
@@ -167,9 +224,17 @@ const AUTH: Record<string, AuthView> = {
     error: { code: "metadata_unavailable" },
   },
   auth_signed_in: signedIn,
-  auth_signed_in_org: { ...signedIn, organization: "Studio Esempio" },
+  auth_signed_in_no_org: { ...signedIn, organization: null, user_name: null },
   auth_offline: { ...signedIn, reachable: false },
   auth_revoked: { ...signedOut, notice: "revoked" },
+  auth_unknown: { ...signedOut, notice: "unknown" },
+  auth_already_signed_out: { ...signedOut, notice: "already_signed_out" },
+  auth_clearing: { ...signedIn, busy: "clearing" },
+  auth_not_cleared: {
+    ...signedOut,
+    notice: "signed_out",
+    error: { code: "disks_not_cleared", detail: "the floppy command failed: the VM is not responding" },
+  },
   auth_sign_out_failed: {
     ...signedIn,
     error: { code: "sign_out_failed", detail: "the server did not answer: timed out" },
@@ -177,7 +242,8 @@ const AUTH: Record<string, AuthView> = {
   auth_bad_server: { ...signedOut, error: { code: "invalid_server", reason: "insecure" } },
 };
 
-let auth: AuthView = AUTH[scenario] ?? signedIn;
+// A team install before sign-in is signed out.
+let auth: AuthView = AUTH[scenario] ?? (scenario === "team_no_disks" ? signedOut : signedIn);
 const authListeners = new Set<(v: AuthView) => void>();
 function publishAuth(next: AuthView): AuthView {
   auth = next;
@@ -210,7 +276,24 @@ export const mockBackend: Backend = {
   },
   cancel: async () => publish({ job: null }),
   dismissError: async () => publish({ last_error: null }),
-  listFolders: async () => (scenario === "empty" ? [] : FOLDERS),
+  listFolders: async (path) =>
+    scenario === "empty"
+      ? []
+      : path
+        ? FOLDERS.slice(1, 4).map((f) => ({ name: f.name, path: `${path}/${f.name}` }))
+        : FOLDERS,
+  setDiskEnabled: async (id, enabled) => {
+    if (!status.team) return;
+    const disks = status.team.disks.map((d) =>
+      d.id !== id ? d : enabled ? disk(d.folder, { access: d.access, mounted_access: d.access }) : { ...d, ...off },
+    );
+    const anyOn = disks.some((d) => d.enabled);
+    publish({ team: { ...status.team, disks }, state: anyOn ? "connected" : "no_disks", mount_point: anyOn ? "/Volumes/Floppy" : null });
+  },
+  restart: async () => {
+    publish({ state: "starting", job: { kind: "restart", path: null, name: null, started_ms: Date.now() } });
+    later(1500, () => publish({ state: "connected", job: null, team: status.team && { ...status.team, restart_needed: false } }));
+  },
   openInFinder: async () => {},
   getSetup: async () => setup,
   runSetup: async () => {

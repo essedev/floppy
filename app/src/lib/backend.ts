@@ -26,7 +26,12 @@ export interface Backend {
   free(path: string): Promise<void>;
   cancel(): Promise<void>;
   dismissError(): Promise<void>;
-  listFolders(): Promise<Folder[]>;
+  /** The folders at the top of the disk, or of `path` on it (a team disk's projects). */
+  listFolders(path?: string): Promise<Folder[]>;
+  /** Turns a team disk on or off on this Mac. */
+  setDiskEnabled(id: string, enabled: boolean): Promise<void>;
+  /** Stops and starts Floppy, for the memory its disks want. */
+  restart(): Promise<void>;
   openInFinder(path?: string): Promise<void>;
   getSetup(): Promise<SetupProgress>;
   runSetup(): Promise<void>;
@@ -80,7 +85,9 @@ const tauriBackend: Backend = {
   free: (path) => invoke("free", { path }),
   cancel: () => invoke("cancel_job"),
   dismissError: () => invoke("dismiss_error"),
-  listFolders: () => invoke("list_folders"),
+  listFolders: (path) => invoke("list_folders", { path: path ?? null }),
+  setDiskEnabled: (id, enabled) => invoke("set_disk_enabled", { id, enabled }),
+  restart: () => invoke("restart_disk"),
   openInFinder: (path) => invoke("open_in_finder", { path: path ?? null }),
   getSetup: () => invoke("get_setup"),
   runSetup: () => invoke("run_setup"),

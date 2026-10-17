@@ -1,7 +1,8 @@
 /**
  * The Settings window (concept-c-app, DECISIONS #12: its own window): the
  * account (sign-in, or who is signed in with sign-out), the server for a
- * self-hosted team, this Mac, space, general and support. Diagnostics are
+ * self-hosted team, the team's disks with a switch each, this Mac, space,
+ * general and support. Diagnostics are
  * shown but not sendable yet.
  */
 
@@ -10,11 +11,12 @@ import { Button, Confirm, Led, Notice, Readout, SlotMark, TextInput, Toggle } fr
 import { useAuth, useAuthStep } from "@/features/account/hooks";
 import { AuthErrorNotice, RefusedNotice, SignIn } from "@/features/account/SignIn";
 import { initialsOf, serverEditable } from "@/features/account/view";
-import { useAppInfo, useLogin, useStatus } from "@/features/disk/hooks";
+import { useAppInfo, useDiskAction, useLogin, useStatus } from "@/features/disk/hooks";
+import { diskLook, teamOf } from "@/features/disk/team";
 import { it } from "@/i18n/it";
 import { backend } from "@/lib/backend";
 import { fillOf, gb, gbUnit } from "@/lib/format";
-import type { AuthView } from "@/lib/types";
+import type { AuthView, DiskStatus, DiskView, TeamView } from "@/lib/types";
 
 export function SettingsWindow() {
   const info = useAppInfo();
@@ -44,6 +46,8 @@ export function SettingsWindow() {
       </Group>
 
       {view && view.phase !== "signed_in" && view.phase !== "registering" && <ServerGroup view={view} />}
+
+      {status && teamOf(status) && <DisksGroup status={status} team={teamOf(status)!} />}
 
       <Group title={it.settings.thisMac}>
         <Row>
@@ -151,7 +155,7 @@ function AccountRows({ view, computerName }: { view: AuthView; computerName: str
         <span className="grid size-9 shrink-0 place-items-center rounded-full bg-ink text-[13px] font-bold text-surface" aria-hidden="true">
           {initialsOf(view.email)}
         </span>
-        <Label title={view.email} line={it.settings.accountLine(view.organization, view.device_name)} />
+        <Label title={view.user_name || view.email} line={it.settings.accountLine(view.organization, view.email)} />
         <Button disabled={busy || confirming} onClick={() => setConfirming(true)}>
           {busy ? t.signOut.signingOut : t.signOut.action}
         </Button>
@@ -197,6 +201,85 @@ function AccountRows({ view, computerName }: { view: AuthView; computerName: str
         </span>
       </Row>
     </>
+  );
+}
+
+/** The team's disks on this Mac, each with its state and a switch to turn it off. */
+function DisksGroup({ status, team }: { status: DiskStatus; team: TeamView }) {
+  const restart = useDiskAction(backend.restart);
+  return (
+    <Group title={it.settings.disks}>
+      {team.refused_single ? (
+        <div className="p-3">
+          <Notice led="err" title={it.team.single.title}>
+            {it.team.single.body}
+          </Notice>
+        </div>
+      ) : team.disks.length === 0 ? (
+        <Row>
+          <Label title={it.settings.disksNone} />
+        </Row>
+      ) : (
+        <>
+          <Row>
+            <span className="text-[13px] text-ink-2">{it.settings.disksLine}</span>
+          </Row>
+          {team.disks.map((d) => (
+            <DiskSetting key={d.id} disk={d} applying={team.applying} />
+          ))}
+        </>
+      )}
+      {(team.restart_needed || (team.error && !team.applying)) && !team.refused_single && (
+        <div className="flex flex-col gap-2.5 p-3">
+          {team.error && !team.applying && (
+            <Notice led="err" title={it.team.error.title}>
+              <span className="block">{it.team.error.body}</span>
+              <span className="mt-1 block font-ro text-[11.5px] text-ink-2">{team.error}</span>
+            </Notice>
+          )}
+          {team.restart_needed && (
+            <Notice led="dl" title={it.team.restart.title}>
+              <span className="block">{it.team.restart.confirmBody}</span>
+              <Button
+                size="sm"
+                className="mt-2 bg-raised shadow-[0_0_0_0.5px_rgba(0,0,0,0.12)]"
+                disabled={!!status.job || restart.isPending}
+                onClick={() => restart.mutate()}
+              >
+                {it.team.restart.action}
+              </Button>
+            </Notice>
+          )}
+          {restart.error && <Notice led="err">{it.errors[restart.error.code] ?? restart.error.message}</Notice>}
+        </div>
+      )}
+    </Group>
+  );
+}
+
+function DiskSetting({ disk, applying }: { disk: DiskView; applying: boolean }) {
+  const look = diskLook(disk, applying);
+  const toggle = useDiskAction<boolean>((on) => backend.setDiskEnabled(disk.id, on));
+  return (
+    <Row>
+      <span className="flex">
+        <Led state={look.led ?? undefined} blink={look.blink} />
+      </span>
+      <span className="min-w-0 flex-1">
+        <b className={`block truncate text-[13.5px] font-semibold ${look.dim ? "text-ink-2" : ""}`}>{disk.folder}</b>
+        <span className="block text-[13px] text-ink-2">{look.line}</span>
+        {toggle.error && (
+          <span className="mt-1 block text-[13px] text-ink">{it.errors[toggle.error.code] ?? toggle.error.message}</span>
+        )}
+      </span>
+      <Readout className="text-[11px]">{look.readout}</Readout>
+      <Toggle
+        checked={disk.enabled}
+        disabled={toggle.isPending}
+        label={it.settings.diskToggle(disk.folder)}
+        onChange={(on) => toggle.mutate(on)}
+      />
+    </Row>
   );
 }
 
