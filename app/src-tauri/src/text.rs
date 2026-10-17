@@ -16,6 +16,7 @@ pub fn tooltip(state: DiskState, busy: bool) -> &'static str {
         DiskState::Stopping => "Floppy: spegnimento",
         DiskState::Unreachable => "Floppy: non raggiungibile",
         DiskState::Off => "Floppy: spento",
+        DiskState::NoDisks => "Floppy: nessun disco",
         DiskState::NeedsSetup => "Floppy: da preparare",
         DiskState::NotInstalled => "Floppy: non installato",
     }

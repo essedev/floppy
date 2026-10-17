@@ -2,15 +2,31 @@
 //! running (one at a time), and the periodic check. Events go out through a
 //! callback, so this module has no Tauri dependency and is tested with a
 //! fake `floppy` command.
+//!
+//! In the team version it also keeps the team's disks in step with the
+//! control plane (`account` hands it the answer through `TeamDisks`): it
+//! writes `~/.floppy/disks.json` (`team`) and runs `floppy disks apply` with
+//! the secrets on stdin, after every change and again every minute while a
+//! disk waits for a remount. It never applies while the person has turned
+//! Floppy off (an apply would turn it back on), during an install, setup,
+//! start, stop or restart, or on a Mac with the single-user volume.
 
-use crate::engine::{self, DiskState, EngineError, EngineReport, JobKind, Problem, Space};
+use crate::account::api::DeviceConfig;
+use crate::account::credentials::DiskCredentials;
+use crate::account::{MountReport, TeamDisks};
+use crate::engine::{
+    self, Access, DiskState, EngineDisk, EngineError, EngineReport, JobKind, MetaMode, Mode,
+    Pending, Problem, Replica, RunState, Space,
+};
 use crate::installer::{InstallNeed, Installer};
+use crate::team::{self, DisksFile, Rejected};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
+use std::process::Child;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 /// How often the engine is checked while the disk works.
 pub const CHECK_INTERVAL: Duration = Duration::from_secs(15);
@@ -19,6 +35,9 @@ pub const RETRY_INTERVAL: Duration = Duration::from_secs(30);
 /// Reading the disk's top folders gives up after this: a dead SMB mount can
 /// hang whoever lists it.
 pub const LIST_TIMEOUT: Duration = Duration::from_secs(3);
+/// How often `disks apply` runs again while a disk waits for a remount, and
+/// after a failed apply (docs/ARCHITECTURE.md, "Team disks": about a minute).
+pub const APPLY_RETRY: Duration = Duration::from_secs(60);
 
 /// The job the app is running.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -60,6 +79,47 @@ pub struct DiskStatus {
     pub install: Option<InstallNeed>,
     /// The app carries an engine: a missing command can be installed.
     pub bundled: bool,
+    /// The install this Mac runs, once the engine has answered.
+    pub mode: Option<Mode>,
+    /// The team's disks, in the team version or when the account has some.
+    pub team: Option<TeamView>,
+}
+
+/// The team's disks as the panel and Settings show them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct TeamView {
+    pub disks: Vec<DiskView>,
+    /// Disks the Mac may see but cannot mount (a name the engine refuses).
+    pub rejected: Vec<Rejected>,
+    /// `disks apply` is running.
+    pub applying: bool,
+    /// Why the last apply or clear failed, until one succeeds.
+    pub error: Option<String>,
+    /// The VM needs more memory for its disks: Floppy has to restart.
+    pub restart_needed: bool,
+    /// The account has disks but this Mac runs the single-user volume, which
+    /// the team engine refuses to share a VM with.
+    pub refused_single: bool,
+}
+
+/// One disk: the person's choice from the disks file, the rest from the engine.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct DiskView {
+    pub id: String,
+    pub folder: String,
+    /// Its folder in the Finder, while the share is mounted.
+    pub path: Option<String>,
+    pub access: Access,
+    pub enabled: bool,
+    /// None before the engine has reported the disk.
+    pub state: Option<RunState>,
+    pub mounted_access: Option<Access>,
+    pub pending: Option<Pending>,
+    pub cache_used_mb: Option<u64>,
+    pub cache_size_mb: Option<u64>,
+    pub replica: Option<Replica>,
+    pub meta_mode: Option<MetaMode>,
+    pub online: Option<bool>,
 }
 
 /// Where the install and `floppy setup` are, in the four steps the first-run
@@ -120,6 +180,10 @@ pub enum CoreError {
     ListTimeout,
     #[error("this build of the app carries no engine")]
     NoBundle,
+    #[error("this Mac does not run the team version")]
+    NotTeam,
+    #[error("no such disk on this Mac")]
+    NoSuchDisk,
     #[error(transparent)]
     Engine(#[from] EngineError),
 }
@@ -128,6 +192,31 @@ struct Running {
     info: JobInfo,
     pid: u32,
     cancelled: bool,
+}
+
+/// The account's answer with what mounts it: in memory only.
+struct Plan {
+    config: DeviceConfig,
+    credentials: DiskCredentials,
+}
+
+#[derive(Default)]
+struct TeamSync {
+    plan: Option<Plan>,
+    /// The disks file as last read or written.
+    file: Option<DisksFile>,
+    /// The plan or a choice changed since the last apply.
+    dirty: bool,
+    applying: bool,
+    clearing: bool,
+    last_apply: Option<Instant>,
+    last_failed: bool,
+    error: Option<String>,
+    rejected: Vec<Rejected>,
+    /// Bumped by each clear: an apply that started before it is stale.
+    generation: u64,
+    /// `APPLY_RETRY`, shorter in tests.
+    retry: Duration,
 }
 
 struct Inner {
@@ -139,6 +228,7 @@ struct Inner {
     shown: Option<DiskState>,
     setup: SetupProgress,
     install: Option<InstallNeed>,
+    team: TeamSync,
 }
 
 type Emit = Box<dyn Fn(Event) + Send + Sync>;
@@ -147,6 +237,8 @@ type Emit = Box<dyn Fn(Event) + Send + Sync>;
 /// checking thread and the job threads.
 pub struct Core {
     engine: PathBuf,
+    /// The engine's home, where the disks file goes.
+    home: PathBuf,
     installer: Option<Installer>,
     inner: Mutex<Inner>,
     emit: Emit,
@@ -168,17 +260,20 @@ fn folder_name(path: &str) -> Option<String> {
 }
 
 impl Core {
-    /// A core that runs `engine`, installs it from `installer` when the app
-    /// carries one, and reports through `emit`.
+    /// A core that runs `engine` with its home `home`, installs it from
+    /// `installer` when the app carries one, and reports through `emit`.
     pub fn new(
         engine: PathBuf,
+        home: PathBuf,
         installer: Option<Installer>,
         emit: impl Fn(Event) + Send + Sync + 'static,
     ) -> Arc<Self> {
         let (tx, rx) = mpsc::channel();
         let install = installer.as_ref().and_then(Installer::need);
+        let file = team::read(&home).ok().flatten();
         Arc::new(Core {
             engine,
+            home,
             installer,
             inner: Mutex::new(Inner {
                 report: None,
@@ -189,6 +284,11 @@ impl Core {
                 shown: None,
                 setup: SetupProgress::default(),
                 install,
+                team: TeamSync {
+                    file,
+                    retry: APPLY_RETRY,
+                    ..TeamSync::default()
+                },
             }),
             emit: Box::new(emit),
             wake: Mutex::new(tx),
@@ -221,10 +321,17 @@ impl Core {
         let job_kind = inner.job.as_ref().map(|j| j.info.kind);
         let pending = Err(EngineError::Timeout(0));
         let report = inner.report.as_ref().unwrap_or(&pending);
-        let (mut state, problem) = engine::derive(report, job_kind);
+        let (mut state, mut problem) = engine::derive(report, job_kind);
         // Before the first answer the app is starting, not broken.
         if inner.report.is_none() && job_kind.is_none() {
             state = DiskState::Starting;
+        }
+        // The first apply brings the disks and the share: starting, not empty.
+        if inner.team.applying
+            && (state == DiskState::NoDisks || problem == Some(Problem::NotMounted))
+        {
+            state = DiskState::Starting;
+            problem = None;
         }
         let ok = report.as_ref().ok();
         let mount_point = ok.and_then(|r| r.mount_point.clone());
@@ -253,7 +360,68 @@ impl Core {
             engine_path: self.engine.display().to_string(),
             install: inner.install,
             bundled: self.installer.is_some(),
+            mode: ok.map(|r| r.mode),
+            team: Self::team_view(inner, ok),
         }
+    }
+
+    fn team_view(inner: &Inner, report: Option<&EngineReport>) -> Option<TeamView> {
+        let t = &inner.team;
+        let mode = report.map(|r| r.mode);
+        if mode != Some(Mode::Team) && t.plan.is_none() {
+            return None;
+        }
+        let reported: &[EngineDisk] = report.map(|r| r.team_disks()).unwrap_or_default();
+        let mount_point = report.and_then(|r| r.mount_point.clone());
+        let view = |id: &str, folder: &str, access: Access, enabled: bool| {
+            let e = reported.iter().find(|d| d.id == id);
+            DiskView {
+                id: id.to_string(),
+                folder: folder.to_string(),
+                path: mount_point
+                    .as_ref()
+                    .filter(|_| e.is_some_and(|d| d.state == RunState::Mounted))
+                    .map(|mp| format!("{mp}/{folder}")),
+                access,
+                enabled,
+                state: e.map(|d| d.state),
+                mounted_access: e.and_then(|d| d.mounted_access),
+                pending: e.and_then(|d| d.pending),
+                cache_used_mb: e.and_then(|d| d.cache_used_mb),
+                cache_size_mb: e.and_then(|d| d.cache_size_mb),
+                replica: e.map(|d| d.replica),
+                meta_mode: e.and_then(|d| d.mode),
+                online: e.and_then(|d| d.online),
+            }
+        };
+        let mut disks: Vec<DiskView> = match (&t.file, &t.plan) {
+            (Some(f), _) => f
+                .disks
+                .iter()
+                .map(|d| view(&d.id, &d.folder, d.access, d.enabled))
+                .collect(),
+            // Not written yet (the single-user volume, or before the first sync).
+            (None, Some(p)) => p
+                .config
+                .disks
+                .iter()
+                .map(|d| view(&d.id, &d.name, d.access, true))
+                .collect(),
+            (None, None) => Vec::new(),
+        };
+        for e in reported {
+            if !disks.iter().any(|d| d.id == e.id) {
+                disks.push(view(&e.id, &e.folder, e.access, e.enabled));
+            }
+        }
+        Some(TeamView {
+            disks,
+            rejected: t.rejected.clone(),
+            applying: t.applying || t.clearing,
+            error: t.error.clone(),
+            restart_needed: report.is_some_and(EngineReport::restart_needed),
+            refused_single: mode == Some(Mode::Single) && t.plan.is_some(),
+        })
     }
 
     fn publish(&self, inner: &mut Inner) {
@@ -287,6 +455,9 @@ impl Core {
         };
         inner.report = Some(report);
         inner.checked_ms = now_ms();
+        if !inner.team.applying && !inner.team.clearing {
+            inner.team.file = team::read(&self.home).ok().flatten();
+        }
         self.publish(&mut inner);
     }
 
@@ -306,6 +477,7 @@ impl Core {
         thread::spawn(move || {
             loop {
                 core.refresh();
+                core.sync();
                 let wait = core.lock().next_check;
                 match rx.recv_timeout(wait) {
                     Ok(()) => while rx.try_recv().is_ok() {},
@@ -335,11 +507,15 @@ impl Core {
         }
     }
 
-    /// The folders at the top of the disk, alphabetically. Read on a thread
-    /// that is abandoned after `LIST_TIMEOUT`: a dead mount blocks readdir.
-    pub fn folders(&self) -> Result<Vec<Folder>, CoreError> {
-        let mp = self.mount_point().ok_or(CoreError::NotMounted)?;
-        list_folders(Path::new(&mp), LIST_TIMEOUT)
+    /// The folders at the top of the disk, or of `path` on it (a team
+    /// disk's projects), alphabetically. Read on a thread that is abandoned
+    /// after `LIST_TIMEOUT`: a dead mount blocks readdir.
+    pub fn folders(&self, path: Option<&str>) -> Result<Vec<Folder>, CoreError> {
+        let dir = match path {
+            Some(p) => self.disk_path(p)?,
+            None => self.mount_point().ok_or(CoreError::NotMounted)?,
+        };
+        list_folders(Path::new(&dir), LIST_TIMEOUT)
     }
 
     /// Starts a job: the bundled install, `floppy start|stop|setup`, or
@@ -349,7 +525,8 @@ impl Core {
             JobKind::Install => "install",
             JobKind::Setup => "setup",
             JobKind::Start => "start",
-            JobKind::Stop => "stop",
+            // The restart is a stop, then a start (below).
+            JobKind::Stop | JobKind::Restart => "stop",
             JobKind::Warmup => "warmup",
             JobKind::Free => "free",
         }];
@@ -395,14 +572,37 @@ impl Core {
 
         let core = Arc::clone(self);
         thread::spawn(move || {
-            let (status, tail) = engine::follow(child, |line| {
+            let (status, mut tail) = engine::follow(child, |line| {
                 if matches!(kind, JobKind::Install | JobKind::Setup) {
                     core.setup_line(line);
                 }
             });
-            core.finish(info, status.is_some_and(|s| s.success()), &tail);
+            let mut ok = status.is_some_and(|s| s.success());
+            if ok && kind == JobKind::Restart {
+                match core.restart_start() {
+                    Ok(child) => {
+                        let (status, more) = engine::follow(child, |_| {});
+                        ok = status.is_some_and(|s| s.success());
+                        tail = more;
+                    }
+                    Err(e) => {
+                        ok = false;
+                        tail = vec![format!("floppy: {e}")];
+                    }
+                }
+            }
+            core.finish(info, ok, &tail);
         });
         Ok(())
+    }
+
+    /// The second half of a restart: `floppy start`, tracked as the job's process.
+    fn restart_start(&self) -> Result<Child, EngineError> {
+        let child = engine::spawn(&self.engine, &["start"])?;
+        if let Some(job) = self.lock().job.as_mut() {
+            job.pid = child.id();
+        }
+        Ok(child)
     }
 
     fn setup_line(&self, line: &str) {
@@ -472,7 +672,7 @@ impl Core {
         // A user who started the disk is not told it "came back".
         if matches!(
             info.kind,
-            JobKind::Start | JobKind::Setup | JobKind::Install
+            JobKind::Start | JobKind::Setup | JobKind::Install | JobKind::Restart
         ) {
             inner.shown = None;
         }
@@ -500,6 +700,228 @@ impl Core {
         inner.last_error = None;
         self.publish(&mut inner);
     }
+
+    // The team disks.
+
+    fn mode(inner: &Inner) -> Option<Mode> {
+        inner
+            .report
+            .as_ref()
+            .and_then(|r| r.as_ref().ok())
+            .map(|r| r.mode)
+    }
+
+    /// Turns a team disk on or off on this Mac (`enabled` in the disks file);
+    /// the next apply mounts it or removes it once nothing on it is open.
+    pub fn set_disk_enabled(&self, id: &str, on: bool) -> Result<(), CoreError> {
+        let mut inner = self.lock();
+        if Self::mode(&inner) != Some(Mode::Team) {
+            return Err(CoreError::NotTeam);
+        }
+        let mut file = team::read(&self.home)
+            .map_err(|e| CoreError::Engine(EngineError::Failed(e)))?
+            .ok_or(CoreError::NoSuchDisk)?;
+        if !team::set_enabled(&mut file, id, on) {
+            return Err(CoreError::NoSuchDisk);
+        }
+        team::write(&self.home, &file)
+            .map_err(|e| CoreError::Engine(EngineError::Failed(e.to_string())))?;
+        inner.team.file = Some(file);
+        inner.team.dirty = true;
+        // A choice is applied at once, not after the backoff of a failure.
+        inner.team.last_failed = false;
+        self.publish(&mut inner);
+        drop(inner);
+        self.wake();
+        Ok(())
+    }
+
+    /// Runs `disks apply` when one is due: after a change, and every minute
+    /// while a disk waits for a remount or after a failure.
+    fn sync(self: &Arc<Self>) {
+        let mut inner = self.lock();
+        let Some(Ok(report)) = inner.report.as_ref() else {
+            return;
+        };
+        let blocked = report.mode != Mode::Team
+            || report.stopped
+            || inner.team.applying
+            || inner.team.clearing
+            || inner.job.as_ref().is_some_and(|j| {
+                matches!(
+                    j.info.kind,
+                    JobKind::Install
+                        | JobKind::Setup
+                        | JobKind::Start
+                        | JobKind::Stop
+                        | JobKind::Restart
+                )
+            });
+        if blocked {
+            return;
+        }
+        let waiting = report.team_disks().iter().any(|d| d.pending.is_some());
+        let t = &inner.team;
+        let since_last = t.last_apply.map(|at| at.elapsed());
+        let backoff_over = since_last.is_none_or(|e| e >= t.retry);
+        let due = (t.dirty && (!t.last_failed || backoff_over))
+            || ((waiting || t.last_failed) && backoff_over && t.file.is_some());
+        if !due {
+            return;
+        }
+        // Without a plan the file stands as it is and the VM keeps its secrets.
+        let mut secrets = None;
+        if let Some(plan) = &inner.team.plan {
+            let previous = team::read(&self.home).ok().flatten();
+            let (file, rejected) = team::build(
+                &plan.config,
+                &plan.credentials.valkey_username,
+                previous.as_ref(),
+            );
+            let mounted: Vec<_> = plan
+                .config
+                .disks
+                .iter()
+                .filter(|d| file.disks.iter().any(|f| f.id == d.id))
+                .cloned()
+                .collect();
+            secrets = Some(plan.credentials.secrets_json(&mounted));
+            if let Err(e) = team::write(&self.home, &file) {
+                inner.team.error = Some(format!("could not write the disks file: {e}"));
+                inner.team.last_apply = Some(Instant::now());
+                inner.team.last_failed = true;
+                self.publish(&mut inner);
+                return;
+            }
+            inner.team.file = Some(file);
+            inner.team.rejected = rejected;
+        } else if inner.team.file.is_none() {
+            return;
+        }
+        inner.team.applying = true;
+        inner.team.dirty = false;
+        inner.team.last_apply = Some(Instant::now());
+        let generation = inner.team.generation;
+        self.publish(&mut inner);
+        drop(inner);
+
+        let core = Arc::clone(self);
+        thread::spawn(move || {
+            let result = engine::apply(&core.engine, secrets.as_deref());
+            {
+                let mut inner = core.lock();
+                inner.team.applying = false;
+                if inner.team.generation == generation {
+                    match result {
+                        Ok(_) => {
+                            inner.team.error = None;
+                            inner.team.last_failed = false;
+                        }
+                        Err(e) => {
+                            inner.team.error = Some(e.to_string());
+                            inner.team.last_failed = true;
+                        }
+                    }
+                }
+                core.publish(&mut inner);
+            }
+            core.wake();
+        });
+    }
+}
+
+impl TeamDisks for Core {
+    fn configure(&self, config: &DeviceConfig, credentials: &DiskCredentials) {
+        let mut inner = self.lock();
+        let same = inner
+            .team
+            .plan
+            .as_ref()
+            .is_some_and(|p| p.config.disks == config.disks && &p.credentials == credentials);
+        inner.team.plan = Some(Plan {
+            config: config.clone(),
+            credentials: credentials.clone(),
+        });
+        // The same disks again (a launch, a refresh): nothing to apply, but
+        // the first plan of a launch sends the secrets once.
+        if !same {
+            inner.team.dirty = true;
+            inner.team.last_failed = false;
+        }
+        self.publish(&mut inner);
+        drop(inner);
+        self.wake();
+    }
+
+    fn report(&self) -> MountReport {
+        let inner = self.lock();
+        let disks = inner
+            .report
+            .as_ref()
+            .and_then(|r| r.as_ref().ok())
+            .map(|r| r.team_disks().to_vec())
+            .unwrap_or_default();
+        mount_report(&disks)
+    }
+
+    fn clear(&self) -> Result<(), String> {
+        let mut inner = self.lock();
+        inner.team.plan = None;
+        inner.team.dirty = false;
+        inner.team.rejected.clear();
+        inner.team.generation += 1;
+        let mode = Self::mode(&inner);
+        if mode == Some(Mode::Single) {
+            self.publish(&mut inner);
+            return Ok(());
+        }
+        inner.team.clearing = true;
+        self.publish(&mut inner);
+        drop(inner);
+        // Without an answer yet, ask: a single-user Mac has nothing to clear.
+        let single =
+            mode.is_none() && engine::status(&self.engine).is_ok_and(|r| r.mode == Mode::Single);
+        let result = if single {
+            Ok(())
+        } else {
+            match engine::clear(&self.engine) {
+                Ok(()) | Err(EngineError::Missing(_)) => Ok(()),
+                Err(e) => Err(e.to_string()),
+            }
+        };
+        let mut inner = self.lock();
+        inner.team.clearing = false;
+        inner.team.file = team::read(&self.home).ok().flatten();
+        inner.team.error = result.as_ref().err().cloned();
+        inner.team.last_failed = false;
+        self.publish(&mut inner);
+        drop(inner);
+        self.wake();
+        result
+    }
+}
+
+/// What the heartbeat says about the mounts: the mounted disks, and the
+/// worst metadata mode among them (offline, then master, then replica).
+pub fn mount_report(disks: &[EngineDisk]) -> MountReport {
+    let mounted: Vec<&EngineDisk> = disks
+        .iter()
+        .filter(|d| d.state == RunState::Mounted)
+        .collect();
+    let has = |m: MetaMode| mounted.iter().any(|d| d.mode == Some(m));
+    let replica_mode = if has(MetaMode::Offline) {
+        Some("offline")
+    } else if has(MetaMode::Master) {
+        Some("master")
+    } else if has(MetaMode::Replica) {
+        Some("replica")
+    } else {
+        None
+    };
+    MountReport {
+        mounted_disk_ids: mounted.iter().map(|d| d.id.clone()).collect(),
+        replica_mode: replica_mode.map(str::to_string),
+    }
 }
 
 /// Maps a line of `floppy setup` to the step it starts.
@@ -508,7 +930,9 @@ fn setup_step(line: &str) -> Option<u8> {
         Some(1)
     } else if line.starts_with("Starting the VM") {
         Some(2)
-    } else if line.starts_with("Installing the drive") {
+    } else if line.starts_with("Installing the drive")
+        || line.starts_with("Installing Floppy in the VM")
+    {
         Some(3)
     } else {
         None
@@ -557,7 +981,8 @@ mod tests {
     fn core_with(bin: PathBuf) -> (Arc<Core>, Arc<StdMutex<Vec<Event>>>) {
         let events = Arc::new(StdMutex::new(Vec::new()));
         let sink = Arc::clone(&events);
-        let core = Core::new(bin, None, move |e| sink.lock().unwrap().push(e));
+        let home = bin.with_file_name("home");
+        let core = Core::new(bin, home, None, move |e| sink.lock().unwrap().push(e));
         (core, events)
     }
 
@@ -767,9 +1192,12 @@ echo "Ready: /Volumes/Floppy" >&2"#,
         };
         let events = Arc::new(StdMutex::new(Vec::new()));
         let sink = Arc::clone(&events);
-        let core = Core::new(home.join("bin/floppy"), Some(installer.clone()), move |e| {
-            sink.lock().unwrap().push(e)
-        });
+        let core = Core::new(
+            home.join("bin/floppy"),
+            home.clone(),
+            Some(installer.clone()),
+            move |e| sink.lock().unwrap().push(e),
+        );
         (core, events, installer)
     }
 
@@ -846,5 +1274,341 @@ esac"#
             Err(CoreError::NoBundle)
         );
         assert_eq!(core.status().install, None);
+    }
+
+    // The team disks, against a fake engine that answers `status --json` from
+    // a file, records what `disks apply` got on stdin, and clears the file.
+
+    use crate::account::api::{Access as ApiAccess, DiskConfig, OrganizationRef, UserRef};
+    use crate::account::credentials::S3Key;
+    use crate::engine::tests::{DISK_A, disk_with, team_status};
+
+    struct TeamRig {
+        core: Arc<Core>,
+        dir: tempfile::TempDir,
+        home: PathBuf,
+    }
+
+    impl TeamRig {
+        fn status(&self, json: &str) {
+            std::fs::write(self.dir.path().join("status.json"), json).unwrap();
+        }
+        fn applies(&self) -> Vec<String> {
+            let mut out = Vec::new();
+            for n in 1.. {
+                match std::fs::read_to_string(self.dir.path().join(format!("stdin.{n}"))) {
+                    Ok(s) => out.push(s),
+                    Err(_) => break,
+                }
+            }
+            out
+        }
+        fn calls(&self) -> String {
+            std::fs::read_to_string(self.dir.path().join("calls")).unwrap_or_default()
+        }
+        fn sync_and_wait(&self) {
+            self.core.refresh();
+            self.core.sync();
+            let start = Instant::now();
+            while self.core.lock().team.applying {
+                assert!(
+                    start.elapsed() < Duration::from_secs(10),
+                    "apply did not end"
+                );
+                thread::sleep(Duration::from_millis(20));
+            }
+        }
+        fn file(&self) -> serde_json::Value {
+            serde_json::from_slice(&std::fs::read(self.home.join("disks.json")).unwrap()).unwrap()
+        }
+    }
+
+    fn team_rig() -> TeamRig {
+        let dir = tempfile::tempdir().unwrap();
+        let d = dir.path().display().to_string();
+        let home = dir.path().join("home");
+        std::fs::create_dir_all(&home).unwrap();
+        let apply_answer = format!(
+            r#"{{"version":1,"mount_point":"/Volumes/Floppy","cache_per_disk_mb":10240,"vm_memory_mib":1024,"vm_memory_wanted_mib":1024,"restart_needed":false,"vm":{{"smbd":"active","drive":"active","disks":[{DISK_A}]}}}}"#
+        );
+        let bin = fake(
+            dir.path(),
+            &format!(
+                r#"D="{d}"
+echo "$*" >> "$D/calls"
+case "$1 ${{2:-}}" in
+  "status --json") cat "$D/status.json" ;;
+  "disks apply")
+    n=1; while [ -f "$D/stdin.$n" ]; do n=$((n+1)); done
+    cat > "$D/stdin.$n"
+    if [ -f "$D/apply.fail" ]; then echo "floppy: $(cat "$D/apply.fail")" >&2; exit 1; fi
+    echo '{apply_answer}' ;;
+  "disks clear") rm -f "$D/home/disks.json"; echo '{{"version":1,"cleared":true}}' ;;
+  "stop "*|"start "*) ;;
+  *) exit 2 ;;
+esac"#
+            ),
+        );
+        let core = Core::new(bin, home.clone(), None, |_| {});
+        core.lock().team.retry = Duration::from_millis(600);
+        let rig = TeamRig { core, dir, home };
+        rig.status(&team_status(&[], "").replace(r#""configured":true"#, r#""configured":false"#));
+        rig
+    }
+
+    fn plan(disks: &[(&str, &str, ApiAccess)], managed: bool) -> (DeviceConfig, DiskCredentials) {
+        let config = DeviceConfig {
+            storage_mode: if managed { "managed" } else { "manual" }.into(),
+            s3_access_key_tail: None,
+            organization: OrganizationRef {
+                id: "o1".into(),
+                name: "Studio Esempio".into(),
+            },
+            user: UserRef {
+                email: "giulia@studio.test".into(),
+                name: "Giulia Ferri".into(),
+            },
+            disks: disks
+                .iter()
+                .map(|(id, name, access)| DiskConfig {
+                    id: id.to_string(),
+                    name: name.to_string(),
+                    volume_name: id.to_string(),
+                    access: *access,
+                    meta_url: "redis://localhost:4551/1".into(),
+                    cache_expire_days: 30,
+                    mount_path: format!("/Volumes/Floppy/{name}"),
+                })
+                .collect(),
+        };
+        let creds = DiskCredentials {
+            valkey_username: "floppy_d_1".into(),
+            valkey_password: "pw-secret".into(),
+            s3: managed.then(|| S3Key {
+                access_key_id: "GK123".into(),
+                secret_key: "sk-secret".into(),
+            }),
+        };
+        (config, creds)
+    }
+
+    #[test]
+    fn a_plan_writes_the_disks_file_and_applies_with_the_secrets_on_stdin() {
+        let r = team_rig();
+        r.core.refresh();
+        assert_eq!(r.core.status().state, DiskState::NoDisks);
+        let (config, creds) = plan(&[("0192-a", "Archivio 2025", ApiAccess::Read)], true);
+        r.core.configure(&config, &creds);
+        r.sync_and_wait();
+        let file = r.file();
+        assert_eq!(file["meta_user"], "floppy_d_1");
+        assert_eq!(file["disks"][0]["folder"], "Archivio 2025");
+        assert_eq!(file["disks"][0]["enabled"], true);
+        // The file holds no secret; stdin held them all.
+        let raw = std::fs::read_to_string(r.home.join("disks.json")).unwrap();
+        assert!(!raw.contains("pw-secret") && !raw.contains("sk-secret"));
+        let sent: serde_json::Value = serde_json::from_str(&r.applies()[0]).unwrap();
+        assert_eq!(sent["meta_password"], "pw-secret");
+        assert_eq!(sent["s3"]["0192-a"]["secret_key"], "sk-secret");
+        assert!(!r.calls().contains("pw-secret"));
+
+        // The same plan again (a refresh) applies nothing.
+        r.status(&team_status(&[DISK_A], ""));
+        r.core.configure(&config, &creds);
+        r.sync_and_wait();
+        assert_eq!(r.applies().len(), 1);
+        let s = r.core.status();
+        assert_eq!(s.state, DiskState::Connected);
+        let team = s.team.unwrap();
+        assert_eq!(
+            team.disks[0].path.as_deref(),
+            Some("/Volumes/Floppy/Archivio 2025")
+        );
+        assert_eq!(team.disks[0].state, Some(RunState::Mounted));
+        assert_eq!(team.error, None);
+    }
+
+    #[test]
+    fn a_pending_disk_is_applied_again_until_it_is_done() {
+        let r = team_rig();
+        let (config, creds) = plan(&[("0192-a", "Archivio 2025", ApiAccess::Read)], false);
+        r.core.refresh();
+        r.core.configure(&config, &creds);
+        r.sync_and_wait();
+        // Lowered to read while a file is open: the engine says remount.
+        let waiting = disk_with(
+            DISK_A,
+            &[("pending", "\"remount\""), ("mounted_access", "\"write\"")],
+        );
+        r.status(&team_status(&[&waiting], ""));
+        r.sync_and_wait();
+        assert_eq!(r.applies().len(), 1, "not before the retry interval");
+        thread::sleep(Duration::from_millis(650));
+        r.sync_and_wait();
+        assert_eq!(r.applies().len(), 2);
+        let disk = &r.core.status().team.unwrap().disks[0];
+        assert_eq!(disk.pending, Some(Pending::Remount));
+        r.status(&team_status(&[DISK_A], ""));
+        thread::sleep(Duration::from_millis(650));
+        r.sync_and_wait();
+        assert_eq!(r.applies().len(), 2, "nothing waits any more");
+    }
+
+    #[test]
+    fn a_failed_apply_is_shown_and_retried_after_the_interval() {
+        let r = team_rig();
+        std::fs::write(
+            r.dir.path().join("apply.fail"),
+            "the VM is not responding, run: floppy status",
+        )
+        .unwrap();
+        let (config, creds) = plan(&[("0192-a", "A", ApiAccess::Write)], false);
+        r.core.refresh();
+        r.core.configure(&config, &creds);
+        r.sync_and_wait();
+        assert_eq!(
+            r.core.status().team.unwrap().error.as_deref(),
+            Some("the floppy command failed: the VM is not responding, run: floppy status")
+        );
+        r.sync_and_wait();
+        assert_eq!(r.applies().len(), 1);
+        std::fs::remove_file(r.dir.path().join("apply.fail")).unwrap();
+        thread::sleep(Duration::from_millis(650));
+        r.sync_and_wait();
+        assert_eq!(r.applies().len(), 2);
+        assert_eq!(r.core.status().team.unwrap().error, None);
+    }
+
+    #[test]
+    fn never_applies_while_off_or_on_the_single_user_volume() {
+        let r = team_rig();
+        let (config, creds) = plan(&[("0192-a", "A", ApiAccess::Write)], false);
+        // Turned off by the person: an apply would turn Floppy back on.
+        r.status(&team_status(&[], "").replace(r#""stopped":false"#, r#""stopped":true"#));
+        r.core.refresh();
+        r.core.configure(&config, &creds);
+        r.sync_and_wait();
+        assert!(r.applies().is_empty());
+        assert!(!r.home.join("disks.json").exists());
+
+        // The zip's volume: the plan is shown as refused, nothing written.
+        r.status(r#"{"version":1,"mode":"single","configured":true,"installed":true,"stopped":false,"vm":"running","mount_point":"/Volumes/Floppy","responding":true,"drive":"active","cache_used_mb":1,"cache_limit_mb":100,"mac_free_mb":90000,"reserve_mb":20480,"vm_memory_mib":null,"vm_memory_wanted_mib":null,"disks":null}"#);
+        r.sync_and_wait();
+        assert!(r.applies().is_empty());
+        let s = r.core.status();
+        assert_eq!(s.state, DiskState::Connected);
+        let team = s.team.unwrap();
+        assert!(team.refused_single);
+        assert_eq!(team.disks[0].folder, "A");
+        assert_eq!(
+            r.core.set_disk_enabled("0192-a", false),
+            Err(CoreError::NotTeam)
+        );
+        // Nothing to clear there: the volume is not touched.
+        assert_eq!(r.core.clear(), Ok(()));
+        assert!(!r.calls().contains("disks clear"));
+
+        // On again: the waiting plan is applied.
+        r.status(&team_status(&[], ""));
+        r.core.configure(&config, &creds);
+        r.sync_and_wait();
+        assert_eq!(r.applies().len(), 1);
+    }
+
+    #[test]
+    fn a_disk_turned_off_stays_off_across_new_answers() {
+        let r = team_rig();
+        let (config, creds) = plan(
+            &[
+                ("0192-a", "A", ApiAccess::Write),
+                ("0192-b", "B", ApiAccess::Read),
+            ],
+            false,
+        );
+        r.core.refresh();
+        r.core.configure(&config, &creds);
+        r.sync_and_wait();
+        r.core.set_disk_enabled("0192-b", false).unwrap();
+        assert_eq!(r.file()["disks"][1]["enabled"], false);
+        r.sync_and_wait();
+        assert_eq!(r.applies().len(), 2, "a choice is applied at once");
+        assert_eq!(
+            r.core.set_disk_enabled("nope", true),
+            Err(CoreError::NoSuchDisk)
+        );
+        // The server lowers A: B stays off.
+        let (lowered, _) = plan(
+            &[
+                ("0192-a", "A", ApiAccess::Read),
+                ("0192-b", "B", ApiAccess::Read),
+            ],
+            false,
+        );
+        r.core.configure(&lowered, &creds);
+        r.sync_and_wait();
+        let file = r.file();
+        assert_eq!(file["disks"][0]["access"], "read");
+        assert_eq!(file["disks"][1]["enabled"], false);
+    }
+
+    #[test]
+    fn clear_runs_the_engine_and_forgets_the_plan() {
+        let r = team_rig();
+        let (config, creds) = plan(&[("0192-a", "A", ApiAccess::Write)], false);
+        r.core.refresh();
+        r.core.configure(&config, &creds);
+        r.sync_and_wait();
+        assert!(r.home.join("disks.json").exists());
+        assert_eq!(r.core.clear(), Ok(()));
+        assert!(r.calls().contains("disks clear"));
+        assert!(!r.home.join("disks.json").exists());
+        r.status(&team_status(&[], "").replace(r#""configured":true"#, r#""configured":false"#));
+        r.sync_and_wait();
+        assert_eq!(r.applies().len(), 1, "no plan, no file: nothing to apply");
+        assert!(r.core.status().team.unwrap().disks.is_empty());
+    }
+
+    #[test]
+    fn restart_stops_then_starts() {
+        let r = team_rig();
+        r.status(
+            &team_status(&[DISK_A], "")
+                .replace(r#""vm_memory_mib":1024"#, r#""vm_memory_mib":768"#),
+        );
+        r.core.refresh();
+        assert!(r.core.status().team.unwrap().restart_needed);
+        r.core.run_job(JobKind::Restart, None).unwrap();
+        assert_eq!(r.core.status().state, DiskState::Starting);
+        wait_idle(&r.core);
+        assert!(r.calls().ends_with("stop\nstart\n"), "{}", r.calls());
+        assert_eq!(r.core.status().last_error, None);
+    }
+
+    #[test]
+    fn the_heartbeat_report_takes_the_worst_mode() {
+        let offline = disk_with(
+            DISK_A,
+            &[
+                ("id", "\"b\""),
+                ("mode", "\"offline\""),
+                ("online", "false"),
+            ],
+        );
+        let starting = disk_with(
+            DISK_A,
+            &[("id", "\"c\""), ("state", "\"starting\""), ("mode", "null")],
+        );
+        let disks: Vec<EngineDisk> = [DISK_A, offline.as_str(), starting.as_str()]
+            .iter()
+            .map(|d| serde_json::from_str(d).unwrap())
+            .collect();
+        let report = mount_report(&disks);
+        assert_eq!(report.mounted_disk_ids, ["0192-a", "b"]);
+        assert_eq!(report.replica_mode.as_deref(), Some("offline"));
+        assert_eq!(
+            mount_report(&disks[..1]).replica_mode.as_deref(),
+            Some("replica")
+        );
+        assert_eq!(mount_report(&[]).replica_mode, None);
     }
 }

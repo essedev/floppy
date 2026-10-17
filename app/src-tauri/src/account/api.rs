@@ -2,7 +2,9 @@
 //! them (server/src/floppy_server/auth/router.py, device/router.py): the app's
 //! sign-in under `/auth/app/*` and the Mac's own calls under `/device/*`,
 //! authenticated by `Authorization: Bearer <device token>`. Errors come back as
-//! `{code, message, details}` (errors.py).
+//! `{code, message, details}` (errors.py); a device's 401 carries
+//! `details.reason`. The shapes follow the Pydantic models of
+//! device/service.py.
 
 use super::server;
 use serde::{Deserialize, Serialize};
@@ -27,6 +29,8 @@ pub enum ApiError {
         attempts_left: Option<u32>,
         /// `details.retryAfter` (or the header) of `rate_limited`, seconds.
         retry_after: Option<u64>,
+        /// `details.reason` of a device's 401 (`DeviceRefusal`).
+        reason: Option<String>,
     },
     /// An answer this app cannot read: not the control plane, or a newer one.
     #[error("unexpected answer: {0}")]
@@ -46,6 +50,38 @@ impl ApiError {
     pub fn is_unauthorized(&self) -> bool {
         matches!(self, ApiError::Status { status: 401, .. })
     }
+
+    /// Why the server refused this Mac's token, for a 401.
+    pub fn refusal(&self) -> Option<DeviceRefusal> {
+        match self {
+            ApiError::Status {
+                status: 401,
+                reason,
+                ..
+            } => Some(match reason.as_deref() {
+                Some("token_unknown") => DeviceRefusal::TokenUnknown,
+                Some("device_signed_out") => DeviceRefusal::SignedOut,
+                Some("device_not_registered") => DeviceRefusal::NotRegistered,
+                // `device_revoked`, and a server from before the reasons.
+                _ => DeviceRefusal::Revoked,
+            }),
+            _ => None,
+        }
+    }
+}
+
+/// The reasons of a device's 401 (server errors.py, `device_unauthorized`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeviceRefusal {
+    /// The server does not know this token: the Mac was deleted, or the
+    /// server is another one (or was rebuilt).
+    TokenUnknown,
+    /// An admin, or the person from the web, revoked this Mac.
+    Revoked,
+    /// This Mac signed out (`/device/sign-out`) earlier.
+    SignedOut,
+    /// The Mac is still `pending`: it has to register.
+    NotRegistered,
 }
 
 /// A serde error without the input it choked on: it may be a secret.
@@ -82,6 +118,11 @@ pub fn error_from(status: u16, body: &[u8], retry_header: Option<&str>) -> ApiEr
                 .get("retryAfter")
                 .and_then(|v| v.as_u64())
                 .or_else(|| retry_header.and_then(|h| h.trim().parse().ok())),
+            reason: b
+                .details
+                .get("reason")
+                .and_then(|v| v.as_str())
+                .map(str::to_string),
             code: b.code,
             message: b.message,
         },
@@ -151,12 +192,146 @@ pub struct Versions {
     pub macos_version: String,
 }
 
-/// The heartbeat's answer: `revoked` means this Mac lost its access.
+/// The heartbeat's state: `revoked` means this Mac lost its access.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Beat {
     Active,
     Revoked,
+}
+
+/// Read-only or read-write, per person and disk (DECISIONS #23).
+pub use crate::engine::Access;
+
+/// The organization the Mac belongs to.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OrganizationRef {
+    pub id: String,
+    pub name: String,
+}
+
+/// The person the Mac belongs to; `name` falls back to the address.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UserRef {
+    pub email: String,
+    pub name: String,
+}
+
+/// A disk this Mac may see, as it mounts it: `metaUrl` is its instance and
+/// database without credentials; `read` is a `--read-only` mount.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiskConfig {
+    pub id: String,
+    pub name: String,
+    pub volume_name: String,
+    pub access: Access,
+    pub meta_url: String,
+    pub cache_expire_days: u32,
+    pub mount_path: String,
+}
+
+/// `GET /device/config`: everything to mount, no secret. `s3AccessKeyTail`
+/// is the end of this Mac's own key (managed), to check the Keychain's.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceConfig {
+    pub storage_mode: String,
+    pub s3_access_key_tail: Option<String>,
+    pub organization: OrganizationRef,
+    pub user: UserRef,
+    pub disks: Vec<DiskConfig>,
+}
+
+/// This Mac's own S3 key (managed mode).
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct S3KeyOut {
+    pub access_key_id: String,
+    pub secret_key: String,
+}
+
+/// `POST /device/register`, returned once: the Valkey user and password (the
+/// same on every disk's instance), the S3 key in managed mode, the disks.
+#[derive(Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RegisterResponse {
+    pub valkey_username: String,
+    pub valkey_password: String,
+    pub storage_mode: String,
+    pub s3: Option<S3KeyOut>,
+    pub organization: OrganizationRef,
+    pub user: UserRef,
+    pub disks: Vec<DiskConfig>,
+}
+
+impl std::fmt::Debug for RegisterResponse {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RegisterResponse")
+            .field("valkey_username", &self.valkey_username)
+            .field("storage_mode", &self.storage_mode)
+            .field("s3", &self.s3.is_some())
+            .field("disks", &self.disks.len())
+            .finish_non_exhaustive()
+    }
+}
+
+impl RegisterResponse {
+    /// The same facts as `GET /device/config` would give now.
+    pub fn config(&self) -> DeviceConfig {
+        DeviceConfig {
+            storage_mode: self.storage_mode.clone(),
+            s3_access_key_tail: self.s3.as_ref().map(|k| key_tail(&k.access_key_id)),
+            organization: self.organization.clone(),
+            user: self.user.clone(),
+            disks: self.disks.clone(),
+        }
+    }
+}
+
+/// The end of an access key as the server keeps it (`right(access_key_id, 5)`).
+pub fn key_tail(access_key_id: &str) -> String {
+    let chars: Vec<char> = access_key_id.chars().collect();
+    chars[chars.len().saturating_sub(5)..].iter().collect()
+}
+
+/// Where this Mac's mounts read their metadata from.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReplicaReport {
+    /// `replica`, `master` or `offline`.
+    pub mode: String,
+    pub lag_ms: Option<u64>,
+}
+
+/// What the Mac reports every minute.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HeartbeatRequest {
+    #[serde(flatten)]
+    pub versions: Versions,
+    pub replica: Option<ReplicaReport>,
+    pub s3_access_key_tail: Option<String>,
+    pub mounted_disk_ids: Vec<String>,
+}
+
+/// A disk the Mac may see now, and how.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiskAccessRef {
+    pub id: String,
+    pub access: Access,
+}
+
+/// The heartbeat's answer: the state and what the Mac may see now.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HeartbeatAnswer {
+    pub state: Beat,
+    #[serde(default)]
+    pub disks: Vec<DiskAccessRef>,
 }
 
 /// The calls the account makes; `Http` in the app, fakes in the tests.
@@ -165,9 +340,19 @@ pub trait ControlPlane: Send + Sync {
     /// `pending`, `completed`, `expired` or `locked`.
     fn sign_in_status(&self, server: &str, request_id: &str) -> Result<String, ApiError>;
     fn exchange(&self, server: &str, verifier: &str, proof: &Proof) -> Result<Grant, ApiError>;
-    /// The registration answer, raw: `credentials::keep` reads it.
-    fn register(&self, server: &str, token: &str, v: &Versions) -> Result<Vec<u8>, ApiError>;
-    fn heartbeat(&self, server: &str, token: &str, v: &Versions) -> Result<Beat, ApiError>;
+    fn register(
+        &self,
+        server: &str,
+        token: &str,
+        v: &Versions,
+    ) -> Result<RegisterResponse, ApiError>;
+    fn config(&self, server: &str, token: &str) -> Result<DeviceConfig, ApiError>;
+    fn heartbeat(
+        &self,
+        server: &str,
+        token: &str,
+        beat: &HeartbeatRequest,
+    ) -> Result<HeartbeatAnswer, ApiError>;
     fn sign_out(&self, server: &str, token: &str) -> Result<(), ApiError>;
 }
 
@@ -278,20 +463,32 @@ impl ControlPlane for Http {
         Self::json(&body)
     }
 
-    fn register(&self, server: &str, token: &str, v: &Versions) -> Result<Vec<u8>, ApiError> {
+    fn register(
+        &self,
+        server: &str,
+        token: &str,
+        v: &Versions,
+    ) -> Result<RegisterResponse, ApiError> {
         let url = server::endpoint(server, "/device/register");
         let (_, body) = self.send("POST", &url, Some(token), Some(Self::value(v)?))?;
-        Ok(body)
+        Self::json(&body)
     }
 
-    fn heartbeat(&self, server: &str, token: &str, v: &Versions) -> Result<Beat, ApiError> {
-        #[derive(Deserialize)]
-        struct Answer {
-            state: Beat,
-        }
+    fn config(&self, server: &str, token: &str) -> Result<DeviceConfig, ApiError> {
+        let url = server::endpoint(server, "/device/config");
+        let (_, body) = self.send("GET", &url, Some(token), None)?;
+        Self::json(&body)
+    }
+
+    fn heartbeat(
+        &self,
+        server: &str,
+        token: &str,
+        beat: &HeartbeatRequest,
+    ) -> Result<HeartbeatAnswer, ApiError> {
         let url = server::endpoint(server, "/device/heartbeat");
-        let (_, body) = self.send("POST", &url, Some(token), Some(Self::value(v)?))?;
-        Ok(Self::json::<Answer>(&body)?.state)
+        let (_, body) = self.send("POST", &url, Some(token), Some(Self::value(beat)?))?;
+        Self::json(&body)
     }
 
     fn sign_out(&self, server: &str, token: &str) -> Result<(), ApiError> {
@@ -338,6 +535,88 @@ mod tests {
             error_from(502, b"<html>bad gateway</html>", None),
             ApiError::Unexpected(_)
         ));
+    }
+
+    #[test]
+    fn reads_the_device_refusal_reasons() {
+        let refusal = |reason: &str| {
+            error_from(
+                401,
+                format!(
+                    r#"{{"code":"unauthorized","message":"x","details":{{"reason":"{reason}"}}}}"#
+                )
+                .as_bytes(),
+                None,
+            )
+            .refusal()
+        };
+        assert_eq!(refusal("token_unknown"), Some(DeviceRefusal::TokenUnknown));
+        assert_eq!(refusal("device_revoked"), Some(DeviceRefusal::Revoked));
+        assert_eq!(refusal("device_signed_out"), Some(DeviceRefusal::SignedOut));
+        assert_eq!(
+            refusal("device_not_registered"),
+            Some(DeviceRefusal::NotRegistered)
+        );
+        // A server from before the reasons: revoked, as the app always read it.
+        let bare = error_from(401, br#"{"code":"unauthorized","message":"x"}"#, None);
+        assert_eq!(bare.refusal(), Some(DeviceRefusal::Revoked));
+        let other = error_from(403, br#"{"code":"forbidden","message":"x"}"#, None);
+        assert_eq!(other.refusal(), None);
+    }
+
+    /// The answers exactly as the server's Pydantic models serialize them.
+    #[test]
+    fn parses_the_device_answers() {
+        let register: RegisterResponse = serde_json::from_str(
+            r#"{"valkeyUsername":"floppy_d_0192f0c47d1e7a409e523c1d2b9a0f11","valkeyPassword":"pw-secret",
+            "storageMode":"managed","s3":{"accessKeyId":"GK1234567890abcdef","secretKey":"sk-secret"},
+            "organization":{"id":"0192f0c4-0000-7000-8000-000000000001","name":"Studio Esempio"},
+            "user":{"email":"giulia@studio.test","name":"Giulia Ferri"},
+            "disks":[{"id":"0192f0c4-7d1e-7a40-9e52-3c1d2b9a0f11","name":"Archivio 2025","volumeName":"archivio-2025",
+            "access":"read","metaUrl":"rediss://archivio-2025.meta.example.com:6443/1","cacheExpireDays":30,
+            "mountPath":"/Volumes/Floppy/Archivio 2025"}]}"#,
+        )
+        .unwrap();
+        let debug = format!("{register:?}");
+        assert!(!debug.contains("pw-secret") && !debug.contains("sk-secret"));
+        let config = register.config();
+        assert_eq!(config.s3_access_key_tail.as_deref(), Some("bcdef"));
+        assert_eq!(config.organization.name, "Studio Esempio");
+        assert_eq!(config.disks[0].access, Access::Read);
+
+        let config: DeviceConfig = serde_json::from_str(
+            r#"{"storageMode":"manual","s3AccessKeyTail":null,
+            "organization":{"id":"o","name":"Studio"},"user":{"email":"a@b.it","name":"a@b.it"},"disks":[]}"#,
+        )
+        .unwrap();
+        assert_eq!(config.storage_mode, "manual");
+
+        let beat: HeartbeatAnswer =
+            serde_json::from_str(r#"{"state":"active","disks":[{"id":"d1","access":"write"}]}"#)
+                .unwrap();
+        assert_eq!(beat.disks[0].access, Access::Write);
+        let revoked: HeartbeatAnswer =
+            serde_json::from_str(r#"{"state":"revoked","disks":[]}"#).unwrap();
+        assert_eq!(revoked.state, Beat::Revoked);
+
+        let sent = serde_json::to_value(HeartbeatRequest {
+            versions: Versions {
+                app_version: "0.1.0".into(),
+                macos_version: "15.5".into(),
+            },
+            replica: Some(ReplicaReport {
+                mode: "offline".into(),
+                lag_ms: None,
+            }),
+            s3_access_key_tail: None,
+            mounted_disk_ids: vec!["d1".into()],
+        })
+        .unwrap();
+        assert_eq!(
+            sent,
+            serde_json::json!({"appVersion":"0.1.0","macosVersion":"15.5",
+                "replica":{"mode":"offline","lagMs":null},"s3AccessKeyTail":null,"mountedDiskIds":["d1"]})
+        );
     }
 
     #[test]

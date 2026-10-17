@@ -1,6 +1,8 @@
 //! The engine is the `floppy` command (`macos/bin/floppy`, installed in
 //! `~/.floppy/bin/floppy` from the app's bundle, see `installer`). The app never touches the VM, the mount, launchd
 //! or `nsmb.conf` itself: it runs the command and reads what it answers.
+//! The team disks' contract (`status --json` with `disks`, `disks apply` with
+//! the secrets on stdin, `disks clear`) is docs/ARCHITECTURE.md, "Team disks".
 //!
 //! No Tauri dependency here, so the module is tested against fake commands.
 
@@ -23,6 +25,9 @@ pub const DEFAULT_RESERVE_MB: u64 = 20480;
 /// `status --json` waits at most 5 s on a dead mount and makes one call into
 /// the VM; anything past this is a hung command.
 pub const STATUS_TIMEOUT: Duration = Duration::from_secs(25);
+/// `disks apply` and `disks clear` wait up to 15 minutes for the engine's lock
+/// (another command running), and an apply may set the VM up first.
+pub const DISKS_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 /// The PATH the command runs with, the same whether the app was started by
 /// launchd (which gives this one) or from a terminal (which gives the user's).
 const ENGINE_PATH_VAR: &str = "/usr/bin:/bin:/usr/sbin:/sbin";
@@ -73,21 +78,167 @@ pub enum EngineError {
     Parse(String),
 }
 
-/// What `floppy status --json` prints (version 1).
+/// What `floppy status --json` prints (version 1). An engine from before the
+/// team version prints no `mode`, `vm_memory_*` nor `disks`.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct EngineReport {
     pub version: u32,
+    #[serde(default)]
+    pub mode: Mode,
+    /// Single-user: always. Team: the disks file exists.
     pub configured: bool,
     pub installed: bool,
     pub stopped: bool,
     pub vm: VmState,
     pub mount_point: Option<String>,
     pub responding: Option<bool>,
+    /// Team: `active` only when Samba and every enabled disk are up.
     pub drive: Option<String>,
     pub cache_used_mb: Option<u64>,
     pub cache_limit_mb: Option<u64>,
     pub mac_free_mb: Option<u64>,
     pub reserve_mb: Option<u64>,
+    #[serde(default)]
+    pub vm_memory_mib: Option<u64>,
+    #[serde(default)]
+    pub vm_memory_wanted_mib: Option<u64>,
+    /// Team: one entry per disk of the disks file; null when the VM is not running.
+    #[serde(default)]
+    pub disks: Option<Vec<EngineDisk>>,
+}
+
+/// Which install this Mac runs: the zip's single-user volume (`config.env`)
+/// or the team version.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Mode {
+    #[default]
+    Single,
+    Team,
+}
+
+/// How a team disk is mounted: `read` is `--read-only`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Access {
+    Read,
+    Write,
+}
+
+/// A team disk's mount in the VM.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RunState {
+    Mounted,
+    /// The unit is coming up or retrying.
+    Starting,
+    Failed,
+    Stopped,
+    /// Turned off by the person (`enabled: false`).
+    Disabled,
+    #[serde(other)]
+    Other,
+}
+
+/// A change the disk waits for until nothing on it is open.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Pending {
+    /// New access, address, secrets or a smaller cache.
+    Remount,
+    /// Turned off or no longer visible, still in use.
+    Remove,
+    #[serde(other)]
+    Other,
+}
+
+/// The disk's local Valkey replica.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Replica {
+    Up,
+    Syncing,
+    /// No link to the master.
+    Down,
+    Stopped,
+    #[serde(other)]
+    Other,
+}
+
+/// Where the mount reads its metadata from (the patch's mode).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MetaMode {
+    Replica,
+    /// The replica is behind or down: reads go to the master.
+    Master,
+    /// The master is unreachable: reads from the replica, writes refused.
+    Offline,
+    /// Right after mounting.
+    Unknown,
+    #[serde(other)]
+    Other,
+}
+
+/// One team disk as `status --json` and `disks apply` report it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EngineDisk {
+    pub id: String,
+    pub folder: String,
+    /// The access asked for in the disks file.
+    pub access: Access,
+    pub enabled: bool,
+    pub state: RunState,
+    /// The access of the running mount; differs from `access` while a remount waits.
+    pub mounted_access: Option<Access>,
+    pub pending: Option<Pending>,
+    pub cache_used_mb: Option<u64>,
+    pub cache_size_mb: Option<u64>,
+    pub replica: Replica,
+    pub mode: Option<MetaMode>,
+    /// False only when offline, null when not mounted.
+    pub online: Option<bool>,
+}
+
+/// What `floppy disks apply` prints.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct ApplyReport {
+    pub version: u32,
+    pub mount_point: Option<String>,
+    pub cache_per_disk_mb: Option<u64>,
+    pub vm_memory_mib: Option<u64>,
+    pub vm_memory_wanted_mib: Option<u64>,
+    /// The VM runs with less memory than its disks want: a restart applies it.
+    pub restart_needed: bool,
+    pub vm: ApplyVm,
+}
+
+/// The VM's side of an apply.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct ApplyVm {
+    pub smbd: Option<String>,
+    pub drive: Option<String>,
+    pub disks: Vec<EngineDisk>,
+}
+
+impl EngineReport {
+    /// The team disks the report lists, none in the single-user mode.
+    pub fn team_disks(&self) -> &[EngineDisk] {
+        match (self.mode, &self.disks) {
+            (Mode::Team, Some(d)) => d,
+            _ => &[],
+        }
+    }
+
+    /// The VM runs with less memory than its disks want: `floppy stop` and
+    /// `start` give it the new size (it never changes while running).
+    pub fn restart_needed(&self) -> bool {
+        self.mode == Mode::Team
+            && matches!(
+                (self.vm_memory_mib, self.vm_memory_wanted_mib),
+                (Some(have), Some(want)) if have < want
+            )
+    }
 }
 
 /// The VM as Lima reports it, `broken` when it runs but does not answer.
@@ -102,18 +253,35 @@ pub enum VmState {
     Other,
 }
 
-/// The report in the command's output: the last line that holds a JSON object.
-pub fn parse_report(stdout: &str) -> Result<EngineReport, EngineError> {
-    let line = stdout
+/// The last line of the output that holds a JSON object.
+fn json_line(stdout: &str) -> Result<&str, EngineError> {
+    stdout
         .lines()
         .rev()
         .find(|l| l.trim_start().starts_with('{'))
-        .ok_or_else(|| EngineError::Parse("no JSON object in the output".into()))?;
+        .ok_or_else(|| EngineError::Parse("no JSON object in the output".into()))
+}
+
+/// The report in the command's output: the last line that holds a JSON object.
+pub fn parse_report(stdout: &str) -> Result<EngineReport, EngineError> {
     let report: EngineReport =
-        serde_json::from_str(line).map_err(|e| EngineError::Parse(e.to_string()))?;
+        serde_json::from_str(json_line(stdout)?).map_err(|e| EngineError::Parse(e.to_string()))?;
     if report.version != 1 {
         return Err(EngineError::Parse(format!(
             "status version {} is not supported",
+            report.version
+        )));
+    }
+    Ok(report)
+}
+
+/// The answer of `floppy disks apply`.
+pub fn parse_apply(stdout: &str) -> Result<ApplyReport, EngineError> {
+    let report: ApplyReport =
+        serde_json::from_str(json_line(stdout)?).map_err(|e| EngineError::Parse(e.to_string()))?;
+    if report.version != 1 {
+        return Err(EngineError::Parse(format!(
+            "apply version {} is not supported",
             report.version
         )));
     }
@@ -179,7 +347,31 @@ fn drain<R: Read + Send + 'static>(pipe: Option<R>) -> thread::JoinHandle<String
 /// Runs the command and waits at most `timeout`; past it the process group is
 /// killed and the call fails.
 pub fn run(bin: &Path, args: &[&str], timeout: Duration) -> Result<Finished, EngineError> {
-    let mut child = spawn(bin, args)?;
+    run_with_input(bin, args, None, timeout)
+}
+
+/// `run`, with `input` written to the command's stdin and then closed: the
+/// only way a secret reaches the engine (never argv, the environment or a file).
+pub fn run_with_input(
+    bin: &Path,
+    args: &[&str],
+    input: Option<&[u8]>,
+    timeout: Duration,
+) -> Result<Finished, EngineError> {
+    if !is_executable(bin) {
+        return Err(EngineError::Missing(bin.display().to_string()));
+    }
+    let mut cmd = command(bin, args);
+    if input.is_some() {
+        cmd.stdin(Stdio::piped());
+    }
+    let mut child = spawn_command(cmd)?;
+    if let (Some(bytes), Some(mut stdin)) = (input, child.stdin.take()) {
+        use std::io::Write;
+        // A command that exits without reading gets EPIPE here: its exit
+        // status says what went wrong, not the write. Dropping closes stdin.
+        let _ = stdin.write_all(bytes);
+    }
     let stdout = drain(child.stdout.take());
     let stderr = drain(child.stderr.take());
     let started = Instant::now();
@@ -206,12 +398,42 @@ pub fn run(bin: &Path, args: &[&str], timeout: Duration) -> Result<Finished, Eng
 pub fn status(bin: &Path) -> Result<EngineReport, EngineError> {
     let done = run(bin, &["status", "--json"], STATUS_TIMEOUT)?;
     if !done.status.success() {
-        return Err(EngineError::Failed(
-            last_message(&done.stderr)
-                .unwrap_or_else(|| format!("exit {}", done.status.code().unwrap_or(-1))),
-        ));
+        return Err(failed(&done));
     }
     parse_report(&done.stdout)
+}
+
+fn failed(done: &Finished) -> EngineError {
+    EngineError::Failed(
+        last_message(&done.stderr)
+            .unwrap_or_else(|| format!("exit {}", done.status.code().unwrap_or(-1))),
+    )
+}
+
+/// `floppy disks apply`: the disks file (already written) and, when known,
+/// the secrets on stdin. None keeps the secrets the VM already has.
+pub fn apply(bin: &Path, secrets: Option<&[u8]>) -> Result<ApplyReport, EngineError> {
+    // An empty stdin rather than an inherited one: the command reads it to the end.
+    let done = run_with_input(
+        bin,
+        &["disks", "apply"],
+        Some(secrets.unwrap_or_default()),
+        DISKS_TIMEOUT,
+    )?;
+    if !done.status.success() {
+        return Err(failed(&done));
+    }
+    parse_apply(&done.stdout)
+}
+
+/// `floppy disks clear`: every team disk off this Mac, its cache and replica
+/// deleted in the VM, the disks file gone. The buckets are not touched.
+pub fn clear(bin: &Path) -> Result<(), EngineError> {
+    let done = run(bin, &["disks", "clear"], DISKS_TIMEOUT)?;
+    if !done.status.success() {
+        return Err(failed(&done));
+    }
+    Ok(())
 }
 
 /// The line that explains a failure: the command's own `floppy: ...` message
@@ -267,6 +489,9 @@ pub enum DiskState {
     Stopping,
     Connected,
     Unreachable,
+    /// Team version, ready, with no disk to mount: not signed in yet, no disk
+    /// given by the team, or every disk turned off by the person.
+    NoDisks,
 }
 
 /// Why the disk is unreachable.
@@ -290,6 +515,8 @@ pub enum JobKind {
     Setup,
     Start,
     Stop,
+    /// `floppy stop` then `floppy start`: the VM takes the memory its disks want.
+    Restart,
     Warmup,
     Free,
 }
@@ -300,7 +527,7 @@ pub fn derive(
     job: Option<JobKind>,
 ) -> (DiskState, Option<Problem>) {
     match job {
-        Some(JobKind::Install | JobKind::Setup | JobKind::Start) => {
+        Some(JobKind::Install | JobKind::Setup | JobKind::Start | JobKind::Restart) => {
             return (DiskState::Starting, None);
         }
         Some(JobKind::Stop) => return (DiskState::Stopping, None),
@@ -311,6 +538,9 @@ pub fn derive(
         Err(EngineError::Missing(_)) => return (DiskState::NotInstalled, None),
         Err(_) => return (DiskState::Unreachable, Some(Problem::Engine)),
     };
+    if r.mode == Mode::Team {
+        return derive_team(r);
+    }
     if !r.configured {
         return (DiskState::NotInstalled, None);
     }
@@ -327,6 +557,47 @@ pub fn derive(
         VmState::Running if r.mount_point.is_none() => Some(Problem::NotMounted),
         VmState::Running if r.responding == Some(false) => Some(Problem::NotResponding),
         VmState::Running => None,
+    };
+    match problem {
+        Some(p) => (DiskState::Unreachable, Some(p)),
+        None => (DiskState::Connected, None),
+    }
+}
+
+/// The team version: the faceplate is the share at /Volumes/Floppy, and a
+/// disk that is starting, failed or waiting shows on its own row instead of
+/// making the whole Floppy unreachable.
+fn derive_team(r: &EngineReport) -> (DiskState, Option<Problem>) {
+    if !r.installed {
+        return (DiskState::NeedsSetup, None);
+    }
+    if r.stopped {
+        return (DiskState::Off, None);
+    }
+    match r.vm {
+        VmState::Missing | VmState::Broken => {
+            return (DiskState::Unreachable, Some(Problem::VmBroken));
+        }
+        VmState::Stopped | VmState::Other => {
+            return (DiskState::Unreachable, Some(Problem::VmStopped));
+        }
+        VmState::Running => {}
+    }
+    let enabled: Vec<&EngineDisk> = r.team_disks().iter().filter(|d| d.enabled).collect();
+    if !r.configured || enabled.is_empty() {
+        return (DiskState::NoDisks, None);
+    }
+    // `drive` is Samba's state, or failed/activating for the disks: a disk
+    // that explains it is shown on its row.
+    let disks_explain = enabled.iter().any(|d| d.state != RunState::Mounted);
+    let problem = if r.drive.as_deref() != Some("active") && !disks_explain {
+        Some(Problem::DriveDown)
+    } else if r.mount_point.is_none() {
+        Some(Problem::NotMounted)
+    } else if r.responding == Some(false) {
+        Some(Problem::NotResponding)
+    } else {
+        None
     };
     match problem {
         Some(p) => (DiskState::Unreachable, Some(p)),
@@ -387,7 +658,31 @@ pub(crate) mod tests {
             cache_limit_mb: Some(102400),
             mac_free_mb: Some(201975),
             reserve_mb: Some(20480),
+            mode: Mode::Single,
+            vm_memory_mib: None,
+            vm_memory_wanted_mib: None,
+            disks: None,
         }
+    }
+
+    /// A disk line as the engine prints it (docs/ARCHITECTURE.md, "Team disks").
+    pub const DISK_A: &str = r#"{"id":"0192-a","folder":"Archivio 2025","access":"read","enabled":true,"state":"mounted","mounted_access":"read","pending":null,"cache_used_mb":812,"cache_size_mb":10240,"replica":"up","mode":"replica","online":true}"#;
+
+    /// `status --json` of the team version with `disks` (each a JSON object).
+    pub fn team_status(disks: &[&str], extra: &str) -> String {
+        format!(
+            r#"{{"version":1,"mode":"team","configured":true,"installed":true,"stopped":false,"vm":"running","mount_point":"/Volumes/Floppy","responding":true,"drive":"active","cache_used_mb":812,"cache_limit_mb":30720,"mac_free_mb":201975,"reserve_mb":20480,"vm_memory_mib":1024,"vm_memory_wanted_mib":1024,"disks":[{}]{extra}}}"#,
+            disks.join(",")
+        )
+    }
+
+    /// The disk line with some fields replaced (`"key":value` pairs).
+    pub fn disk_with(base: &str, changes: &[(&str, &str)]) -> String {
+        let mut v: serde_json::Value = serde_json::from_str(base).unwrap();
+        for (k, val) in changes {
+            v[*k] = serde_json::from_str(val).unwrap();
+        }
+        v.to_string()
     }
 
     /// A fake `floppy` in a temp dir, so nothing here touches ~/.floppy.
@@ -413,6 +708,159 @@ pub(crate) mod tests {
         let r = parse_report(out).unwrap();
         assert_eq!(r.vm, VmState::Missing);
         assert_eq!(derive(&Ok(r), None), (DiskState::NotInstalled, None));
+    }
+
+    #[test]
+    fn parses_the_team_status() {
+        let out = team_status(&[DISK_A], "");
+        let r = parse_report(&out).unwrap();
+        assert_eq!(r.mode, Mode::Team);
+        let d = &r.team_disks()[0];
+        assert_eq!(d.folder, "Archivio 2025");
+        assert_eq!(
+            (d.access, d.mounted_access),
+            (Access::Read, Some(Access::Read))
+        );
+        assert_eq!(
+            (d.state, d.replica, d.mode),
+            (RunState::Mounted, Replica::Up, Some(MetaMode::Replica))
+        );
+        assert_eq!(
+            (d.cache_used_mb, d.cache_size_mb, d.online),
+            (Some(812), Some(10240), Some(true))
+        );
+        assert!(!r.restart_needed());
+        assert_eq!(derive(&Ok(r), None), (DiskState::Connected, None));
+
+        // Values a newer engine may add read as `other`, not as an error.
+        let newer = disk_with(
+            DISK_A,
+            &[
+                ("state", "\"paused\""),
+                ("replica", "\"x\""),
+                ("mode", "\"y\""),
+                ("pending", "\"z\""),
+            ],
+        );
+        let r = parse_report(&team_status(&[&newer], "")).unwrap();
+        let d = &r.team_disks()[0];
+        assert_eq!(
+            (d.state, d.replica, d.mode, d.pending),
+            (
+                RunState::Other,
+                Replica::Other,
+                Some(MetaMode::Other),
+                Some(Pending::Other)
+            )
+        );
+
+        // The VM not running: disks null.
+        let stopped = r#"{"version":1,"mode":"team","configured":true,"installed":true,"stopped":true,"vm":"stopped","mount_point":null,"responding":null,"drive":null,"cache_used_mb":null,"cache_limit_mb":null,"mac_free_mb":1000,"reserve_mb":20480,"vm_memory_mib":1024,"vm_memory_wanted_mib":1280,"disks":null}"#;
+        let r = parse_report(stopped).unwrap();
+        assert!(r.team_disks().is_empty());
+        assert!(r.restart_needed());
+        assert_eq!(derive(&Ok(r), None).0, DiskState::Off);
+    }
+
+    #[test]
+    fn derives_the_team_states() {
+        let state = |out: String| derive(&parse_report(&out), None);
+        // Before sign-in: the VM is ready, no disks file.
+        let fresh = team_status(&[], "").replace(r#""configured":true"#, r#""configured":false"#);
+        assert_eq!(state(fresh), (DiskState::NoDisks, None));
+        // Every disk turned off.
+        let off = disk_with(DISK_A, &[("enabled", "false"), ("state", "\"disabled\"")]);
+        assert_eq!(state(team_status(&[&off], "")).0, DiskState::NoDisks);
+        // A disk failed or starting is its row's business, not the whole Floppy.
+        let failed = disk_with(DISK_A, &[("state", "\"failed\"")]);
+        let both = team_status(&[DISK_A, &failed], "")
+            .replace(r#""drive":"active""#, r#""drive":"failed""#);
+        assert_eq!(state(both), (DiskState::Connected, None));
+        // Samba down with every disk mounted is the drive.
+        let samba =
+            team_status(&[DISK_A], "").replace(r#""drive":"active""#, r#""drive":"inactive""#);
+        assert_eq!(
+            state(samba),
+            (DiskState::Unreachable, Some(Problem::DriveDown))
+        );
+        let unmounted = team_status(&[DISK_A], "").replace(
+            r#""mount_point":"/Volumes/Floppy""#,
+            r#""mount_point":null"#,
+        );
+        assert_eq!(
+            state(unmounted),
+            (DiskState::Unreachable, Some(Problem::NotMounted))
+        );
+        let setup = team_status(&[], "").replace(r#""installed":true"#, r#""installed":false"#);
+        assert_eq!(state(setup).0, DiskState::NeedsSetup);
+        let broken = team_status(&[DISK_A], "").replace(r#""vm":"running""#, r#""vm":"broken""#);
+        assert_eq!(
+            state(broken),
+            (DiskState::Unreachable, Some(Problem::VmBroken))
+        );
+        assert_eq!(
+            derive(&Ok(report()), Some(JobKind::Restart)).0,
+            DiskState::Starting
+        );
+    }
+
+    #[test]
+    fn apply_sends_the_secrets_on_stdin_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let seen = dir.path().join("seen");
+        let answer = format!(
+            r#"{{"version":1,"mount_point":"/Volumes/Floppy","cache_per_disk_mb":10240,"vm_memory_mib":1024,"vm_memory_wanted_mib":1280,"restart_needed":true,"vm":{{"smbd":"active","drive":"active","cache_used_mb":1,"cache_limit_mb":30720,"disks":[{DISK_A}]}}}}"#
+        );
+        let bin = fake(
+            dir.path(),
+            &format!(
+                r#"[ "$1 $2" = "disks apply" ] || exit 2
+{{ echo "args: $*"; echo "env: $(env | grep -c pw-secret)"; printf 'stdin: '; cat; echo; }} > "{}"
+echo "Starting the VM..." >&2
+echo '{answer}'"#,
+                seen.display()
+            ),
+        );
+        let report = apply(&bin, Some(br#"{"version":1,"meta_password":"pw-secret"}"#)).unwrap();
+        assert!(report.restart_needed);
+        assert_eq!(report.vm.disks[0].id, "0192-a");
+        let seen = std::fs::read_to_string(&seen).unwrap();
+        assert_eq!(
+            seen,
+            "args: disks apply\nenv: 0\nstdin: {\"version\":1,\"meta_password\":\"pw-secret\"}\n"
+        );
+
+        // Without secrets the stdin is empty, not the app's own.
+        let bin = fake(
+            dir.path(),
+            &format!(r#"[ -z "$(cat)" ] || exit 3; echo '{answer}'"#),
+        );
+        assert!(apply(&bin, None).is_ok());
+    }
+
+    #[test]
+    fn apply_and_clear_report_the_engine_message() {
+        let dir = tempfile::tempdir().unwrap();
+        let bin = fake(
+            dir.path(),
+            "cat >/dev/null; echo 'floppy: this Mac runs the single-user volume (config.env): team disks need the team install' >&2; exit 1",
+        );
+        assert_eq!(
+            apply(&bin, None).unwrap_err(),
+            EngineError::Failed(
+                "this Mac runs the single-user volume (config.env): team disks need the team install".into()
+            )
+        );
+        let bin = fake(
+            dir.path(),
+            r#"[ "$1 $2" = "disks clear" ] && echo '{"version":1,"cleared":true}'"#,
+        );
+        assert_eq!(clear(&bin), Ok(()));
+        assert!(matches!(
+            clear(&dir.path().join("none")),
+            Err(EngineError::Missing(_))
+        ));
+        assert!(parse_apply(r#"{"version":2}"#).is_err());
     }
 
     #[test]

@@ -1,7 +1,8 @@
 //! Floppy's menu bar app (DECISIONS #9, #12): a tray icon with the disk's
 //! state, a panel under it, Settings and a first-run window. The engine is the
 //! `floppy` command; `core` runs it, `account` signs the Mac in to the
-//! control plane, this module wires both to Tauri.
+//! control plane and hands `core` the team's disks, this module wires both
+//! to Tauri.
 
 mod account;
 mod commands;
@@ -9,6 +10,7 @@ mod core;
 mod engine;
 mod installer;
 mod prefs;
+mod team;
 mod text;
 mod tray;
 mod windows;
@@ -116,6 +118,8 @@ pub fn run() {
             commands::cancel_job,
             commands::dismiss_error,
             commands::list_folders,
+            commands::set_disk_enabled,
+            commands::restart_disk,
             commands::open_in_finder,
             commands::get_setup,
             commands::run_setup,
@@ -167,9 +171,12 @@ pub fn run() {
                 .build(app)?;
             let tray = tray::TrayState::new(icon);
 
-            let core = Core::new(engine::engine_path(), bundled_engine(app), move |event| {
-                on_event(&handle, &tray, event)
-            });
+            let core = Core::new(
+                engine::engine_path(),
+                engine::floppy_home(),
+                bundled_engine(app),
+                move |event| on_event(&handle, &tray, event),
+            );
             app.manage(Arc::clone(&core));
             let prefs = prefs::PrefsStore::new(&app.path().app_config_dir()?);
             let first_run = !prefs.load().first_run_done;
@@ -182,6 +189,7 @@ pub fn run() {
             let account = Account::new(
                 Arc::new(api::Http::new(&format!("Floppy/{version} (macOS {macos})"))),
                 Arc::new(secrets::Keychain),
+                Arc::clone(&core) as Arc<dyn account::TeamDisks>,
                 prefs,
                 api::Versions {
                     app_version: version,

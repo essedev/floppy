@@ -27,6 +27,8 @@ impl From<CoreError> for CommandError {
             CoreError::NothingToCancel => "nothing_to_cancel",
             CoreError::ListTimeout => "list_timeout",
             CoreError::NoBundle => "no_bundle",
+            CoreError::NotTeam => "not_team",
+            CoreError::NoSuchDisk => "no_such_disk",
             CoreError::Engine(_) => "engine",
         };
         CommandError {
@@ -99,10 +101,26 @@ pub fn dismiss_error(core: CoreState) {
     core.dismiss_error();
 }
 
+/// Restarts Floppy (stop, then start) so the VM takes the memory its disks want.
 #[tauri::command]
-pub async fn list_folders(core: CoreState<'_>) -> Result<Vec<Folder>, CommandError> {
+pub fn restart_disk(core: CoreState) -> Result<(), CommandError> {
+    Ok(core.run_job(JobKind::Restart, None)?)
+}
+
+/// Turns a team disk on or off on this Mac.
+#[tauri::command]
+pub fn set_disk_enabled(core: CoreState, id: String, enabled: bool) -> Result<(), CommandError> {
+    Ok(core.set_disk_enabled(&id, enabled)?)
+}
+
+/// The folders at the top of the disk, or of `path` on it.
+#[tauri::command]
+pub async fn list_folders(
+    core: CoreState<'_>,
+    path: Option<String>,
+) -> Result<Vec<Folder>, CommandError> {
     let core = Arc::clone(&core);
-    tauri::async_runtime::spawn_blocking(move || core.folders())
+    tauri::async_runtime::spawn_blocking(move || core.folders(path.as_deref()))
         .await
         .map_err(io_error)?
         .map_err(CommandError::from)

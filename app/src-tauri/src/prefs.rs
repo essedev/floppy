@@ -1,7 +1,7 @@
 //! The app's own preferences, a small JSON file in its config folder
 //! (`~/Library/Application Support/dev.esse.floppy.menubar/prefs.json`).
-//! The disk's configuration stays in the engine's `~/.floppy/config.env`;
-//! nothing secret goes here (the Keychain holds that, see `account::secrets`).
+//! The disk's configuration stays in the engine's `~/.floppy/config.env` (or
+//! `disks.json` for the team, see `team`); nothing secret goes here (the Keychain holds that, see `account::secrets`).
 
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -15,6 +15,9 @@ pub struct Prefs {
     pub first_run_done: bool,
     /// The control plane typed in Settings; None means the build's default.
     pub server_url: Option<String>,
+    /// The team disks of a signed-out Mac are still to be cleared off it
+    /// (`floppy disks clear` failed or was interrupted): retried.
+    pub disks_clear_owed: bool,
 }
 
 /// Reads and writes `Prefs` at one path; clones share the write lock.

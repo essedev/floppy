@@ -8,10 +8,20 @@
 //!    loopback), is traded with the verifier for a device token: the Mac is
 //!    `pending` on the server, and the token goes to the Keychain at once.
 //! 3. `/device/register` makes it `active` and returns its disk credentials
-//!    once (`credentials.rs`).
-//! 4. A heartbeat keeps the server current; `revoked`, or a token the server
-//!    no longer knows, clears the Keychain and signs the app out without
-//!    touching the disk.
+//!    once (`credentials.rs`) with the disks it may see, which go to the
+//!    engine side (`TeamDisks`, implemented by `core`).
+//! 4. A heartbeat every minute reports the mounts and answers what the Mac
+//!    may see now: when a disk or its access changed, `/device/config` is
+//!    read again and handed to the engine side.
+//! 5. Revoked (the heartbeat, or a 401 with its `details.reason`), or signed
+//!    out by the person: every team disk is cleared off the Mac first
+//!    (`floppy disks clear`), then the Keychain. A clear that fails is owed
+//!    (kept in the preferences) and retried every minute.
+//!
+//! Sign-out clears the disks too. The server revokes the Mac's Valkey users
+//! (and, managed, its S3 key) at sign-out without opening a key window,
+//! because the app wipes the Mac: a signed-out Mac keeping the team's cache
+//! and replicas would break that. A signed-out Mac has no team disks.
 //!
 //! Network calls never run under the lock; one step runs at a time (`busy`),
 //! and the worker thread polls the waiting request, retries registration and
@@ -25,7 +35,11 @@ pub mod secrets;
 pub mod server;
 
 use crate::prefs::PrefsStore;
-use api::{ApiError, Beat, ControlPlane, Proof, StartRequest, Versions};
+use api::{
+    ApiError, Beat, ControlPlane, DeviceConfig, DeviceRefusal, HeartbeatRequest, Proof,
+    ReplicaReport, StartRequest, Versions,
+};
+use credentials::DiskCredentials;
 use loopback::Loopback;
 use secrets::SecretStore;
 use serde::{Deserialize, Serialize};
@@ -52,6 +66,10 @@ pub struct Timing {
     pub request_ttl: Duration,
     pub register_retry: Duration,
     pub heartbeat: Duration,
+    /// Reading `/device/config` again after a failure.
+    pub config_retry: Duration,
+    /// Clearing the team disks again after a failure.
+    pub clear_retry: Duration,
 }
 
 impl Default for Timing {
@@ -63,8 +81,30 @@ impl Default for Timing {
             request_ttl: Duration::from_secs(15 * 60),
             register_retry: Duration::from_secs(30),
             heartbeat: Duration::from_secs(60),
+            config_retry: Duration::from_secs(30),
+            clear_retry: Duration::from_secs(60),
         }
     }
+}
+
+/// What the account asks of the engine side: `core::Core` in the app, a
+/// recording fake in the tests.
+pub trait TeamDisks: Send + Sync {
+    /// The disks the control plane lets this Mac see, with what mounts them.
+    fn configure(&self, config: &DeviceConfig, credentials: &DiskCredentials);
+    /// What the heartbeat reports about the mounts.
+    fn report(&self) -> MountReport;
+    /// Every team disk off this Mac (`floppy disks clear`); the engine's
+    /// message when it could not.
+    fn clear(&self) -> Result<(), String>;
+}
+
+/// The mounts as the heartbeat reports them.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct MountReport {
+    pub mounted_disk_ids: Vec<String>,
+    /// `replica`, `master` or `offline`: the worst among the mounted disks.
+    pub replica_mode: Option<String>,
 }
 
 /// The Keychain record of a signed-in Mac.
@@ -76,6 +116,11 @@ struct DeviceRecord {
     email: String,
     device_name: String,
     registered: bool,
+    /// The team and the person's name, from the last answer.
+    #[serde(default)]
+    organization: Option<String>,
+    #[serde(default)]
+    user_name: Option<String>,
 }
 
 impl std::fmt::Debug for DeviceRecord {
@@ -96,6 +141,11 @@ pub enum OutNotice {
     Revoked,
     /// The person signed out from this app.
     SignedOut,
+    /// The server does not know this Mac (`token_unknown`): deleted, or
+    /// another server answers at the address.
+    Unknown,
+    /// The server says this Mac had already signed out (`device_signed_out`).
+    AlreadySignedOut,
 }
 
 /// Why a waiting request can no longer complete.
@@ -136,8 +186,10 @@ pub enum Phase {
     SignedIn {
         email: String,
         device_name: String,
-        /// Not exposed to the app by the server yet.
+        /// The team's name, once the server has told it.
         organization: Option<String>,
+        /// The person's name (the address when they set none).
+        user_name: Option<String>,
     },
 }
 
@@ -150,6 +202,8 @@ pub enum Busy {
     Linking,
     Registering,
     SigningOut,
+    /// Removing the team disks of a Mac that lost its access.
+    Clearing,
 }
 
 /// What went wrong in the last step, for the dictionary.
@@ -175,6 +229,10 @@ pub enum AuthError {
     MailFailed,
     MetadataUnavailable,
     SignOutFailed {
+        detail: String,
+    },
+    /// Signed out, but the team disks are still on the Mac: retried.
+    DisksNotCleared {
         detail: String,
     },
     Keychain {
@@ -243,6 +301,17 @@ struct Inner {
     reachable: bool,
     last_register: Option<Instant>,
     last_beat: Option<Instant>,
+    /// In memory from the Keychain; None until registered.
+    credentials: Option<DiskCredentials>,
+    /// The last `/device/config` (or registration) answer.
+    config: Option<DeviceConfig>,
+    config_due: bool,
+    last_config: Option<Instant>,
+    /// Registered again this run because the S3 key was not the server's.
+    reissued: bool,
+    /// The team disks are still to be cleared (also in the preferences).
+    clear_owed: bool,
+    last_clear: Option<Instant>,
 }
 
 type Emit = Box<dyn Fn(AccountEvent) + Send + Sync>;
@@ -252,6 +321,7 @@ pub struct Account {
     inner: Mutex<Inner>,
     api: Arc<dyn ControlPlane>,
     secrets: Arc<dyn SecretStore>,
+    team: Arc<dyn TeamDisks>,
     prefs: PrefsStore,
     versions: Versions,
     timing: Timing,
@@ -311,13 +381,15 @@ impl Account {
     pub fn new(
         api: Arc<dyn ControlPlane>,
         secrets: Arc<dyn SecretStore>,
+        team: Arc<dyn TeamDisks>,
         prefs: PrefsStore,
         versions: Versions,
         timing: Timing,
         emit: impl Fn(AccountEvent) + Send + Sync + 'static,
     ) -> Arc<Self> {
-        let configured_server = prefs
-            .load()
+        let stored = prefs.load();
+        let clear_owed = stored.disks_clear_owed;
+        let configured_server = stored
             .server_url
             .and_then(|s| server::normalize(&s).ok())
             .unwrap_or_else(|| server::DEFAULT_SERVER.to_string());
@@ -340,12 +412,15 @@ impl Account {
                 None
             }
         };
+        // A Keychain that refuses this item is not fatal: the Mac registers
+        // again and gets new ones.
+        let credentials = match &record {
+            Some(r) if r.registered => credentials::load(secrets.as_ref()).ok().flatten(),
+            _ => None,
+        };
+        let registered = record.as_ref().is_some_and(|r| r.registered);
         let phase = match &record {
-            Some(r) if r.registered => Phase::SignedIn {
-                email: r.email.clone(),
-                device_name: r.device_name.clone(),
-                organization: None,
-            },
+            Some(r) if r.registered => signed_in(r),
             Some(r) => Phase::Registering {
                 email: r.email.clone(),
                 device_name: r.device_name.clone(),
@@ -363,9 +438,17 @@ impl Account {
                 reachable: true,
                 last_register: None,
                 last_beat: None,
+                config_due: registered,
+                credentials,
+                config: None,
+                last_config: None,
+                reissued: false,
+                clear_owed,
+                last_clear: None,
             }),
             api,
             secrets,
+            team,
             prefs,
             versions,
             timing,
@@ -703,6 +786,8 @@ impl Account {
                 email: p.email,
                 device_name: p.device_name,
                 registered: false,
+                organization: None,
+                user_name: None,
             };
             match self.save_record(&record) {
                 Ok(()) => {
@@ -771,45 +856,54 @@ impl Account {
             .api
             .register(&record.server, &record.device_token, &self.versions);
         match answer {
-            Ok(body) => {
-                let kept = credentials::keep(self.secrets.as_ref(), &body);
-                self.update(|inner| {
+            Ok(answer) => {
+                let creds = DiskCredentials::from_register(&answer);
+                let config = answer.config();
+                let kept = credentials::keep(self.secrets.as_ref(), &creds);
+                let done = self.update(|inner| {
                     inner.busy = None;
                     inner.last_register = Some(Instant::now());
                     if let Err(e) = kept {
-                        inner.error = Some(match e {
-                            credentials::KeepError::Shape(d) => AuthError::Server { detail: d },
-                            credentials::KeepError::Keychain(k) => AuthError::Keychain {
-                                detail: k.to_string(),
-                            },
+                        inner.error = Some(AuthError::Keychain {
+                            detail: e.to_string(),
                         });
-                        return;
+                        return false;
                     }
                     let registered = DeviceRecord {
                         registered: true,
+                        organization: Some(config.organization.name.clone()),
+                        user_name: Some(config.user.name.clone()),
                         ..record
                     };
                     match self.save_record(&registered) {
                         Ok(()) => {
-                            inner.phase = Phase::SignedIn {
-                                email: registered.email.clone(),
-                                device_name: registered.device_name.clone(),
-                                organization: None,
-                            };
+                            inner.phase = signed_in(&registered);
                             inner.record = Some(registered);
                             inner.reachable = true;
                             inner.error = None;
                             inner.last_beat = Some(Instant::now());
+                            inner.credentials = Some(creds.clone());
+                            inner.config = Some(config.clone());
+                            inner.config_due = false;
+                            inner.last_config = Some(Instant::now());
+                            // A new registration reconciles whatever the last left.
+                            inner.clear_owed = false;
+                            true
                         }
                         Err(e) => {
                             inner.error = Some(AuthError::Keychain {
                                 detail: e.to_string(),
-                            })
+                            });
+                            false
                         }
                     }
                 });
+                if done {
+                    let _ = self.prefs.update(|p| p.disks_clear_owed = false);
+                    self.team.configure(&config, &creds);
+                }
             }
-            Err(e) if e.is_unauthorized() => self.lose_access(true),
+            Err(e) if e.is_unauthorized() => self.refused(&e, true),
             Err(e) => self.update(|inner| {
                 inner.busy = None;
                 inner.last_register = Some(Instant::now());
@@ -822,20 +916,56 @@ impl Account {
     }
 
     fn heartbeat(&self) {
-        let Some(record) = self.lock().record.clone() else {
-            return;
+        let (record, tail) = {
+            let inner = self.lock();
+            let Some(record) = inner.record.clone() else {
+                return;
+            };
+            (
+                record,
+                inner
+                    .credentials
+                    .as_ref()
+                    .and_then(DiskCredentials::s3_tail),
+            )
+        };
+        let mounts = self.team.report();
+        let beat = HeartbeatRequest {
+            versions: self.versions.clone(),
+            replica: mounts
+                .replica_mode
+                .map(|mode| ReplicaReport { mode, lag_ms: None }),
+            s3_access_key_tail: tail,
+            mounted_disk_ids: mounts.mounted_disk_ids,
         };
         let answer = self
             .api
-            .heartbeat(&record.server, &record.device_token, &self.versions);
+            .heartbeat(&record.server, &record.device_token, &beat);
         // A step started meanwhile (sign-out) owns `busy`: the beat never touches it.
         match answer {
-            Ok(Beat::Revoked) => self.lose_access(false),
-            Err(e) if e.is_unauthorized() => self.lose_access(false),
+            Ok(a) if a.state == Beat::Revoked => self.lose_access(OutNotice::Revoked, false),
+            Err(e) if e.is_unauthorized() => self.refused(&e, false),
             other => self.update(|inner| {
                 inner.last_beat = Some(Instant::now());
                 match other {
-                    Ok(_) => inner.reachable = true,
+                    Ok(a) => {
+                        inner.reachable = true;
+                        // A disk given, taken away or with another access: read
+                        // the configuration again and hand it to the engine.
+                        let mut now: Vec<(String, api::Access)> =
+                            a.disks.into_iter().map(|d| (d.id, d.access)).collect();
+                        now.sort();
+                        let mut known: Vec<(String, api::Access)> = inner
+                            .config
+                            .as_ref()
+                            .map(|c| c.disks.iter().map(|d| (d.id.clone(), d.access)).collect())
+                            .unwrap_or_default();
+                        known.sort();
+                        if inner.config.is_none() || now != known {
+                            inner.config_due = true;
+                            inner.last_config = None;
+                        }
+                    }
                     Err(ApiError::Network(_)) => inner.reachable = false,
                     Err(ApiError::Status { status, .. }) if status >= 500 => {
                         inner.reachable = false
@@ -849,37 +979,160 @@ impl Account {
         }
     }
 
+    /// Reads `/device/config` and hands it to the engine side.
+    fn fetch_config(&self) {
+        let Some(record) = self.lock().record.clone() else {
+            return;
+        };
+        let answer = self.api.config(&record.server, &record.device_token);
+        let config = match answer {
+            Ok(c) => c,
+            Err(e) if e.is_unauthorized() => return self.refused(&e, false),
+            Err(e) => {
+                return self.update(|inner| {
+                    inner.last_config = Some(Instant::now());
+                    inner.reachable = !matches!(
+                        e,
+                        ApiError::Network(_) | ApiError::Status { status: 500.., .. }
+                    );
+                });
+            }
+        };
+        let creds = self.update(|inner| {
+            inner.last_config = Some(Instant::now());
+            inner.config_due = false;
+            inner.reachable = true;
+            // Managed: a key the server no longer has would fail every mount.
+            // Registering again issues a new one (once per run, not in a loop).
+            let tail = inner
+                .credentials
+                .as_ref()
+                .and_then(DiskCredentials::s3_tail);
+            let stale = config.storage_mode == "managed" && tail != config.s3_access_key_tail;
+            if (stale || inner.credentials.is_none()) && !inner.reissued {
+                inner.reissued = true;
+                inner.phase = Phase::Registering {
+                    email: record.email.clone(),
+                    device_name: record.device_name.clone(),
+                };
+                inner.last_register = None;
+                return None;
+            }
+            let named = DeviceRecord {
+                organization: Some(config.organization.name.clone()),
+                user_name: Some(config.user.name.clone()),
+                ..record.clone()
+            };
+            if inner.record.as_ref() != Some(&named) && self.save_record(&named).is_ok() {
+                inner.record = Some(named.clone());
+            }
+            if matches!(inner.phase, Phase::SignedIn { .. }) {
+                inner.phase = signed_in(inner.record.as_ref().unwrap_or(&named));
+            }
+            inner.config = Some(config.clone());
+            inner.credentials.clone()
+        });
+        if let Some(creds) = creds {
+            self.team.configure(&config, &creds);
+        }
+    }
+
     /// Removes the token and the disk credentials from the Keychain.
     fn clear_keychain(&self) -> Result<(), secrets::SecretError> {
         credentials::clear(self.secrets.as_ref())?;
         self.secrets.delete(DEVICE_ITEM)
     }
 
-    /// The server says this Mac has no access any more: sign out, leave the
-    /// disk alone. `ending_step` when the step that learned it owns `busy`.
-    fn lose_access(&self, ending_step: bool) {
+    /// Clears the team disks, owed in the preferences until it succeeds, so
+    /// a crash or a failure is retried (`tick`), also after a relaunch.
+    fn clear_disks(&self) -> Result<(), String> {
+        let _ = self.prefs.update(|p| p.disks_clear_owed = true);
+        let result = self.team.clear();
+        if result.is_ok() {
+            let _ = self.prefs.update(|p| p.disks_clear_owed = false);
+        }
+        let mut inner = self.lock();
+        inner.clear_owed = result.is_err();
+        inner.last_clear = Some(Instant::now());
+        result
+    }
+
+    /// A 401: back to registering for a Mac the server holds as pending,
+    /// signed out with the reason otherwise.
+    fn refused(&self, e: &ApiError, ending_step: bool) {
+        let notice = match e.refusal() {
+            Some(DeviceRefusal::NotRegistered) => {
+                let record = self.lock().record.clone();
+                let Some(record) = record else { return };
+                let pending = DeviceRecord {
+                    registered: false,
+                    ..record
+                };
+                let saved = self.save_record(&pending);
+                return self.update(|inner| {
+                    if ending_step {
+                        inner.busy = None;
+                    }
+                    inner.phase = Phase::Registering {
+                        email: pending.email.clone(),
+                        device_name: pending.device_name.clone(),
+                    };
+                    inner.record = Some(pending);
+                    inner.last_register = None;
+                    inner.error = saved.err().map(|e| AuthError::Keychain {
+                        detail: e.to_string(),
+                    });
+                });
+            }
+            Some(DeviceRefusal::TokenUnknown) => OutNotice::Unknown,
+            Some(DeviceRefusal::SignedOut) => OutNotice::AlreadySignedOut,
+            Some(DeviceRefusal::Revoked) | None => OutNotice::Revoked,
+        };
+        self.lose_access(notice, ending_step);
+    }
+
+    /// The server says this Mac has no access any more: the team disks off
+    /// the Mac first, then the Keychain. `ending_step` when the step that
+    /// learned it owns `busy`.
+    fn lose_access(&self, notice: OutNotice, ending_step: bool) {
+        let marked = self.update(|inner| {
+            if inner.busy.is_none() || ending_step {
+                inner.busy = Some(Busy::Clearing);
+                true
+            } else {
+                false
+            }
+        });
+        let disks = self.clear_disks();
         let cleared = self.clear_keychain();
         self.update(|inner| {
-            if ending_step {
+            if marked {
                 inner.busy = None;
             }
             inner.record = None;
             inner.pending = None;
+            inner.credentials = None;
+            inner.config = None;
             inner.reachable = true;
             inner.phase = Phase::SignedOut {
-                notice: Some(OutNotice::Revoked),
+                notice: Some(notice),
             };
-            inner.error = cleared.err().map(|e| AuthError::Keychain {
-                detail: e.to_string(),
-            });
+            inner.error = match (cleared, disks) {
+                (Err(e), _) => Some(AuthError::Keychain {
+                    detail: e.to_string(),
+                }),
+                (_, Err(detail)) => Some(AuthError::DisksNotCleared { detail }),
+                _ => None,
+            };
         });
     }
 
     // Sign-out and settings.
 
-    /// "Esci": the server revokes this Mac (`signed_out`), then the Keychain
-    /// is cleared. `local_only` clears it without the server, after a failed
-    /// attempt: the Mac then stays in the admin's list until revoked there.
+    /// "Esci": the server revokes this Mac (`signed_out`), then the team disks
+    /// and the Keychain are cleared. `local_only` clears them without the
+    /// server, after a failed attempt: the Mac then stays in the admin's list
+    /// until revoked there.
     pub fn sign_out(self: &Arc<Self>, local_only: bool) -> Result<AuthView, Refused> {
         self.begin(Busy::SigningOut, |i| i.record.is_some())?;
         let record = self.lock().record.clone();
@@ -901,17 +1154,24 @@ impl Account {
                 }
             }
         }
+        let disks = self.clear_disks();
         let cleared = self.clear_keychain();
         Ok(self.update(|inner| {
             inner.busy = None;
             inner.record = None;
+            inner.credentials = None;
+            inner.config = None;
             inner.reachable = true;
             inner.phase = Phase::SignedOut {
                 notice: Some(OutNotice::SignedOut),
             };
-            inner.error = cleared.err().map(|e| AuthError::Keychain {
-                detail: e.to_string(),
-            });
+            inner.error = match (cleared, disks) {
+                (Err(e), _) => Some(AuthError::Keychain {
+                    detail: e.to_string(),
+                }),
+                (_, Err(detail)) => Some(AuthError::DisksNotCleared { detail }),
+                _ => None,
+            };
             Self::compose(inner)
         }))
     }
@@ -967,7 +1227,11 @@ impl Account {
         enum Due {
             Poll(String, String),
             Register,
+            /// The configuration, then the heartbeat when it is due too: a
+            /// failing configuration never holds the heartbeat back.
+            Config(bool),
             Beat,
+            Clear,
             Nothing,
         }
         let due = {
@@ -994,9 +1258,20 @@ impl Account {
                         Due::Register
                     }
                     (Phase::SignedIn { .. }, _)
+                        if inner.config_due
+                            && since(inner.last_config, self.timing.config_retry) =>
+                    {
+                        Due::Config(since(inner.last_beat, self.timing.heartbeat))
+                    }
+                    (Phase::SignedIn { .. }, _)
                         if since(inner.last_beat, self.timing.heartbeat) =>
                     {
                         Due::Beat
+                    }
+                    (Phase::SignedOut { .. } | Phase::Ended { .. }, _)
+                        if inner.clear_owed && since(inner.last_clear, self.timing.clear_retry) =>
+                    {
+                        Due::Clear
                     }
                     _ => Due::Nothing,
                 }
@@ -1008,7 +1283,24 @@ impl Account {
                 self.update(|_| {});
                 self.register_now();
             }
+            Due::Config(beat) => {
+                self.fetch_config();
+                if beat && matches!(self.lock().phase, Phase::SignedIn { .. }) {
+                    self.heartbeat();
+                }
+            }
             Due::Beat => self.heartbeat(),
+            Due::Clear => {
+                let result = self.clear_disks();
+                self.update(|inner| match result {
+                    Ok(()) => {
+                        if matches!(inner.error, Some(AuthError::DisksNotCleared { .. })) {
+                            inner.error = None;
+                        }
+                    }
+                    Err(detail) => inner.error = Some(AuthError::DisksNotCleared { detail }),
+                });
+            }
             Due::Nothing => {}
         }
     }
@@ -1084,6 +1376,16 @@ impl Account {
                 thread::sleep(tick);
             }
         });
+    }
+}
+
+/// The signed-in phase for a record.
+fn signed_in(r: &DeviceRecord) -> Phase {
+    Phase::SignedIn {
+        email: r.email.clone(),
+        device_name: r.device_name.clone(),
+        organization: r.organization.clone(),
+        user_name: r.user_name.clone(),
     }
 }
 

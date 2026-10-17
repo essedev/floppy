@@ -54,7 +54,9 @@ pub fn look(status: &DiskStatus) -> Look {
         DiskState::Connected => Look::Connected,
         DiskState::Starting | DiskState::Stopping => Look::Starting,
         DiskState::Unreachable => Look::Unreachable,
-        DiskState::Off | DiskState::NeedsSetup | DiskState::NotInstalled => Look::Off,
+        DiskState::Off | DiskState::NeedsSetup | DiskState::NotInstalled | DiskState::NoDisks => {
+            Look::Off
+        }
     }
 }
 
