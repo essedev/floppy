@@ -4,7 +4,8 @@ paths:
 ---
 # The menu bar app
 
-- **The app never remounts the disk by itself**: it reports the state and runs `floppy start` only when the user asks (CLAUDE.md, "Never unmount or remount a mounted disk automatically").
+- **The app never forces a disk**: it runs `floppy start`, stop and restart only when the user asks (CLAUDE.md, "Never unmount or remount a mounted disk automatically"). Team disks change only through `floppy disks apply` from `team.rs`, which remounts a disk only when it is free and reports it `pending` otherwise; apply never runs while Floppy is stopped (it would start it), nor during install, setup, start, stop or restart.
+- **Sign-out and revocation clear the disks first**: `floppy disks clear`, then the Keychain; a failed clear stays pending in `prefs.json` and is retried, since the server revokes without a rotation window on that assumption.
 - **Base CSS rules go in `@layer base`**: outside a layer they beat Tailwind's utilities (a primary button rendered invisible).
 - **Tray images are drawn 18 pt high**: the template PNGs are padded to 24x18 for that.
 - **The engine is reached only through `engine.rs`**, with the binary from `FLOPPY_BIN` or `$FLOPPY_HOME/bin/floppy` (default `~/.floppy`) and a fixed PATH; tests use fake `floppy` scripts and fake bundles in temp folders, never the real install.
