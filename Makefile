@@ -1,7 +1,7 @@
 SCRIPTS := macos/bin/floppy macos/install.sh macos/vm/guest/guest-install.sh \
 	macos/vm/guest/floppy-mount scripts/package.sh spike/setup.sh spike/bench.sh spike/data-bench.sh spike/meta-bench.sh spike/meta-access.sh \
 	spike/juicefs-replica/build.sh spike/juicefs-replica/test.sh \
-	spike/drive/entrypoint.sh app/scripts/render-marks.sh
+	spike/drive/entrypoint.sh app/scripts/render-marks.sh server/docker/db-init.sh
 
 .DEFAULT_GOAL := help
 
@@ -20,9 +20,12 @@ app-check: ## The menu bar app: typecheck and build, frontend and Rust tests, cl
 web-check: ## The admin web: typecheck, lint and build
 	cd web && pnpm install --frozen-lockfile && pnpm typecheck && pnpm lint && pnpm build
 
+server-check: ## The control plane: format, lint, types and tests (needs `docker compose up -d db valkey` in server/)
+	cd server && uv run ruff format --check . && uv run ruff check . && uv run mypy && uv run --env-file .env pytest
+
 site-check: ## The site: Astro check and build
 	cd site && pnpm install --frozen-lockfile && pnpm check && pnpm build
 
-check: lint app-check web-check site-check ## The full quality pass
+check: lint app-check web-check server-check site-check ## The full quality pass
 
-.PHONY: help lint app-check web-check site-check check
+.PHONY: help lint app-check web-check server-check site-check check

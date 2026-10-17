@@ -48,7 +48,7 @@ cd app && FLOPPY_BIN=/path/to/fake-floppy pnpm tauri dev   # without FLOPPY_BIN:
 cd app && pnpm dev             # views in a browser: ?view=panel|settings|welcome&scenario=...
 app/scripts/render-marks.sh    # tray PNGs and app icons from design/mark/
 
-# Admin web of the control plane (frontend; dev uses the fake API, VITE_API=http the real one)
+# Control plane: server/ (commands in .claude/rules/server.md); admin web, dev on the fake API
 cd web && pnpm dev             # http://localhost:4508; pnpm typecheck, lint, build
 ```
 
