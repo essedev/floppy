@@ -1,12 +1,14 @@
 ---
-// The landing page in one language: a Starlight splash page whose hero is overridden
-// (components/Hero.astro), then who it is for, how it works, the measured numbers, where the
-// project stands, costs, the category, licenses and hosting, install, and links on.
-import StarlightPage from '@astrojs/starlight/components/StarlightPage.astro';
+// The landing page in one language, on its own layout (layouts/LandingLayout.astro): the
+// hero, who it is for, how it works, the measured numbers, costs, the category, licenses and
+// hosting, install on a faceplate panel, and links on. Sections alternate between the page
+// and the surface tone so the page reads as one object in bands.
 import { brand, type Lang } from '@/brand';
 import { landing } from '@/i18n/landing';
 import { localePath } from '@/lib/locale';
+import LandingLayout from '@/layouts/LandingLayout.astro';
 import Diagram from './Diagram.astro';
+import Hero from './Hero.astro';
 
 interface Props {
   /** Language of the page. */
@@ -16,25 +18,20 @@ interface Props {
 const { lang } = Astro.props;
 const t = landing[lang];
 const other: Lang = lang === 'en' ? 'it' : 'en';
-const docsFile = (file: string, anchor: string) => `${brand.repo}/blob/main/docs/${file}#${anchor}`;
+const architecture = (anchor: string) => `${brand.repo}/blob/main/docs/ARCHITECTURE.md#${anchor}`;
+const installLine = `brew install --cask ${brand.caskRef}`;
 ---
 
-<StarlightPage
-  frontmatter={{
-    title: t.pageTitle,
-    description: t.description,
-    template: 'splash',
-    hero: { title: brand.tagline[lang] },
-    pagefind: false,
-  }}
->
-  <div class="not-content fx-landing">
-    <section class="fx-section" aria-labelledby="fx-who">
-      <div class="fx-intro">
+<LandingLayout lang={lang} title={t.pageTitle} description={t.description}>
+  <Hero lang={lang} />
+
+  <section class="fx-band fx-band-alt" aria-labelledby="fx-who">
+    <div class="fx-wrap fx-split">
+      <div class="fx-split-head">
         <h2 id="fx-who">{t.whoTitle}</h2>
-        <p class="fx-section-lead">{t.whoLead}</p>
+        <p class="fx-lead">{t.whoLead}</p>
       </div>
-      <ul class="fx-cols">
+      <ul class="fx-props">
         {
           t.properties.map((p) => (
             <li>
@@ -48,11 +45,15 @@ const docsFile = (file: string, anchor: string) => `${brand.repo}/blob/main/docs
           ))
         }
       </ul>
-    </section>
+    </div>
+  </section>
 
-    <section class="fx-section" aria-labelledby="fx-how">
-      <h2 id="fx-how">{t.howTitle}</h2>
-      <p class="fx-section-lead">{t.howLead}</p>
+  <section class="fx-band" aria-labelledby="fx-how">
+    <div class="fx-wrap">
+      <div class="fx-head">
+        <h2 id="fx-how">{t.howTitle}</h2>
+        <p class="fx-lead">{t.howLead}</p>
+      </div>
       <Diagram t={t.diagram} />
       <ul class="fx-traffic">
         {
@@ -69,18 +70,21 @@ const docsFile = (file: string, anchor: string) => `${brand.repo}/blob/main/docs
           ))
         }
       </ul>
-      <p class="notice fx-note">{t.howNote}</p>
-    </section>
+    </div>
+  </section>
 
-    <section class="fx-section" aria-labelledby="fx-measured">
-      <h2 id="fx-measured">{t.measuredTitle}</h2>
-      <p class="fx-section-lead">{t.measuredLead}</p>
+  <section class="fx-band fx-band-alt" aria-labelledby="fx-measured">
+    <div class="fx-wrap">
+      <div class="fx-head">
+        <h2 id="fx-measured">{t.measuredTitle}</h2>
+        <p class="fx-lead">{t.measuredLead}</p>
+      </div>
       <div class="fx-measures">
         {
           t.measures.map((g) => (
             <section class="fx-measure">
               <h3>{g.title}</h3>
-              <p class="readout">{g.source}</p>
+              <p class="readout">{g.setup}</p>
               <dl>
                 {g.rows.map((r) => (
                   <div>
@@ -96,32 +100,18 @@ const docsFile = (file: string, anchor: string) => `${brand.repo}/blob/main/docs
           ))
         }
       </div>
-      <p class="fx-more-link">
-        <a href={docsFile('ARCHITECTURE.md', 'measured-performance')}>{t.measuredMore}</a>
+      <p class="fx-after">
+        <a href={architecture('measured-performance')}>{t.measuredMore}</a>
       </p>
-    </section>
+    </div>
+  </section>
 
-    <section class="fx-section fx-split" aria-labelledby="fx-status">
-      <h2 id="fx-status">{t.statusTitle}</h2>
-      <ol class="fx-status">
-        {
-          t.status.map((s) => (
-            <li>
-              <p class="fx-status-head">
-                <span class="led" data-state={s.led === 'off' ? undefined : s.led} aria-hidden="true" />
-                <span class="readout">{s.readout}</span>
-              </p>
-              <h3>{s.title}</h3>
-              <p>{s.text}</p>
-            </li>
-          ))
-        }
-      </ol>
-    </section>
-
-    <section class="fx-section" aria-labelledby="fx-cost">
-      <h2 id="fx-cost">{t.costTitle}</h2>
-      <p class="fx-section-lead">{t.costLead}</p>
+  <section class="fx-band" aria-labelledby="fx-cost">
+    <div class="fx-wrap">
+      <div class="fx-head">
+        <h2 id="fx-cost">{t.costTitle}</h2>
+        <p class="fx-lead">{t.costLead}</p>
+      </div>
       <table class="fx-table">
         <caption class="readout">{t.costCaption}</caption>
         <thead>
@@ -145,17 +135,23 @@ const docsFile = (file: string, anchor: string) => `${brand.repo}/blob/main/docs
           }
         </tbody>
       </table>
-      <p class="fx-fine">{t.costNote}</p>
-      <div class="notice fx-note">
-        <h3>{t.costHiddenTitle}</h3>
-        <p>{t.costHidden}</p>
+      <div class="fx-cost-foot">
+        <p class="fx-fine">{t.costNote}</p>
+        <div class="notice fx-notice">
+          <h3>{t.costHiddenTitle}</h3>
+          <p>{t.costHidden}</p>
+        </div>
       </div>
-    </section>
+    </div>
+  </section>
 
-    <section class="fx-section" aria-labelledby="fx-compare">
-      <h2 id="fx-compare">{t.compareTitle}</h2>
-      <p class="fx-section-lead">{t.compareLead}</p>
-      <div class="fx-cols fx-compare">
+  <section class="fx-band fx-band-alt" aria-labelledby="fx-compare">
+    <div class="fx-wrap">
+      <div class="fx-head">
+        <h2 id="fx-compare">{t.compareTitle}</h2>
+        <p class="fx-lead">{t.compareLead}</p>
+      </div>
+      <div class="fx-cols">
         {
           t.competitors.map((c) => (
             <section>
@@ -169,9 +165,9 @@ const docsFile = (file: string, anchor: string) => `${brand.repo}/blob/main/docs
           ))
         }
       </div>
-      <p class="fx-fine">
+      <p class="fx-fine fx-after">
         {t.compareNote}{' '}
-        <a href={docsFile('ARCHITECTURE.md', 'alternatives-considered')}>ARCHITECTURE.md</a>
+        <a href={architecture('alternatives-considered')}>ARCHITECTURE.md</a>
       </p>
       <div class="fx-elsewhere">
         <h3>{t.elsewhereTitle}</h3>
@@ -179,9 +175,11 @@ const docsFile = (file: string, anchor: string) => `${brand.repo}/blob/main/docs
           {t.elsewhere.map((e) => <li>{e}</li>)}
         </ul>
       </div>
-    </section>
+    </div>
+  </section>
 
-    <section class="fx-section" aria-labelledby="fx-open">
+  <section class="fx-band" aria-labelledby="fx-open">
+    <div class="fx-wrap">
       <h2 id="fx-open">{t.openTitle}</h2>
       <div class="fx-pair">
         {
@@ -193,38 +191,44 @@ const docsFile = (file: string, anchor: string) => `${brand.repo}/blob/main/docs
               <h3>{p.title}</h3>
               <p>{p.text}</p>
               <p class="readout">{p.readout}</p>
-              <a class="fx-inline" href={href}>
+              <a class="fx-more-link" href={href}>
                 {p.more}
               </a>
             </div>
           ))
         }
       </div>
-    </section>
+    </div>
+  </section>
 
-    <section class="fx-section fx-install" aria-labelledby="fx-install">
-      <div>
-        <h2 id="fx-install">{t.installTitle}</h2>
-        <p>{t.installText}</p>
-        <p class="fx-status-head fx-install-status">
-          <span class="led" aria-hidden="true" />
-          <span class="readout">{t.installStatus}</span>
-        </p>
-        <p class="fx-testers">
-          {t.installTesters}{' '}
-          <a class="fx-inline" href={`${brand.repo}#install`}>{t.installTestersLink}</a>
-        </p>
+  <section class="fx-band fx-band-install" aria-labelledby="fx-install">
+    <div class="fx-wrap">
+      <div class="fx-plate">
+        <div>
+          <p class="fx-plate-word" aria-hidden="true">{brand.slug}</p>
+          <h2 id="fx-install">{t.installTitle}</h2>
+          <p>{t.installText}</p>
+          <div class="fx-cmd">
+            <code>{installLine}</code>
+            <button type="button" class="fx-copy" data-copy={installLine} data-done={t.installCopied}>
+              {t.installCopy}
+            </button>
+          </div>
+          <p class="sr-only" aria-live="polite" data-copy-status></p>
+        </div>
+        <div>
+          <ul class="fx-plate-list">
+            {t.installRequirements.map((r) => <li>{r}</li>)}
+          </ul>
+          <a class="fx-plate-link" href={localePath(lang, '/install/')}>{t.installMore}</a>
+        </div>
       </div>
-      <div>
-        <ul class="fx-slots">
-          {t.installRequirements.map((r) => <li>{r}</li>)}
-        </ul>
-        <a class="fx-inline" href={localePath(lang, '/install/')}>{t.installMore}</a>
-      </div>
-    </section>
+    </div>
+  </section>
 
-    <nav class="fx-section fx-more" aria-labelledby="fx-more">
-      <h2 id="fx-more">{t.linksTitle}</h2>
+  <footer class="fx-foot">
+    <nav class="fx-wrap" aria-labelledby="fx-more">
+      <h2 id="fx-more" class="readout">{t.linksTitle}</h2>
       <ul>
         <li><a href={localePath(lang, '/introduction/')}>{t.links.docs}</a></li>
         <li><a href={localePath(lang, '/how-it-works/')}>{t.links.how}</a></li>
@@ -233,37 +237,55 @@ const docsFile = (file: string, anchor: string) => `${brand.repo}/blob/main/docs
         <li><a href={brand.repo}>{t.links.github}</a></li>
         <li><a href={localePath(other, '/')} hreflang={other} lang={other}>{t.otherLanguage}</a></li>
       </ul>
+      <p class="fx-fine">{t.footer}</p>
     </nav>
-  </div>
-</StarlightPage>
+  </footer>
+</LandingLayout>
 
-<style is:global>
-  /* The landing sits on the page tone; doc pages read on the lighter surface. */
-  :root:has(.fx-landing) {
-    --sl-color-bg: var(--fx-page);
+<script>
+  // Copy the install line; the button says so for a moment, and a live region tells screen
+  // readers. Without the Clipboard API the line stays selectable by hand.
+  for (const button of document.querySelectorAll<HTMLButtonElement>('[data-copy]')) {
+    const label = button.textContent ?? '';
+    const status = document.querySelector<HTMLElement>('[data-copy-status]');
+    button.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(button.dataset.copy ?? '');
+      } catch {
+        return;
+      }
+      button.textContent = button.dataset.done ?? label;
+      if (status) status.textContent = button.dataset.done ?? '';
+      setTimeout(() => {
+        button.textContent = label;
+        if (status) status.textContent = '';
+      }, 1600);
+    });
   }
-</style>
+</script>
 
 <style>
-  .fx-landing {
-    color: var(--sl-color-gray-2);
+  /* Bands: the page tone and the surface tone in turn, split by a hairline. */
+  .fx-band {
+    padding-block: clamp(3.5rem, 2rem + 5vw, 6.5rem);
+    border-top: 1px solid var(--line);
   }
-  .fx-section {
-    padding-block: 3.5rem;
-    border-top: 1px solid var(--fx-line);
+  .fx-band-alt {
+    background: var(--surface);
   }
+
   h2 {
-    margin: 0 0 1.25rem;
-    color: var(--sl-color-white);
-    font-size: clamp(1.6rem, 1.3rem + 1.2vw, 2.1rem);
-    font-weight: 700;
-    line-height: 1.15;
-    letter-spacing: -0.02em;
+    margin: 0;
+    color: var(--ink);
+    font-size: clamp(1.75rem, 1.3rem + 1.6vw, 2.6rem);
+    font-weight: 800;
+    line-height: 1.08;
+    letter-spacing: -0.025em;
     text-wrap: balance;
   }
   h3 {
     margin: 0;
-    color: var(--sl-color-white);
+    color: var(--ink);
     font-size: 1.1875rem;
     font-weight: 700;
     line-height: 1.3;
@@ -273,72 +295,98 @@ const docsFile = (file: string, anchor: string) => `${brand.repo}/blob/main/docs
     margin: 0;
     line-height: 1.6;
   }
-  .fx-section-lead {
-    max-width: 44rem;
-    margin-bottom: 2.5rem;
+  .fx-lead {
+    max-width: 40rem;
+    color: var(--ink-2);
     font-size: 1.0625rem;
   }
   .fx-fine {
-    max-width: 44rem;
-    margin-top: 1.25rem;
-    color: var(--fx-ink-2);
+    max-width: 40rem;
+    color: var(--ink-2);
     font-size: 0.9375rem;
   }
   a:not(.fx-btn) {
-    color: var(--sl-color-white);
+    color: var(--ink);
     font-weight: 600;
     text-decoration: underline;
-    text-decoration-color: var(--fx-ink-3);
+    text-decoration-color: var(--ink-3);
     text-underline-offset: 0.2em;
   }
   a:not(.fx-btn):hover {
     text-decoration-color: currentColor;
   }
-  .fx-inline {
-    display: inline-block;
-    margin-top: 1rem;
-  }
-  .fx-testers .fx-inline {
-    margin-top: 0;
-  }
-
-  /* Notices: a sunken surface, no tint and no stripe (detail set A). */
-  .fx-note {
-    max-width: 44rem;
-    margin-top: 2.5rem;
-    padding: 1.1rem 1.25rem;
-  }
-  .fx-note h3 {
-    font-size: 1.0625rem;
-    margin-bottom: 0.4rem;
+  a:focus-visible,
+  button:focus-visible {
+    outline: 2px solid var(--ink);
+    outline-offset: 3px;
+    border-radius: 4px;
   }
 
-  /* Three columns of titled text: properties, the category. */
-  .fx-cols {
+  /* Section head: the title, then its lead; side by side on a wide screen. */
+  .fx-head {
     display: grid;
-    gap: 2.25rem;
+    gap: 1.25rem;
+    margin-bottom: clamp(2.25rem, 1.5rem + 2.5vw, 3.5rem);
+  }
+  @media (min-width: 60rem) {
+    .fx-head {
+      grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+      gap: 4rem;
+      align-items: start;
+    }
+    .fx-head .fx-lead {
+      padding-top: 0.35rem;
+    }
+  }
+  .fx-after {
+    margin-top: 1.75rem;
+  }
+
+  /* Who: the head on the left, the three properties stacked on the right. */
+  .fx-split {
+    display: grid;
+    gap: 2.5rem;
+  }
+  @media (min-width: 60rem) {
+    .fx-split {
+      grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+      gap: 4rem;
+    }
+    .fx-split-head {
+      position: sticky;
+      top: 2rem;
+      align-self: start;
+    }
+  }
+  .fx-split-head .fx-lead {
+    margin-top: 1.25rem;
+  }
+  .fx-props {
     margin: 0;
     padding: 0;
     list-style: none;
   }
-  @media (min-width: 50rem) {
-    .fx-cols {
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 2.5rem;
-    }
+  .fx-props li {
+    padding-block: 1.75rem;
+    border-top: 1px solid var(--line);
   }
-  .fx-cols > li > h3 {
+  .fx-props li:first-child {
+    padding-top: 0;
+    border-top: 0;
+  }
+  .fx-props h3 {
     display: flex;
     align-items: baseline;
   }
-  .fx-cols > li > h3 .slot-mark {
+  .fx-props h3 .slot-mark {
     transform: translateY(-0.2em);
   }
-  .fx-cols > li > p {
-    margin-top: 0.75rem;
+  .fx-props p {
+    max-width: 38rem;
+    margin-top: 0.6rem;
   }
-  .fx-cols > li > .readout {
-    margin-top: 1rem;
+  .fx-props .readout {
+    margin-top: 0.9rem;
   }
 
   /* A list with the slot as marker, 10px from the text, centred on the first line. */
@@ -363,14 +411,14 @@ const docsFile = (file: string, anchor: string) => `${brand.repo}/blob/main/docs
     width: 12px;
     height: 4px;
     border-radius: 2px;
-    background: var(--fx-ink-3);
+    background: var(--ink-3);
     box-shadow: inset 0 1px 1px rgba(0, 0, 0, 0.3);
   }
 
   .fx-traffic {
     display: grid;
-    gap: 1.5rem;
-    margin: 2.5rem 0 0;
+    gap: 1.75rem;
+    margin: 3rem 0 0;
     padding: 0;
     list-style: none;
   }
@@ -401,20 +449,20 @@ const docsFile = (file: string, anchor: string) => `${brand.repo}/blob/main/docs
     stroke-linecap: round;
   }
   .fx-stroke-data {
-    stroke: var(--fx-ink);
+    stroke: var(--ink);
     stroke-width: 5;
   }
   .fx-stroke-meta {
-    stroke: var(--fx-ink-2);
+    stroke: var(--ink-2);
     stroke-width: 1.75;
   }
   .fx-stroke-ctl {
-    stroke: var(--fx-ink-2);
+    stroke: var(--ink-2);
     stroke-width: 1.75;
     stroke-dasharray: 2 5;
   }
 
-  /* Measures: readout panels, label on the left, the number in Departure Mono. */
+  /* Measures: readout panels raised off the surface band. */
   .fx-measures {
     display: grid;
     gap: 1rem;
@@ -425,10 +473,10 @@ const docsFile = (file: string, anchor: string) => `${brand.repo}/blob/main/docs
     }
   }
   .fx-measure {
-    padding: 1.4rem 1.4rem 1.1rem;
-    border: 1px solid var(--fx-line);
+    padding: 1.5rem 1.5rem 1.1rem;
+    border: 1px solid var(--line);
     border-radius: 12px;
-    background: var(--fx-surface);
+    background: var(--raised);
   }
   .fx-measure h3 {
     font-size: 1.0625rem;
@@ -446,7 +494,7 @@ const docsFile = (file: string, anchor: string) => `${brand.repo}/blob/main/docs
     align-items: baseline;
     gap: 1rem;
     padding-block: 0.6rem;
-    border-top: 1px solid var(--fx-line);
+    border-top: 1px solid var(--line);
   }
   .fx-measure dt {
     font-size: 0.9375rem;
@@ -454,45 +502,16 @@ const docsFile = (file: string, anchor: string) => `${brand.repo}/blob/main/docs
   }
   .fx-measure-note {
     display: block;
-    color: var(--fx-ink-2);
+    color: var(--ink-3);
     font-size: 0.875rem;
   }
   .fx-measure dd {
     margin: 0;
-    color: var(--sl-color-white);
+    color: var(--ink);
     font-family: var(--f-ro);
     font-size: 0.875rem;
     line-height: 1.45;
     white-space: nowrap;
-  }
-  .fx-more-link {
-    margin-top: 1.5rem;
-  }
-
-  /* Status: heading on the left, LED steps on the right. */
-  @media (min-width: 56rem) {
-    .fx-split {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
-      gap: 4rem;
-    }
-  }
-  .fx-status {
-    display: grid;
-    gap: 2rem;
-    margin: 0;
-    padding: 0;
-    list-style: none;
-  }
-  .fx-status-head {
-    display: flex;
-    align-items: center;
-    gap: 0.6rem;
-    margin-bottom: 0.5rem;
-  }
-  .fx-status h3 + p {
-    margin-top: 0.4rem;
-    max-width: 40rem;
   }
 
   /* Costs: a real table on wide screens, one block per row on a phone. */
@@ -507,18 +526,18 @@ const docsFile = (file: string, anchor: string) => `${brand.repo}/blob/main/docs
   }
   .fx-table th,
   .fx-table td {
-    padding: 0.75rem 1rem 0.75rem 0;
-    border-top: 1px solid var(--fx-line);
+    padding: 0.85rem 1rem 0.85rem 0;
+    border-top: 1px solid var(--line);
     text-align: start;
     vertical-align: baseline;
   }
   .fx-table thead th {
-    color: var(--fx-ink-2);
+    color: var(--ink-2);
     font-weight: 600;
     line-height: 1.35;
   }
   .fx-table tbody th {
-    color: var(--sl-color-white);
+    color: var(--ink);
     font-weight: 700;
   }
   .fx-table td {
@@ -526,7 +545,7 @@ const docsFile = (file: string, anchor: string) => `${brand.repo}/blob/main/docs
     font-size: 0.875rem;
   }
   .fx-table td.is-ours {
-    color: var(--sl-color-white);
+    color: var(--ink);
   }
   @media (max-width: 40rem) {
     .fx-table thead {
@@ -545,7 +564,7 @@ const docsFile = (file: string, anchor: string) => `${brand.repo}/blob/main/docs
     }
     .fx-table tr {
       padding-block: 0.4rem 0.8rem;
-      border-top: 1px solid var(--fx-line);
+      border-top: 1px solid var(--line);
     }
     .fx-table th,
     .fx-table td {
@@ -559,24 +578,54 @@ const docsFile = (file: string, anchor: string) => `${brand.repo}/blob/main/docs
     }
     .fx-table td::before {
       content: attr(data-label);
-      color: var(--fx-ink-2);
-      font-family: var(--__sl-font);
+      color: var(--ink-2);
+      font-family: var(--f-ui);
       font-size: 0.875rem;
     }
   }
+  .fx-cost-foot {
+    display: grid;
+    gap: 2rem;
+    margin-top: 2rem;
+  }
+  @media (min-width: 60rem) {
+    .fx-cost-foot {
+      grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+      gap: 4rem;
+      align-items: start;
+    }
+  }
+  /* Notices: a sunken surface, no tint and no stripe (detail set A). */
+  .fx-notice {
+    padding: 1.25rem 1.4rem;
+  }
+  .fx-notice h3 {
+    margin-bottom: 0.4rem;
+    font-size: 1.0625rem;
+  }
 
-  .fx-compare h3 {
+  .fx-cols {
+    display: grid;
+    gap: 2.25rem;
+  }
+  @media (min-width: 50rem) {
+    .fx-cols {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 2.5rem;
+    }
+  }
+  .fx-cols h3 {
     font-size: 1.125rem;
   }
   .fx-elsewhere {
     max-width: 44rem;
-    margin-top: 2.75rem;
+    margin-top: 3rem;
   }
 
   .fx-pair {
     display: grid;
     gap: 2.5rem;
-    margin-top: 2rem;
+    margin-top: clamp(2rem, 1.5rem + 2vw, 3rem);
   }
   @media (min-width: 50rem) {
     .fx-pair {
@@ -590,43 +639,140 @@ const docsFile = (file: string, anchor: string) => `${brand.repo}/blob/main/docs
   .fx-pair .readout {
     margin-top: 1rem;
   }
-
-  .fx-install {
-    display: grid;
-    gap: 2rem;
+  .fx-more-link {
+    display: inline-block;
+    margin-top: 1rem;
   }
-  @media (min-width: 56rem) {
-    .fx-install {
-      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+
+  /* Install: a panel of the faceplate's dark material, in both themes. */
+  .fx-band-install {
+    padding-block: clamp(2.5rem, 1.5rem + 4vw, 5rem);
+  }
+  .fx-plate {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2.5rem;
+    padding: clamp(1.5rem, 1rem + 3vw, 3rem);
+    border: 1px solid var(--plate-edge);
+    border-radius: 16px;
+    background: linear-gradient(var(--plate-hi), var(--plate-lo));
+    box-shadow:
+      inset 0 0 0 1px rgba(255, 255, 255, 0.06),
+      0 24px 40px -24px rgba(20, 14, 8, 0.45);
+    color: #b3aea5;
+  }
+  @media (min-width: 60rem) {
+    .fx-plate {
+      grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
       gap: 4rem;
       align-items: end;
     }
   }
-  .fx-install h2 {
-    margin-bottom: 1rem;
-  }
-  .fx-install p {
-    max-width: 32rem;
-  }
-  .fx-install-status {
+  .fx-plate h2 {
     margin-top: 1.25rem;
+    color: #efece5;
   }
-  .fx-testers {
+  .fx-plate h2 + p {
+    max-width: 34rem;
     margin-top: 1rem;
-    color: var(--fx-ink-2);
-    font-size: 0.9375rem;
   }
-
-  .fx-more ul {
+  /* The wordmark as the faceplate prints it; text colours on the plate as in
+     design/mark/faceplate.svg, which the tokens do not name. */
+  .fx-plate-word {
+    color: #8f8b83;
+    font-family: var(--f-ui);
+    font-size: 0.9375rem;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+  }
+  .fx-cmd {
     display: flex;
-    flex-wrap: wrap;
-    gap: 0.75rem 2rem;
+    align-items: center;
+    gap: 0.5rem;
+    max-width: 34rem;
+    margin-top: 1.75rem;
+    padding: 0.4rem 0.4rem 0.4rem 1rem;
+    border-radius: 10px;
+    background: var(--plate-slot);
+    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.6);
+  }
+  .fx-cmd code {
+    flex: 1;
+    min-width: 0;
+    overflow-x: auto;
+    color: #efece5;
+    font-family: var(--f-ro);
+    font-size: 0.875rem;
+    white-space: nowrap;
+  }
+  .fx-copy {
+    flex: none;
+    min-height: 2.25rem;
+    padding: 0 0.9rem;
+    border: 0;
+    border-radius: 7px;
+    background: var(--plate-fill);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6), 0 1px 1px rgba(0, 0, 0, 0.5);
+    color: var(--plate-lo);
+    font: 600 0.875rem/1 var(--f-ui);
+    cursor: pointer;
+  }
+  .fx-copy:hover {
+    background: #e6e1d6;
+  }
+  .fx-plate :focus-visible {
+    outline-color: #efece5;
+  }
+  .fx-plate-list {
     margin: 0;
     padding: 0;
     list-style: none;
   }
-  .fx-more h2 {
-    margin-bottom: 1.25rem;
-    font-size: 1.25rem;
+  .fx-plate-list li {
+    position: relative;
+    padding-inline-start: 22px;
+  }
+  .fx-plate-list li + li {
+    margin-top: 0.6rem;
+  }
+  .fx-plate-list li::before {
+    content: '';
+    position: absolute;
+    inset-inline-start: 0;
+    top: calc(0.8em - 2px);
+    width: 12px;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--plate-fill);
+    opacity: 0.55;
+  }
+  a.fx-plate-link {
+    display: inline-block;
+    margin-top: 1.5rem;
+    color: #efece5;
+    text-decoration-color: #8f8b83;
+  }
+
+  .fx-foot {
+    padding-block: 3rem 4rem;
+    border-top: 1px solid var(--line);
+  }
+  .fx-foot ul {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem 2rem;
+    margin: 1rem 0 0;
+    padding: 0;
+    list-style: none;
+  }
+  .fx-foot h2 {
+    font-size: 11.5px;
+    font-weight: 400;
+    letter-spacing: 0.04em;
+    color: var(--ink-2);
+  }
+  .fx-foot .fx-fine {
+    max-width: none;
+    margin-top: 2rem;
   }
 </style>

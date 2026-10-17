@@ -16,6 +16,10 @@ export const brand = {
   volume: `/Volumes/${name}`,
   /** Homebrew cask. TODO: the tap is not published yet; the final form may be `<tap>/<cask>`. */
   cask: slug,
+  /** Homebrew tap the cask lives in, as concept-d-onboarding draws it (DECISIONS #10). */
+  tap: 'essedev/tap',
+  /** What `brew install --cask` takes: the cask through its tap. */
+  caskRef: `essedev/tap/${slug}`,
   repo: 'https://github.com/essedev/fluix',
   /** TODO: the domain depends on the final name. `.example` is reserved and resolves nowhere. */
   domain: 'floppy.example',
@@ -36,7 +40,7 @@ export const brandTokens: Record<string, string> = {
   name: brand.name,
   slug: brand.slug,
   volume: brand.volume,
-  cask: brand.cask,
+  cask: brand.caskRef,
   repo: brand.repo,
   domain: brand.domain,
 };

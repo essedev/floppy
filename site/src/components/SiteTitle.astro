@@ -1,46 +1,7 @@
 ---
-// Header title: the app icon (graphite squircle, slot and LED on one axis) and the name.
-import { brand } from '@/brand';
-
-const { siteTitleHref } = Astro.locals.starlightRoute;
+// Starlight SiteTitle override: the site's wordmark, leading to the landing in the page's
+// language.
+import Wordmark from './chrome/Wordmark.astro';
 ---
 
-<a href={siteTitleHref} class="site-title">
-  <svg width="30" height="30" viewBox="0 0 124 124" aria-hidden="true">
-    <defs>
-      <linearGradient id="fx-title-sq" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0" stop-color="#3a3835"></stop>
-        <stop offset="1" stop-color="#1c1b19"></stop>
-      </linearGradient>
-    </defs>
-    <rect x="4" y="4" width="116" height="116" rx="27" fill="url(#fx-title-sq)"></rect>
-    <rect x="4.5" y="4.5" width="115" height="115" rx="26.5" fill="none" stroke="#fff" stroke-opacity=".08"></rect>
-    <rect x="16" y="51" width="68" height="22" rx="11" fill="#0b0b0a"></rect>
-    <rect x="20" y="55" width="42" height="14" rx="7" fill="#d9d4c8"></rect>
-    <circle cx="100" cy="62" r="12.5" fill="#0b0b0a"></circle>
-    <circle cx="100" cy="62" r="8.5" fill="#ff6a2e"></circle>
-    <ellipse cx="100" cy="58.2" rx="4" ry="2" fill="#fff" opacity=".5"></ellipse>
-  </svg>
-  <span translate="no">{brand.name}</span>
-</a>
-
-<style>
-  .site-title {
-    display: flex;
-    align-items: center;
-    gap: 0.6rem;
-    min-width: 0;
-    color: var(--sl-color-white);
-    text-decoration: none;
-    white-space: nowrap;
-    font-size: 1.25rem;
-    font-weight: 800;
-    letter-spacing: -0.02em;
-  }
-  svg {
-    flex: none;
-  }
-  span {
-    overflow: hidden;
-  }
-</style>
+<Wordmark href={Astro.locals.starlightRoute.siteTitleHref} />

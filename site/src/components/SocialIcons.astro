@@ -1,24 +1,35 @@
 ---
-// Header override: a text link to the docs before Starlight's own social icons, so the
-// landing's header leads to the docs as well as the hero does.
-import Default from '@astrojs/starlight/components/SocialIcons.astro';
-import { landing } from '@/i18n/landing';
+// Starlight SocialIcons override: the same links as the landing's header, a text link to the
+// docs and the repository.
+import { Icon } from '@astrojs/starlight/components';
+import { brand } from '@/brand';
+import { chrome } from '@/i18n/chrome';
 import { langOf, localePath } from '@/lib/locale';
 
 const lang = langOf(Astro.locals.starlightRoute.lang);
 ---
 
-<a class="fx-docs" href={localePath(lang, '/introduction/')}>{landing[lang].docsNav}</a>
-<Default />
+<a class="fx-head-link" href={localePath(lang, '/introduction/')}>{chrome[lang].docs}</a>
+<a class="fx-head-link fx-head-icon" href={brand.repo} rel="me">
+  <Icon name="github" size="1.15rem" />
+  <span class="sr-only">GitHub</span>
+</a>
 
 <style>
-  .fx-docs {
-    color: var(--sl-color-gray-2);
+  .fx-head-link {
+    display: inline-flex;
+    align-items: center;
+    color: var(--ink-2);
     font-size: 0.9375rem;
     font-weight: 600;
     text-decoration: none;
   }
-  .fx-docs:hover {
-    color: var(--sl-color-white);
+  .fx-head-link:hover {
+    color: var(--ink);
+  }
+  .fx-head-link:focus-visible {
+    outline: 2px solid var(--ink);
+    outline-offset: 3px;
+    border-radius: 4px;
   }
 </style>

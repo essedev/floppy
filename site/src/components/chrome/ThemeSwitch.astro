@@ -1,0 +1,195 @@
+---
+// The theme switch of the site's header: a three-position slide switch drawn from the
+// faceplate's slot (dark slot, light cap), light on the left, auto in the middle, dark on the
+// right, with a Departure Mono readout of the position. It is a real radio group, so arrows,
+// Tab and screen readers work as for any radio. The choice is stored the way Starlight stores
+// it (localStorage "starlight-theme", empty for auto), so the landing and the docs agree.
+import type { Lang } from '@/brand';
+import { chrome } from '@/i18n/chrome';
+
+interface Props {
+  /** Language of the page. */
+  lang: Lang;
+}
+
+const t = chrome[Astro.props.lang];
+const positions = ['light', 'auto', 'dark'] as const;
+/** Radio names must differ between the header and the mobile menu, which can share a page. */
+const name = `fx-theme-${Math.random().toString(36).slice(2, 8)}`;
+---
+
+<fx-theme-switch>
+  <fieldset class="fx-theme">
+    <legend class="sr-only">{t.themeLabel}</legend>
+    <span class="fx-theme-slot">
+      <span class="fx-theme-cap" aria-hidden="true"></span>
+      {
+        positions.map((p) => (
+          <label class="fx-theme-pos">
+            <input type="radio" name={name} value={p} checked={p === 'auto'} />
+            <span class="sr-only">{t.themeNames[p]}</span>
+          </label>
+        ))
+      }
+    </span>
+    <span class="readout fx-theme-ro" aria-hidden="true">
+      {positions.map((p) => <span data-ro={p}>{t.theme[p]}</span>)}
+    </span>
+  </fieldset>
+</fx-theme-switch>
+
+{/* Inlined so the switch shows the stored position before the first paint. */}
+<script is:inline>
+  (() => {
+    let theme = '';
+    try {
+      theme = localStorage.getItem('starlight-theme') || '';
+    } catch {}
+    theme = theme === 'light' || theme === 'dark' ? theme : 'auto';
+    document.querySelectorAll('fx-theme-switch input[type=radio]').forEach((input) => {
+      input.checked = input.value === theme;
+    });
+  })();
+</script>
+
+<script>
+  type Theme = 'auto' | 'dark' | 'light';
+
+  /** Starlight's own key, read by its ThemeProvider before the first paint. */
+  const storageKey = 'starlight-theme';
+
+  const parseTheme = (value: unknown): Theme =>
+    value === 'light' || value === 'dark' || value === 'auto' ? value : 'auto';
+
+  function loadTheme(): Theme {
+    try {
+      return parseTheme(localStorage.getItem(storageKey));
+    } catch {
+      return 'auto';
+    }
+  }
+
+  function storeTheme(theme: Theme): void {
+    try {
+      localStorage.setItem(storageKey, theme === 'auto' ? '' : theme);
+    } catch {
+      // Storage blocked (private mode): the choice holds for this page only.
+    }
+  }
+
+  const systemTheme = (): 'light' | 'dark' =>
+    matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+
+  /** Every switch on the page shows the same position. */
+  function syncSwitches(theme: Theme): void {
+    for (const input of document.querySelectorAll<HTMLInputElement>('fx-theme-switch input[type=radio]')) {
+      input.checked = input.value === theme;
+    }
+  }
+
+  function applyTheme(theme: Theme): void {
+    syncSwitches(theme);
+    document.documentElement.dataset.theme = theme === 'auto' ? systemTheme() : theme;
+    storeTheme(theme);
+  }
+
+  matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => {
+    if (loadTheme() === 'auto') applyTheme('auto');
+  });
+
+  class FxThemeSwitch extends HTMLElement {
+    constructor() {
+      super();
+      syncSwitches(loadTheme());
+      this.addEventListener('change', (event) => {
+        if (event.target instanceof HTMLInputElement) applyTheme(parseTheme(event.target.value));
+      });
+    }
+  }
+  customElements.define('fx-theme-switch', FxThemeSwitch);
+</script>
+
+<style>
+  fx-theme-switch {
+    display: inline-flex;
+  }
+  .fx-theme {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+    border: 0;
+  }
+  /* The faceplate's slot: a dark groove with a light cap, the same in both themes. */
+  .fx-theme-slot {
+    position: relative;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    width: 60px;
+    height: 20px;
+    border-radius: 10px;
+    background: var(--plate-slot);
+    box-shadow:
+      inset 0 1px 2px rgba(0, 0, 0, 0.6),
+      0 0 0 1px rgba(255, 255, 255, 0.09),
+      0 1px 0 var(--bezel-lift);
+  }
+  .fx-theme-cap {
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 18px;
+    height: 14px;
+    border-radius: 7px;
+    background: var(--plate-fill);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6), 0 1px 1px rgba(0, 0, 0, 0.5);
+    transition: transform 0.18s cubic-bezier(0.2, 0.7, 0.3, 1);
+    pointer-events: none;
+  }
+  .fx-theme:has(input[value='auto']:checked) .fx-theme-cap {
+    transform: translateX(18px);
+  }
+  .fx-theme:has(input[value='dark']:checked) .fx-theme-cap {
+    transform: translateX(36px);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .fx-theme-cap {
+      transition: none;
+    }
+  }
+  .fx-theme-pos {
+    position: relative;
+    cursor: pointer;
+  }
+  /* The real radio covers its third of the slot: invisible, but it takes clicks and focus. */
+  .fx-theme-pos input {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    opacity: 0;
+    cursor: pointer;
+  }
+  .fx-theme-slot:has(input:focus-visible) {
+    outline: 2px solid var(--ink);
+    outline-offset: 2px;
+  }
+  .fx-theme-ro {
+    min-width: 6ch;
+    line-height: 1;
+  }
+  .fx-theme-ro span {
+    display: none;
+  }
+  .fx-theme:has(input[value='light']:checked) [data-ro='light'],
+  .fx-theme:has(input[value='auto']:checked) [data-ro='auto'],
+  .fx-theme:has(input[value='dark']:checked) [data-ro='dark'] {
+    display: inline;
+  }
+  .fx-theme:hover .fx-theme-ro {
+    color: var(--ink);
+  }
+</style>

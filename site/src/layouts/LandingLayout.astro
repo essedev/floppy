@@ -1,0 +1,186 @@
+---
+// The landing's own page, outside Starlight: the same fonts, tokens, theme and header
+// controls as the docs (components/chrome), with a layout of its own. The theme is applied
+// before the first paint from Starlight's key, so moving between the landing and the docs
+// keeps the reader's choice.
+import '@/styles/fonts.css';
+import '@/styles/tokens.css';
+import '@/styles/theme.css';
+import { Icon } from '@astrojs/starlight/components';
+import { brand, type Lang } from '@/brand';
+import { chrome } from '@/i18n/chrome';
+import { localePath, pathsFor } from '@/lib/locale';
+import LanguageSwitch from '@/components/chrome/LanguageSwitch.astro';
+import ThemeSwitch from '@/components/chrome/ThemeSwitch.astro';
+import Wordmark from '@/components/chrome/Wordmark.astro';
+
+interface Props {
+  /** Language of the page. */
+  lang: Lang;
+  /** Title of the page, before the product name. */
+  title: string;
+  /** Meta description. */
+  description: string;
+}
+
+const { lang, title, description } = Astro.props;
+const t = chrome[lang];
+const paths = pathsFor(Astro.url.pathname);
+const site = Astro.site ?? new URL(`https://${brand.domain}`);
+const fonts = [
+  '/fonts/schibsted-grotesk/schibsted-grotesk-latin-wght-normal.woff2',
+  '/fonts/departure-mono/DepartureMono-Regular.woff2',
+];
+---
+
+<!doctype html>
+<html lang={lang} data-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{`${title} | ${brand.name}`}</title>
+    <meta name="description" content={description} />
+    <link rel="canonical" href={new URL(paths[lang], site)} />
+    {(Object.keys(paths) as Lang[]).map((l) => <link rel="alternate" hreflang={l} href={new URL(paths[l], site)} />)}
+    <meta property="og:title" content={`${title} | ${brand.name}`} />
+    <meta property="og:description" content={description} />
+    <meta property="og:type" content="website" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    {fonts.map((href) => <link rel="preload" href={href} as="font" type="font/woff2" crossorigin />)}
+    {/* Same logic as Starlight's ThemeProvider, inlined to avoid a flash of the wrong theme. */}
+    <script is:inline>
+      (() => {
+        let stored = '';
+        try {
+          stored = localStorage.getItem('starlight-theme') || '';
+        } catch {}
+        const theme = stored || (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+        document.documentElement.dataset.theme = theme === 'light' ? 'light' : 'dark';
+      })();
+    </script>
+  </head>
+  <body>
+    <a class="fx-skip" href="#main">{t.skip}</a>
+    <header class="fx-header">
+      <div class="fx-wrap fx-header-row">
+        <Wordmark href={localePath(lang, '/')} />
+        <nav class="fx-header-nav" aria-label={t.nav}>
+          <a class="fx-head-link fx-head-docs" href={localePath(lang, '/introduction/')}>{t.docs}</a>
+          <a class="fx-head-link" href={brand.repo}>
+            <Icon name="github" size="1.15rem" />
+            <span class="sr-only">GitHub</span>
+          </a>
+        </nav>
+        <div class="fx-header-controls">
+          <ThemeSwitch lang={lang} />
+          <LanguageSwitch lang={lang} paths={paths} />
+        </div>
+      </div>
+    </header>
+    <main id="main">
+      <slot />
+    </main>
+  </body>
+</html>
+
+<style is:global>
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+  html {
+    background: var(--page);
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    margin: 0;
+    background: var(--page);
+    color: var(--ink-2);
+    font-family: var(--f-ui);
+    font-size: 1rem;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+  /* The page's measure: 16px gutters on a phone, 72rem at most. */
+  .fx-wrap {
+    width: 100%;
+    max-width: 74rem;
+    margin-inline: auto;
+    padding-inline: clamp(1rem, 0.4rem + 2.6vw, 2.5rem);
+  }
+</style>
+
+<style>
+  .fx-skip {
+    position: absolute;
+    left: 1rem;
+    top: -3rem;
+    z-index: 10;
+    padding: 0.5rem 0.75rem;
+    border-radius: 8px;
+    background: var(--ink);
+    color: var(--page);
+  }
+  .fx-skip:focus {
+    top: 0.75rem;
+  }
+  .fx-header {
+    border-bottom: 1px solid var(--line);
+  }
+  .fx-header-row {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    height: 4rem;
+  }
+  .fx-header-nav {
+    display: flex;
+    align-items: center;
+    gap: 1.25rem;
+    margin-inline-start: auto;
+  }
+  .fx-header-controls {
+    display: flex;
+    align-items: center;
+    gap: 0.9rem;
+    padding-inline-start: 0.9rem;
+    border-inline-start: 1px solid var(--line);
+  }
+  .fx-head-link {
+    display: inline-flex;
+    align-items: center;
+    color: var(--ink-2);
+    font-size: 0.9375rem;
+    font-weight: 600;
+    text-decoration: none;
+  }
+  .fx-head-link:hover {
+    color: var(--ink);
+  }
+  .fx-head-link:focus-visible {
+    outline: 2px solid var(--ink);
+    outline-offset: 3px;
+    border-radius: 4px;
+  }
+  @media (max-width: 40rem) {
+    .fx-head-docs {
+      display: none;
+    }
+    .fx-header-controls {
+      gap: 0.6rem;
+      padding-inline-start: 0.6rem;
+    }
+  }
+</style>

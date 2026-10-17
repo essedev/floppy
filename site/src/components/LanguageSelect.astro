@@ -1,0 +1,8 @@
+---
+// Starlight LanguageSelect override: the site's own language selector, linking to this page
+// in each language.
+import { langOf, pathsFor } from '@/lib/locale';
+import LanguageSwitch from './chrome/LanguageSwitch.astro';
+---
+
+<LanguageSwitch lang={langOf(Astro.locals.starlightRoute.lang)} paths={pathsFor(Astro.url.pathname)} />

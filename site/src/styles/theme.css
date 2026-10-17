@@ -208,8 +208,3 @@ h1#_top {
   outline: 2px solid var(--sl-color-white);
   outline-offset: 2px;
 }
-
-/* The search shortcut hint sits inside a control: keep it at a readable size. */
-site-search kbd {
-  font-size: 0.8125rem;
-}

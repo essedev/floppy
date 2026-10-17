@@ -1,0 +1,7 @@
+---
+// Starlight ThemeSelect override: the site's own theme switch, in the page's language.
+import { langOf } from '@/lib/locale';
+import ThemeSwitch from './chrome/ThemeSwitch.astro';
+---
+
+<ThemeSwitch lang={langOf(Astro.locals.starlightRoute.lang)} />

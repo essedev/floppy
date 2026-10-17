@@ -1,0 +1,80 @@
+---
+// Starlight MobileMenuToggle override: the docs' menu button as a small faceplate, the dark
+// body of the app icon with three slots for "open" and two crossed slots for "close". Same
+// popover target and behaviour as Starlight's.
+import { chrome } from '@/i18n/chrome';
+import { langOf } from '@/lib/locale';
+
+const lang = langOf(Astro.locals.starlightRoute.lang);
+---
+
+<button popovertarget="starlight__sidebar" class="fx-menu sl-flex md:sl-hidden print:hidden">
+  <span class="fx-menu-slots" aria-hidden="true"><span></span><span></span><span></span></span>
+  <span class="sr-only">{chrome[lang].menu}</span>
+</button>
+
+<style>
+  .fx-menu {
+    position: fixed;
+    top: calc((var(--sl-nav-height) - var(--sl-menu-button-size)) / 2);
+    inset-inline-end: var(--sl-nav-pad-x);
+    z-index: var(--sl-z-index-navbar);
+    display: grid;
+    place-items: center;
+    width: var(--sl-menu-button-size);
+    height: var(--sl-menu-button-size);
+    padding: 0;
+    border: 1px solid var(--plate-edge);
+    border-radius: 9px;
+    background: var(--plate-lo);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    cursor: pointer;
+  }
+  /* Our display rule is unlayered and would beat Starlight's md:sl-hidden utility. */
+  @media (min-width: 50rem) {
+    .fx-menu {
+      display: none;
+    }
+  }
+  .fx-menu:focus-visible {
+    outline: 2px solid var(--ink);
+    outline-offset: 2px;
+  }
+  .fx-menu-slots {
+    position: relative;
+    display: grid;
+    gap: 3px;
+  }
+  .fx-menu-slots span {
+    width: 14px;
+    height: 3px;
+    border-radius: 1.5px;
+    background: var(--plate-fill);
+    transition: transform 0.18s ease, opacity 0.18s ease;
+  }
+  .fx-menu:has(~ :popover-open) .fx-menu-slots span:nth-child(1) {
+    transform: translateY(6px) rotate(45deg);
+  }
+  .fx-menu:has(~ :popover-open) .fx-menu-slots span:nth-child(2) {
+    opacity: 0;
+  }
+  .fx-menu:has(~ :popover-open) .fx-menu-slots span:nth-child(3) {
+    transform: translateY(-6px) rotate(-45deg);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .fx-menu-slots span {
+      transition: none;
+    }
+  }
+</style>
+
+<style is:global>
+  body:has(#starlight__sidebar:popover-open) {
+    overflow: hidden;
+  }
+  @media (min-width: 50rem) {
+    body:has(#starlight__sidebar:popover-open) {
+      overflow: auto;
+    }
+  }
+</style>

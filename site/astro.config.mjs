@@ -27,7 +27,7 @@ export default defineConfig({
 			social: [{ icon: 'github', label: 'GitHub', href: brand.repo }],
 			editLink: { baseUrl: `${brand.repo}/edit/main/site/` },
 			favicon: '/favicon.svg',
-			// Our own 404 in src/pages: the built-in one has a hero, which would take the landing's.
+			// Our own 404 in src/pages, in both languages on one page.
 			disable404Route: true,
 			head: [
 				preload('/fonts/schibsted-grotesk/schibsted-grotesk-latin-wght-normal.woff2'),
@@ -36,7 +36,10 @@ export default defineConfig({
 			customCss: ['./src/styles/fonts.css', './src/styles/tokens.css', './src/styles/theme.css'],
 			components: {
 				SiteTitle: './src/components/SiteTitle.astro',
-				Hero: './src/components/Hero.astro',
+				ThemeSelect: './src/components/ThemeSelect.astro',
+				LanguageSelect: './src/components/LanguageSelect.astro',
+				Search: './src/components/Search.astro',
+				MobileMenuToggle: './src/components/MobileMenuToggle.astro',
 				SocialIcons: './src/components/SocialIcons.astro',
 			},
 			sidebar: [

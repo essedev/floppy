@@ -1,0 +1,70 @@
+---
+// The language selector of the site's header: the faceplate's dark slot with one Departure
+// Mono readout per language, the current one on the light cap. Changing language is
+// navigation, so the positions are links to the same page in each language.
+import type { Lang } from '@/brand';
+import { chrome } from '@/i18n/chrome';
+
+interface Props {
+  /** Language of the page. */
+  lang: Lang;
+  /** The same page in each language. */
+  paths: Record<Lang, string>;
+}
+
+const { lang, paths } = Astro.props;
+const langs = Object.keys(paths) as Lang[];
+---
+
+<nav class="fx-lang" aria-label={chrome[lang].languageLabel}>
+  {
+    langs.map((l) => (
+      <a href={paths[l]} hreflang={l} lang={l} aria-current={l === lang ? 'page' : undefined}>
+        {l.toUpperCase()}
+        <span class="sr-only">{chrome[l].languageName}</span>
+      </a>
+    ))
+  }
+</nav>
+
+<style>
+  .fx-lang {
+    display: inline-grid;
+    align-self: center;
+    grid-auto-flow: column;
+    grid-auto-columns: 30px;
+    height: 22px;
+    padding: 2px;
+    border-radius: 11px;
+    background: var(--plate-slot);
+    box-shadow:
+      inset 0 1px 2px rgba(0, 0, 0, 0.6),
+      0 0 0 1px rgba(255, 255, 255, 0.09),
+      0 1px 0 var(--bezel-lift);
+  }
+  /* Readout colours on the dark slot, as in design/mark/faceplate.svg: the tokens have none. */
+  a {
+    display: grid;
+    place-items: center;
+    border-radius: 9px;
+    color: #b3aea5;
+    font-family: var(--f-ro);
+    font-size: 11px;
+    letter-spacing: 0.04em;
+    line-height: 1;
+    text-decoration: none;
+  }
+  a:hover {
+    color: #efece5;
+  }
+  /* The current language sits on the light cap of the slot. */
+  a[aria-current] {
+    background: var(--plate-fill);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6), 0 1px 1px rgba(0, 0, 0, 0.5);
+    color: var(--plate-lo);
+  }
+  a:focus-visible {
+    outline: 2px solid var(--ink);
+    outline-offset: 3px;
+  }
+</style>

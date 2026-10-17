@@ -12,3 +12,9 @@ export function langOf(tag: string | undefined): Lang {
 export function localePath(lang: Lang, path: string): string {
   return lang === 'en' ? path : `/${lang}${path}`;
 }
+
+/** The same page in each language, from the path of the current one. */
+export function pathsFor(pathname: string): Record<Lang, string> {
+  const base = pathname.replace(/^\/it(?=\/|$)/, '') || '/';
+  return { en: localePath('en', base), it: localePath('it', base) };
+}
