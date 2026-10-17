@@ -25,7 +25,9 @@ export function Menu({ items, trigger, align = 'right' }: { items: MenuItem[]; a
 
   useEffect(() => {
     if (!open) return
-    list.current?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus()
+    // Without preventScroll, focusing the fixed menu inside a scrolling dialog scrolls the
+    // dialog, and the scroll below closes the menu it just opened.
+    list.current?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus({ preventScroll: true })
     const onDown = (e: PointerEvent) => {
       if (!root.current?.contains(e.target as Node)) setOpen(false)
     }
@@ -39,7 +41,7 @@ export function Menu({ items, trigger, align = 'right' }: { items: MenuItem[]; a
         const buttons = [...(list.current?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') ?? [])]
         const at = buttons.indexOf(document.activeElement as HTMLButtonElement)
         const next = buttons[(at + (e.key === 'ArrowDown' ? 1 : -1) + buttons.length) % buttons.length]
-        next?.focus()
+        next?.focus({ preventScroll: true })
       }
     }
     const onMove = () => setOpen(false)
