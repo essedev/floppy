@@ -78,3 +78,33 @@ Criteria that emerged while choosing: a real word of one or two syllables, read 
 
 **Active, 17/10/2026.** Volumes are formatted with 1 MB blocks and mounted with a 4 MB readahead, and the patched JuiceFS reads whole blocks inside a sequential stream (`spike/juicefs-replica/0002-*.patch`). Measured on a simulated 100 Mbps link: a cold seek in 0.38 s (0.68 s with 4 MB blocks), the first read after a jump in 0.40 s (0.78 s with the default readahead), cold reads over SMB at 86-93% of the line. The readahead is fixed rather than sized on the line: a short one wins where the line is slow, and on a fast line it still reads 13 times faster than a 60 Mbps clip needs. Numbers in [ARCHITECTURE.md](ARCHITECTURE.md#measured-performance).
 **Ruled out:** 4 MB blocks; a readahead sized on the measured line; SMB multichannel (the gap it was meant to close came from the simulation and the block size); simulating the link with JuiceFS's `--download-limit`, which lets bursts through and then stalls.
+
+## 16. Control plane data model: UUIDv7, nothing deleted, keys scoped by organization
+
+**Active, 17/10/2026.** Ids are UUIDv7 (`uuidv7()`, PostgreSQL 18): not enumerable across tenants, ordered by creation, and an organization moves between self-hosted and hosted with the same ids. No row is ever deleted, and the application role has no `DELETE` grant: entities (organizations, users, memberships, Macs, disks) carry `deleted_at` with partial unique indexes, records (invitations, sign-ins, sessions, keys, rotations, audit) end in a terminal state. Every reference between tenant tables is a composite `(organization_id, id)` foreign key. The one deletion is the hosted audit log's 13-month purge. Details in [DATABASE_SCHEMA.md](DATABASE_SCHEMA.md).
+**Ruled out:** `bigint` and UUIDv4 ids, hard deletes, `deleted_at` on records that are never hidden or restored, row-level security in the first migration (it comes before the hosted service opens).
+
+## 17. Secrets at rest: encrypted when used, hashed when only checked
+
+**Active, 17/10/2026.** What the control plane must use (the S3 secret, a hosted Valkey admin password, the SMTP password) is encrypted with AES-256-GCM under `FLOPPY_SECRET_KEY`, from the environment, bound to its row and column; a retired S3 secret is wiped. What it only checks (device, session, link and invitation tokens, each Mac's Valkey password) is a SHA-256; the 6-digit code is an HMAC with a key derived from the same secret, since a million values fall to any unkeyed hash. Losing the key loses no files: the S3 secret is still in every volume's format. A KMS comes before the hosted service takes paying customers.
+**Ruled out:** keeping the S3 secret only in the volume format (the control plane needs it to format disks and probe the bucket), a slow or unkeyed hash for the code, a KMS from day one.
+
+## 18. The key window closes only for exposures before the rotation
+
+**Active, 17/10/2026.** Revoking a Mac that had a Valkey user, or removing a person who had one, opens the "rotate the S3 key" window; signing out from the app does not, since its owner keeps access. Closing a rotation (the admin confirms the old key is deleted at the provider) closes only the exposures that happened before the rotation started: a Mac revoked while it was applying may already have read the new key from its replica. The rotation waits for every disk, not for every Mac.
+**Ruled out:** closing every reason at once, closing when the new key is applied, waiting for Macs that may be switched off.
+
+## 19. Valkey users per Mac and per organization, not per disk
+
+**Active, 17/10/2026.** A consequence of #2 and #7: a Mac's replica copies the whole Valkey instance, every disk and its S3 key included, so one user per Mac on the organization's instance gives exactly what the Mac can read anyway. Valkey does not replicate ACL users, so the control plane keeps each password's SHA-256 (the form Valkey stores) and rebuilds the users on a promoted or restored master.
+**Ruled out:** a user per disk (it would restrict writes, not reads), an instance per disk until per-disk access is really needed.
+
+## 20. Several disks are folders of the one share at /Volumes/Floppy
+
+**Active, 17/10/2026.** A team's disks appear as `/Volumes/Floppy/<disk>`: one SMB mount at the fixed mount point, each disk its own JuiceFS mount inside the VM, exported as a subfolder of the `Floppy` share. The folder is the disk's display name, part of every path CapCut keeps, so a disk is never renamed; names are ASCII (letters, digits, space, dot, hyphen, underscore) until a spike shows accented paths survive Samba and CapCut. The JuiceFS name is a slug derived once and never shown.
+**Ruled out:** one SMB mount per disk at `/Volumes/<disk>` (a `-1` suffix risk and a mount to keep alive for each), the slug as folder name, renaming a disk.
+
+## 21. TLS to the central Valkey
+
+**Active, 17/10/2026.** Macs reach the central Valkey across the internet with their own password, for writes and for replication: the connection is TLS (`rediss://`), on the master and on its replica in the datacenter. SMB stays plain only because it never leaves the Mac.
+**Ruled out:** plain Valkey over the WAN, a VPN or tunnel (a system extension or administrator rights on every Mac).
