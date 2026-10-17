@@ -1,7 +1,7 @@
 SCRIPTS := macos/bin/floppy macos/install.sh macos/vm/guest/guest-install.sh \
 	macos/vm/guest/floppy-mount scripts/package.sh spike/setup.sh spike/bench.sh spike/data-bench.sh spike/meta-bench.sh spike/meta-access.sh \
 	spike/juicefs-replica/build.sh spike/juicefs-replica/test.sh \
-	spike/drive/entrypoint.sh
+	spike/drive/entrypoint.sh app/scripts/render-marks.sh
 
 .DEFAULT_GOAL := help
 
@@ -13,6 +13,13 @@ lint: ## bash -n, shellcheck and the prose language check
 	shellcheck $(SCRIPTS)
 	python3 scripts/check-prose.py
 
-check: lint ## The full quality pass (there are no tests yet)
+app-check: ## The menu bar app: typecheck and build, frontend and Rust tests, clippy
+	cd app && pnpm install --frozen-lockfile && pnpm build && pnpm test
+	cd app && cargo clippy --all-targets -- -D warnings && cargo test
 
-.PHONY: help lint check
+site-check: ## The site: Astro check and build
+	cd site && pnpm install --frozen-lockfile && pnpm check && pnpm build
+
+check: lint app-check site-check ## The full quality pass
+
+.PHONY: help lint app-check site-check check

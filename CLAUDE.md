@@ -38,10 +38,15 @@ spike/meta-bench.sh            # metadata from the Mac over SMB: SQLite vs Postg
 spike/juicefs-replica/build.sh # patched juicefs (read replica, optimistic writes) into dist/
 spike/juicefs-replica/test.sh  # the patch's Go tests against Valkey master + replica
 JUICEFS_SOURCE=replica docker compose -f spike/docker-compose.yml --profile replica build drive drive-b
-spike/acceptance.py [--baseline] [t01 ...]   # two clients, central Valkey + replicas, 13 tests
+spike/acceptance.py [--baseline] [t01 ...]   # two clients, central Valkey + replicas, 17 checks
 
 # Site (Astro + Starlight; the product name lives in site/src/brand.ts)
 cd site && pnpm dev            # pnpm build, pnpm check
+
+# Menu bar app (Tauri; reads `floppy status --json`, so a change there changes app/src-tauri/src/engine.rs)
+cd app && FLOPPY_BIN=/path/to/fake-floppy pnpm tauri dev   # without FLOPPY_BIN: ~/.floppy/bin/floppy
+cd app && pnpm dev             # views in a browser: ?view=panel|settings|welcome&scenario=...
+app/scripts/render-marks.sh    # tray PNGs and app icons from design/mark/
 ```
 
 ## Gotchas
@@ -78,7 +83,7 @@ cd site && pnpm dev            # pnpm build, pnpm check
 
 **Measure reads from the Mac through its cache too.** With `F_NOCACHE` the macOS SMB client sends one read at a time; through its cache it sends 128 KB pieces out of order, up to 40 MB ahead, and a test that stops reading halfway counts those as waste. Compare whole-file reads, and count GETs in Garage's log, not only JuiceFS's metrics: cancelled downloads are missing there.
 
-**The site describes the finished product.** It goes online when the product is complete: no "early", "being built" or "not published yet" on its pages, no dates on measures (they will be tied to a release). The current state lives in README and ROADMAP. Competitors: facts that can be linked, no judgements.
+**The site describes the finished product**: no status or "not published yet", no dates on measures, competitors by linkable facts only. The current state lives in README and ROADMAP.
 
 **Docker ran out of default subnets** on the development Mac (many compose projects): the spike pins an explicit subnet in `spike/docker-compose.yml`. Never `docker network prune`, the networks belong to other projects.
 

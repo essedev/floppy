@@ -7,9 +7,9 @@
    Theme: light by default, dark with prefers-color-scheme, or forced with
    data-theme="light" / "dark" on <html>. The faceplate is dark in both themes. */
 
-@import url("https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700;800&display=swap");
-/* Departure Mono (SIL OFL) is not on Google Fonts: ship the woff2 with each surface,
-   from https://departuremono.com, as @font-face { font-family: "Departure Mono"; } */
+/* Fonts are loaded by each surface, not here: an @import inside a bundle lands
+   mid-file and is dropped. Schibsted Grotesk (Google Fonts) and Departure Mono
+   (SIL OFL, from https://departuremono.com, shipped as woff2 with the surface). */
 
 :root {
   color-scheme: light;
