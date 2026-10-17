@@ -196,7 +196,7 @@ The problems each feature answers, to verify in the pilot:
 
 Only the macOS module is built; Windows is added as a module, not a rewrite, when needed.
 
-**Distribution with Homebrew** (DECISIONS #10), like Portsage: a cask in its own tap, without an Apple Developer ID, with `xattr -cr` in postflight. Homebrew needs administrator rights once to install itself; the app and the disk never do. Limits: updates need `brew upgrade`, and the trick for unsigned apps depends on Homebrew's rules, which are getting stricter. A DMG in `~/Applications` stays the fallback.
+**Distribution with Homebrew** (DECISIONS #10), like Portsage: a cask in its own tap, without an Apple Developer ID, clearing the quarantine in `postflight_steps`. Homebrew needs administrator rights once to install itself; the app and the disk never do. Limits: updates need `brew upgrade`, and the trick for unsigned apps depends on Homebrew's rules, which are getting stricter. A DMG in `~/Applications` stays the fallback.
 
 ## Access and security
 

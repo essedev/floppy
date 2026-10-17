@@ -17,7 +17,9 @@ The full glossary is in [docs/CONVENTIONS.md](docs/CONVENTIONS.md#glossary). The
 
 ```bash
 make check                               # bash -n, shellcheck, prose language
-scripts/package.sh my-test.env [dist]    # zip for a tester: Lima + command + VM + config (holds the keys); needs Docker running
+make app                                 # dist/app/Floppy.app and its DMG, the engine inside; needs Docker running
+scripts/release-app.sh                   # tag, GitHub release, cask into essedev/homebrew-floppy (outward: only when Simone asks)
+scripts/package.sh my-test.env [dist]    # zip for a tester (holds the keys), until the cask replaces it
 bash floppy/install.sh                    # from the unpacked package: installs into ~/.floppy and mounts
 ~/.floppy/bin/floppy status                # setup|start|stop|status|warmup <path>|free <path>|uninstall
 
