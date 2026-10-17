@@ -17,6 +17,8 @@ from typing import Self
 from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from floppy_server.ratelimit import Limit
+
 
 class Environment(StrEnum):
     """Where the process runs: production refuses the development-only backends."""
@@ -111,10 +113,15 @@ class Settings(BaseSettings):
     smtp_starttls: bool = True
     smtp_timeout_seconds: float = 15.0
 
-    # External systems: real or fake (phase 1 has no real JuiceFS or S3 probe).
+    # External systems: real, or in-process fakes for development and tests.
     metadata_backend: Backend = Backend.REAL
-    juicefs_backend: Backend = Backend.FAKE
-    storage_backend: Backend = Backend.FAKE
+    juicefs_backend: Backend = Backend.REAL
+    storage_backend: Backend = Backend.REAL
+    # The JuiceFS binary (the image has it at /usr/local/bin/juicefs), or a command prefix
+    # that runs it elsewhere, split like a shell would.
+    juicefs_command: str = "juicefs"
+    juicefs_timeout_seconds: float = 120.0
+    storage_timeout_seconds: float = 15.0
 
     # Valkey admin credentials for self-hosted instances (organizations may carry their own).
     valkey_admin_username: str | None = None
@@ -135,6 +142,15 @@ class Settings(BaseSettings):
     # Sign-in: per address and hour, beyond which the latest request is returned unchanged.
     sign_in_hourly_limit: int = Field(default=10, ge=1)
 
+    # Per client address (ratelimit.py); 0 turns a limit off. The client address is the
+    # proxy's unless the request comes from one of `trusted_proxies` (comma-separated
+    # addresses), whose X-Forwarded-For is then believed.
+    sign_in_per_minute: int = Field(default=10, ge=0)
+    sign_in_per_hour: int = Field(default=60, ge=0)
+    code_per_minute: int = Field(default=30, ge=0)
+    link_per_minute: int = Field(default=30, ge=0)
+    trusted_proxies: str = "127.0.0.1"
+
     @model_validator(mode="after")
     def _check(self) -> Self:
         if self.secret_key is None and self.secret_keys is None:
@@ -147,8 +163,17 @@ class Settings(BaseSettings):
                 raise ValueError(
                     "the console mail backend prints codes and links: development only"
                 )
-            if self.metadata_backend is Backend.FAKE:
-                raise ValueError("the fake metadata backend is for development and tests only")
+            fakes = [
+                name
+                for name, backend in (
+                    ("metadata", self.metadata_backend),
+                    ("juicefs", self.juicefs_backend),
+                    ("storage", self.storage_backend),
+                )
+                if backend is Backend.FAKE
+            ]
+            if fakes:
+                raise ValueError(f"fake backends are for development and tests only: {fakes}")
         if not self.public_url.startswith(("http://", "https://")):
             raise ValueError("FLOPPY_PUBLIC_URL must be an http(s) address")
         return self
@@ -165,6 +190,20 @@ class Settings(BaseSettings):
                 raise ValueError("FLOPPY_SECRET_KEY differs from id 1 in FLOPPY_SECRET_KEYS")
             ring[1] = single
         return ring
+
+    @property
+    def rate_limits(self) -> dict[str, tuple[Limit, ...]]:
+        """The limits of each rule, without the ones turned off."""
+        rules = {
+            "sign-in": (Limit(self.sign_in_per_minute, 60), Limit(self.sign_in_per_hour, 3600)),
+            "code": (Limit(self.code_per_minute, 60),),
+            "link": (Limit(self.link_per_minute, 60),),
+        }
+        return {
+            name: kept
+            for name, limits in rules.items()
+            if (kept := tuple(item for item in limits if item.count > 0))
+        }
 
     @property
     def public_origin(self) -> str:

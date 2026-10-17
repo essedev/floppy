@@ -10,6 +10,7 @@ development), so the session cookie is `SameSite=Lax` and unsafe requests that c
 import asyncio
 import contextlib
 import logging
+import shlex
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 
@@ -19,7 +20,7 @@ from fastapi.responses import JSONResponse
 from floppy_server import background
 from floppy_server.audit.router import router as audit_router
 from floppy_server.auth.router import router as auth_router
-from floppy_server.config import Backend, Settings
+from floppy_server.config import Backend, Environment, Settings
 from floppy_server.context import Context
 from floppy_server.crypto import SecretBox
 from floppy_server.db import make_engine, make_sessionmaker
@@ -27,10 +28,10 @@ from floppy_server.device.router import router as device_router
 from floppy_server.disks.router import router as disks_router
 from floppy_server.errors import install_error_handlers
 from floppy_server.health.router import router as health_router
-from floppy_server.infra.juicefs import FakeVolumeFormatter
+from floppy_server.infra.juicefs import FakeVolumeFormatter, JuiceFSFormatter
 from floppy_server.infra.mail import ConsoleMailer, SmtpMailer
 from floppy_server.infra.metadata import FakeMetadataAdmin, ValkeyMetadataAdmin
-from floppy_server.infra.storage import FakeStorageProber
+from floppy_server.infra.storage import FakeStorageProber, S3StorageProber
 from floppy_server.keys.router import router as keys_router
 from floppy_server.macs.router import router as macs_router
 from floppy_server.paths import API_PREFIX
@@ -44,8 +45,6 @@ UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 
 def build_context(settings: Settings) -> Context:
     """The process's context from its settings: real or fake external systems as configured."""
-    if settings.juicefs_backend is Backend.REAL or settings.storage_backend is Backend.REAL:
-        raise ValueError("phase 1 has no real JuiceFS or storage probe: set them to 'fake'")
     engine = make_engine(settings.database_url.get_secret_value(), pool_size=settings.db_pool_size)
     return Context(
         settings=settings,
@@ -56,8 +55,14 @@ def build_context(settings: Settings) -> Context:
         metadata=ValkeyMetadataAdmin()
         if settings.metadata_backend is Backend.REAL
         else FakeMetadataAdmin(),
-        formatter=FakeVolumeFormatter(),
-        prober=FakeStorageProber(),
+        formatter=JuiceFSFormatter(
+            shlex.split(settings.juicefs_command), settings.juicefs_timeout_seconds
+        )
+        if settings.juicefs_backend is Backend.REAL
+        else FakeVolumeFormatter(),
+        prober=S3StorageProber(settings.storage_timeout_seconds)
+        if settings.storage_backend is Backend.REAL
+        else FakeStorageProber(),
     )
 
 
@@ -68,7 +73,7 @@ def create_app(ctx: Context) -> FastAPI:
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         tasks = background.start(ctx) if ctx.settings.background_tasks else []
         if ctx.settings.juicefs_backend is Backend.FAKE:
-            log.warning("JuiceFS is faked: disks are recorded but not formatted (phase 1)")
+            log.warning("JuiceFS is faked: disks are recorded but not formatted")
         try:
             yield
         finally:
@@ -79,12 +84,14 @@ def create_app(ctx: Context) -> FastAPI:
                     await task
             await ctx.engine.dispose()
 
+    production = ctx.settings.env is Environment.PRODUCTION
     app = FastAPI(
         title="Floppy control plane",
         version="0.1.0",
         lifespan=lifespan,
-        openapi_url=f"{API_PREFIX}/openapi.json",
-        docs_url=f"{API_PREFIX}/docs",
+        # The OpenAPI document and its pages are for development: off in production.
+        openapi_url=None if production else f"{API_PREFIX}/openapi.json",
+        docs_url=None if production else f"{API_PREFIX}/docs",
         redoc_url=None,
     )
     app.state.ctx = ctx
