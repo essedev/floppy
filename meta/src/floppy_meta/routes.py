@@ -49,6 +49,6 @@ def traefik_config(settings: Settings, instances: list[Instance]) -> dict[str, A
             "loadBalancer": {"servers": [{"address": f"{settings.upstream_host}:{instance.port}"}]}
         }
     if not routers:
-        # Traefik rejects a TCP section without routers; an empty object is no routes.
+        # No instance: an empty configuration, which Traefik takes as no routes.
         return {}
     return {"tcp": {"routers": routers, "services": services}}
