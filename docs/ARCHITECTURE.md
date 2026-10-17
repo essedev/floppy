@@ -337,13 +337,14 @@ The engine of the team version, in `macos/` next to the single-user mode, which 
 {"id": "...", "folder": "Archivio 2025", "access": "read", "enabled": true,
  "state": "mounted", "mounted_access": "read", "pending": null,
  "cache_used_mb": 812, "cache_size_mb": 10240,
- "replica": "up", "mode": "replica", "online": true}
+ "replica": "up", "mode": "replica", "online": true, "lag_ms": 500, "listed": true}
 ```
 
-- `state`: `mounted`, `starting` (the unit is coming up or retrying), `failed`, `stopped`, `disabled`.
+- `state`: `mounted`, `starting` (the unit is coming up), `failed` (the mount exited, for instance on a refused password or an unreachable master; systemd retries every 5 s), `stopped`, `disabled` (turned off and gone).
+- `listed`: `false` for a disk the VM still has but the disks file no longer lists (no longer visible, its removal waiting while it is in use): it is reported until it is gone, so the app knows the folder still in the Finder. Such a disk has `enabled: false` and its `access` is the mounted one.
 - `access` is the one asked for, `mounted_access` the one the running mount has; they differ while `pending` is `remount`. `pending`: `null`, `remount` (access, metadata address, secrets or a smaller cache wait for the disk to be free) or `remove` (turned off or no longer visible, still in use).
 - `replica`: `up`, `syncing`, `down` (no link to the master), `stopped`.
-- `mode`: the patch's metadata mode, `replica`, `master` (the replica is behind or down, reads go to the master), `offline` (the master is unreachable: reads from the replica, writes refused) or `unknown` right after mounting; `online` is `false` only when offline, `null` when not mounted.
+- `mode`: the patch's metadata mode, `replica`, `master` (the replica is behind or down, reads go to the master), `offline` (the master is unreachable: reads from the replica, writes refused) or `unknown` right after mounting; `online` is `false` only when offline, `null` when not mounted. `lag_ms`: the patch's replica lag, an upper bound (`juicefs_meta_replica_lag_seconds`), so about the probe's 500 ms on an idle disk; `null` when not mounted.
 
 **Inside the VM**, `/usr/local/sbin/floppy-disks` (bash and `jq`), per enabled disk:
 

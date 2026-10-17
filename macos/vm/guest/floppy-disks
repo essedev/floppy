@@ -304,35 +304,59 @@ refuse_single() {
 }
 
 # One JSON object per disk in the file, enabled or not.
+# A disk still configured in the VM but gone from the disks file (no longer
+# visible, removal waiting while it is in use) is reported too, with
+# "listed": false, so the app still knows the folder in the Finder.
 disk_status() {
-  local id="$1" enabled folder access state="stopped" mounted_access=null size=null used=null replica="stopped" mode=null online=null pending="$2"
-  enabled=$(field "$id" .enabled)
-  folder=$(field "$id" .folder)
-  access=$(field "$id" .access)
-  local dir="$ROOT/$folder" rec_now
+  local id="$1" pending="$2" listed=true enabled folder access state="stopped" mounted_access=null size=null used=null
+  local replica="stopped" mode=null online=null lag_ms=null
+  local rec_now
   rec_now=$(mounted_record "$id")
-  if [ "$enabled" != true ]; then
-    state=disabled
+  if [ -f "$DISKS_JSON" ] && [ -n "$(field "$id" .id)" ]; then
+    enabled=$(field "$id" .enabled)
+    folder=$(field "$id" .folder)
+    access=$(field "$id" .access)
   else
-    case "$(systemctl is-active "floppy-disk@$id.service" 2>/dev/null || true)" in
-      active) state=mounted ;;
-      activating|reloading) state=starting ;;
-      failed) state=failed ;;
-      *) state=stopped ;;
-    esac
-    # A unit restarting after a failure says "activating": the mount decides.
-    if mountpoint -q "$dir"; then state=mounted; elif [ "$state" = mounted ]; then state=starting; fi
+    listed=false
+    enabled=false
+    folder=$(run_folder "$id"); [ -n "$folder" ] || folder=$(conf_folder "$id")
+    access=$(rec "$rec_now" ACCESS)
   fi
+  local dir="$ROOT/$folder"
+  # A unit waiting to retry after a failure is "activating (auto-restart)"
+  # for systemd: for the app it has failed, and systemd retries every 5 s.
+  local props active sub
+  props=$(systemctl show -p ActiveState -p SubState "floppy-disk@$id.service" 2>/dev/null || true)
+  active=$(rec "$props" ActiveState)
+  sub=$(rec "$props" SubState)
+  case "$active/$sub" in
+    active/*) state=mounted ;;
+    */auto-restart|failed/*) state=failed ;;
+    activating/*|reloading/*) state=starting ;;
+    *) state=stopped ;;
+  esac
+  # The mount decides between mounted and starting.
+  if mountpoint -q "$dir"; then state=mounted; elif [ "$state" = mounted ]; then state=starting; fi
+  # Turned off and gone; a disk turned off but still mounted says so.
+  if [ "$enabled" != true ] && [ "$state" = stopped ]; then state=disabled; fi
   if [ "$state" = mounted ] && [ -n "$rec_now" ]; then
     mounted_access=$(json_str "$(rec "$rec_now" ACCESS)")
     size=$(rec "$rec_now" CACHE_MB)
-    local m
-    m=$(timeout 3 sed -n 's/^juicefs_meta_replica_mode \(-\{0,1\}[0-9]*\).*/\1/p' "$dir/.stats" 2>/dev/null | head -1 || true)
+    # The patch's gauges: the metadata mode, and the replica's lag (an upper
+    # bound, in seconds).
+    local m l
+    # shellcheck disable=SC2016 # awk's own fields
+    read -r m l < <(timeout 3 awk '$1 == "juicefs_meta_replica_mode" {m = $2} $1 == "juicefs_meta_replica_lag_seconds" {l = $2}
+      END {print (m == "" ? "-" : m), (l == "" ? "-" : l)}' "$dir/.stats" 2>/dev/null || echo "- -")
     case "$m" in
       -1) mode='"unknown"' ;;
       0) mode='"master"'; online=true ;;
       1) mode='"replica"'; online=true ;;
       2) mode='"offline"'; online=false ;;
+    esac
+    case "$l" in
+      ""|-|*[!0-9.e+-]*) ;;
+      *) lag_ms=$(awk -v s="$l" 'BEGIN { if (s >= 0) printf "%d", s * 1000 + 0.5; else print "null" }') ;;
     esac
   fi
   [ -d "$CACHE/$id" ] && used=$(du -sm "$CACHE/$id" 2>/dev/null | cut -f1)
@@ -345,10 +369,10 @@ disk_status() {
     else replica=down; fi
   fi
   [ -n "$pending" ] && pending=$(json_str "$pending") || pending=null
-  printf '{"id":%s,"folder":%s,"access":%s,"enabled":%s,"state":"%s","mounted_access":%s,"pending":%s,' \
-    "$(json_str "$id")" "$(json_str "$folder")" "$(json_str "$access")" "$enabled" "$state" "$mounted_access" "$pending"
-  printf '"cache_used_mb":%s,"cache_size_mb":%s,"replica":"%s","mode":%s,"online":%s}' \
-    "${used:-null}" "${size:-null}" "$replica" "$mode" "$online"
+  printf '{"id":%s,"folder":%s,"access":%s,"listed":%s,"enabled":%s,"state":"%s","mounted_access":%s,"pending":%s,' \
+    "$(json_str "$id")" "$(json_str "$folder")" "$(json_str "$access")" "$listed" "$enabled" "$state" "$mounted_access" "$pending"
+  printf '"cache_used_mb":%s,"cache_size_mb":%s,"replica":"%s","mode":%s,"online":%s,"lag_ms":%s}' \
+    "${used:-null}" "${size:-null}" "$replica" "$mode" "$online" "$lag_ms"
 }
 
 # The remount a disk still waits for (written by apply, cleared once done).
@@ -358,13 +382,16 @@ status_json() {
   local first=1 id smbd drive=active used total=0 any=0
   smbd=$(systemctl is-active smbd 2>/dev/null || true)
   printf '{"smbd":"%s","disks":[' "$smbd"
-  if [ -f "$DISKS_JSON" ]; then
-    while IFS= read -r id; do
-      [ $first = 1 ] || printf ','
-      first=0
-      disk_status "$id" "$(pending_of "$id")"
-    done < <(jq -r '.disks[].id' "$DISKS_JSON")
-  fi
+  # The disks of the file, then the ones the VM still has that it no longer lists.
+  while IFS= read -r id; do
+    [ -n "$id" ] || continue
+    [ $first = 1 ] || printf ','
+    first=0
+    disk_status "$id" "$(pending_of "$id")"
+  done < <({ [ -f "$DISKS_JSON" ] && jq -r '.disks[].id' "$DISKS_JSON"
+             configured_ids | while IFS= read -r c; do
+               [ -f "$DISKS_JSON" ] && [ -n "$(field "$c" .id)" ] || echo "$c"
+             done; } 2>/dev/null)
   printf ']'
   used=$(du -sm "$CACHE" 2>/dev/null | cut -f1 || true)
   for id in $(configured_ids); do
@@ -519,7 +546,19 @@ cmd_mount() {
     --enable-xattr --no-usage-report "${extra[@]}"
 }
 
-cmd_ready() { wait_mounted "$ROOT/$(conf_folder "${1:?}")"; }
+# ExecStartPost: until the disk is mounted, or until JuiceFS ($MAINPID, set by
+# systemd) has exited, which a refused password or an unreachable master do at
+# once: the unit then fails and retries instead of "starting" for a minute.
+cmd_ready() {
+  local dir
+  dir="$ROOT/$(conf_folder "${1:?}")"
+  for _ in $(seq $((MOUNT_WAIT * 2))); do
+    mountpoint -q "$dir" && return 0
+    if [ -n "${MAINPID:-}" ] && ! kill -0 "$MAINPID" 2>/dev/null; then return 1; fi
+    sleep 0.5
+  done
+  return 1
+}
 
 cmd_unmount() {
   local folder
