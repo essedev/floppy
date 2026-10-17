@@ -1,0 +1,85 @@
+[project]
+name = "floppy-server"
+version = "0.1.0"
+description = "Floppy control plane: organizations, people, Macs, disks and the S3 key, off the data path"
+license = "AGPL-3.0-only"
+authors = [
+    { name = "Simone Salerno", email = "doppiaesse@proton.me" }
+]
+requires-python = ">=3.14"
+dependencies = [
+    "aiosmtplib>=5.1.3",
+    "alembic>=1.20.0",
+    "asyncpg>=0.32.0",
+    "cryptography>=50.0.2",
+    "fastapi[standard]>=0.143.3",
+    "pydantic>=2.14.1",
+    "pydantic-settings>=2.16.0",
+    "redis>=8.1.0",
+    "sqlalchemy[asyncio]>=2.1.5",
+]
+
+[project.scripts]
+floppy-server = "floppy_server:main"
+
+[build-system]
+requires = ["uv_build>=0.10.2,<0.11.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "aiosmtpd>=1.4.6",
+    "httpx>=0.28.1",
+    "mypy>=2.4.0",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "pytest-cov>=7.1.0",
+    "ruff>=0.17.1",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py314"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "A", "C4", "S", "SIM", "RUF", "ASYNC", "PT", "RET", "TID", "PL"]
+ignore = [
+    "PLR0913",  # endpoints and constructors take what they take
+    "PLR2004",  # magic values in comparisons read fine here
+    "PLR0911",
+    "PLR0912",
+    "PLR0915",
+    "PLR0917",  # services take the context, the session and what they act on
+    "E501",     # the formatter wraps code; long strings and SQL stay readable
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "S105", "S106", "S107", "S311", "S608", "PLR2004", "PT011", "PT018"]
+"migrations/**" = ["E501"]
+
+[tool.ruff.format]
+# The migration is autogenerate output edited by hand: kept as Alembic wrote it.
+exclude = ["migrations/versions/*"]
+
+[tool.mypy]
+strict = true
+python_version = "3.14"
+plugins = ["pydantic.mypy"]
+files = ["src", "tests", "migrations"]
+
+[[tool.mypy.overrides]]
+module = ["aiosmtpd.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# redis-py's execute_command is untyped; ACL and CLIENT commands have no typed wrappers.
+module = ["floppy_server.infra.metadata", "tests.test_valkey"]
+disallow_untyped_calls = false
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
+testpaths = ["tests"]
+addopts = "-ra"
+filterwarnings = ["error::sqlalchemy.exc.SADeprecationWarning"]

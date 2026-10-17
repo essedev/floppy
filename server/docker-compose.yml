@@ -1,0 +1,78 @@
+# The control plane for self-hosting and local development: PostgreSQL 18, the central
+# Valkey and the server. Secrets come from server/.env (outside git); see .env.example.
+#
+#   docker compose up -d --build     # migrations and bootstrap run before the server starts
+#   docker compose up -d db valkey   # only the stores, for `uv run` and the tests
+#
+# Ports from the project's Portsage range (4500-4509), on localhost only.
+name: floppy-server
+
+services:
+  db:
+    image: postgres:18
+    environment:
+      POSTGRES_USER: floppy_owner
+      POSTGRES_PASSWORD: ${FLOPPY_DB_OWNER_PASSWORD:?set it in server/.env}
+      POSTGRES_DB: floppy
+      FLOPPY_DB_APP_PASSWORD: ${FLOPPY_DB_APP_PASSWORD:?set it in server/.env}
+    volumes:
+      - db-data:/var/lib/postgresql
+      - ./docker/db-init.sh:/docker-entrypoint-initdb.d/10-app-role.sh:ro
+    ports:
+      - "127.0.0.1:4504:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U floppy_owner -d floppy"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  valkey:
+    image: valkey/valkey:8.1.4
+    # Every write is on disk before the answer (architecture.html, Failure modes). ACL users
+    # are not persisted here: the control plane's reconciler recreates them at start.
+    command: >
+      valkey-server --requirepass ${FLOPPY_VALKEY_ADMIN_PASSWORD:?set it in server/.env}
+      --appendonly yes --appendfsync always --databases 16
+    volumes:
+      - valkey-data:/data
+    ports:
+      - "127.0.0.1:4505:6379"
+    healthcheck:
+      test: ["CMD-SHELL", "valkey-cli -a \"$$VALKEY_PASSWORD\" --no-auth-warning ping | grep -q PONG"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    environment:
+      VALKEY_PASSWORD: ${FLOPPY_VALKEY_ADMIN_PASSWORD}
+
+  server:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+      valkey:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      FLOPPY_DATABASE_URL: postgresql+asyncpg://floppy_app:${FLOPPY_DB_APP_PASSWORD}@db:5432/floppy
+      FLOPPY_MIGRATION_DATABASE_URL: postgresql+asyncpg://floppy_owner:${FLOPPY_DB_OWNER_PASSWORD}@db:5432/floppy
+      FLOPPY_BOOTSTRAP_VALKEY_ADMIN_URL: redis://valkey:6379
+    ports:
+      - "127.0.0.1:4507:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/healthz')"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  db-data:
+  valkey-data:
+
+# Explicit subnet: Docker's default address pools run out on a machine with many compose
+# projects (CLAUDE.md, gotchas). The spike uses 10.250.45.0/24.
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: 10.250.46.0/24
