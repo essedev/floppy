@@ -1,6 +1,11 @@
 /*
   Self-hosted fonts, served from public/fonts with their SIL Open Font License next to them.
   Schibsted Grotesk (variable, 400-900) for text and headings; Departure Mono for readouts.
+
+  Departure Mono comes from the official release v1.500 by Helena Zhang,
+  https://github.com/rektdeckard/departure-mono/releases/tag/v1.500 (DepartureMono-1.500.zip):
+  DepartureMono-Regular.woff2 and LICENSE (saved as OFL.txt) unchanged. woff2 sha256
+  5b4fed1daa90708aa9c6ee1190abca9dc22164a1c1def0020386e46b61038cfb.
 */
 
 @font-face {
