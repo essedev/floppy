@@ -11,6 +11,8 @@ docker compose up -d db valkey                      # only the stores, for the t
 docker compose up -d --build                        # full stack: migrates, bootstraps, serves on :4507
 uv run --env-file .env pytest
 uv run --env-file .env floppy-server migrate|bootstrap --from-env|reconcile|reencrypt
+docker compose --profile s3 up -d garage && docker/garage-setup.sh   # local S3 and Garage's admin API (4540)
+docker compose build server                         # before the JuiceFS tests: the image carries the patched juicefs
 ```
 
 - **The schema is docs/DATABASE_SCHEMA.md**: a migration and the schema doc change in the same commit.
@@ -18,3 +20,5 @@ uv run --env-file .env floppy-server migrate|bootstrap --from-env|reconcile|reen
 - **Debian already has a `floppy` group**: the container's user is `controlplane`.
 - **After `ACL DELUSER` redis-py does not reconnect by itself**: the Valkey adapter reconnects explicitly.
 - **The admin web against this server in dev** needs a `/api` proxy to `127.0.0.1:4507` in `web/vite.config.ts` and `VITE_API=http`.
+- **Compose subnet 10.250.48.0/24**: spike/juicefs-replica/test.sh uses .46, the spike .45.
+- **Formats outside the team key scope hold no S3 key**: the control plane formats with its own key in `AWS_*`, never `ACCESS_KEY` (a new format would store it).
