@@ -11,15 +11,20 @@ and the Mac mounts it. Each check prints its measure, its threshold and PASS or
 FAIL; t14 and t25 print the numbers to record.
 
 Usage: spike/perdisk.py [test ...]   tests t14 ... t25 (default: all)
+  ROOT_MODE=immutable spike/perdisk.py    the share's root with chattr +i (all 58 checks pass)
   SMB_FORCE_USER=drive spike/perdisk.py   Samba as an unprivileged user instead of root
+  SQUASH=drive|root                       juicefs mount --all-squash to that account
   ROOT_MODE=tmpfs spike/perdisk.py        the share's root on a read-only tmpfs
   FILES=10000                             files per disk for t25
 
 Needs setup.sh run once (Garage layout, spike/.env) and the patched juicefs in
 spike/juicefs-replica/dist (build.sh): drive-p is built with it.
 
-Measured on 17/10/2026 at 15 ms (52 checks pass with SMB_FORCE_USER=drive; with
-Samba as root, t24 fails: root bypasses the share root's 0555):
+Measured on 17/10/2026 at 15 ms. The share's root: with Samba as root, 0555 alone
+lets the Mac write there (t24); Samba as drive stops it but cannot touch files root
+wrote before (t26), with or without --all-squash (Samba checks the mode bits itself,
+and squashing leaves the stored owners as they are); ROOT_MODE=immutable with Samba
+as root passes everything:
 - idle, per disk: replica 12-15 MB RSS, JuiceFS mount 34-39 MB private memory
   (165-170 MB RSS, the binary's pages counted in both of its processes); smbd 39 MB;
 - cold listing of 300 files in one disk from the Mac: 0.31-0.45 s;
@@ -215,10 +220,25 @@ def set_user(n, perm):
         admin(n, "ACL", "SETUSER", DEVICE, "reset", "on", f">{DEVICE_PW}", *(ACL_WRITE if perm == "rw" else ACL_READ))
 
 
+# SQUASH maps every caller of a disk's mount to one account (`juicefs mount --all-squash`),
+# which also turns off the kernel's permission check: "drive" to Samba's unprivileged
+# user, "root" to uid 0 (JuiceFS then checks nothing), "" for no mapping.
+SQUASH = os.environ.get("SQUASH", "")
+
+
+def squash_flag():
+    if not SQUASH:
+        return ""
+    if SQUASH == "root":
+        return " --all-squash 0:0"
+    ids = in_drive(f"echo $(id -u {SQUASH}):$(id -g {SQUASH})", check=True).stdout.strip()
+    return f" --all-squash {ids}"
+
+
 def mount_flags(n, read_only):
     return (f"--cache-dir /cache/d{n} --cache-size 10240 --buffer-size 256 --max-readahead 4 --prefetch 8 "
             f"--enable-xattr --cache-large-write --no-usage-report -d --log /var/log/jfs-d{n}.log"
-            + (" --read-only" if read_only else ""))
+            + (" --read-only" if read_only else "") + squash_flag())
 
 
 def mount_disk(name, perm, wait=True, folder=True):
@@ -620,6 +640,36 @@ def t24():
     in_drive("rm -rf /mnt/drive/top-level /mnt/drive/hosts 2>/dev/null; true")
 
 
+def t26():
+    """A volume written before Samba ran unprivileged: root's files, then edited from the Mac."""
+    # Written by a mount with no squash, as root, like today's single-user volumes.
+    admin_mount(1, "/seed/1", "mkdir -p legacy/sub && for f in a b c; do echo old > legacy/$f; done; "
+                "echo old > legacy/sub/d; chmod 0644 legacy/a legacy/b legacy/c; chmod 0755 legacy legacy/sub")
+    time.sleep(1)
+    d = MNT / "Progetti" / "legacy"
+    tries = [
+        ("overwrite a root file", ["sh", "-c", f"echo new > '{d / 'a'}'"]),
+        ("rename a root file", ["mv", str(d / "b"), str(d / "b2")]),
+        ("delete a root file", ["rm", str(d / "c")]),
+        ("create in a root folder", ["cp", "/etc/hosts", str(d / "sub" / "hosts")]),
+        ("delete a root folder", ["rm", "-r", str(d / "sub")]),
+    ]
+    for label, cmd in tries:
+        ok, s, err = mac_try(*cmd)
+        record(f"t26 squash={SQUASH or 'none'}, Samba as {os.environ.get('SMB_FORCE_USER', 'root')}: {label}",
+               "ok" if ok else f"refused: {err[0]}", "ok", ok, f"({s:.2f} s)")
+    mac_try("cp", "/etc/hosts", str(MNT / "Progetti" / "from-mac"))  # the volume's root is 0777
+    # What a later mount with no squash sees: the stored owners.
+    owners = {}
+    admin_mount(1, "/seed/1", "stat -c '%n %u:%g' legacy/a from-mac > /tmp/owners 2>&1; true")
+    for line in in_drive("cat /tmp/owners").stdout.splitlines():
+        if len(line.split()) == 2:
+            owners[line.split()[0].split("/")[-1]] = line.split()[1]
+    record("t26 owners stored in the metadata, seen with no squash", str(owners),
+           "a stays 0:0", owners.get("a") == "0:0",
+           "(from-mac is the squashed account)" if SQUASH else "")
+
+
 def t25():
     """Point 5: replication cost of a VM start with three disks of 10,000 files each."""
     files = int(os.environ.get("FILES", "10000"))
@@ -681,7 +731,7 @@ def t25():
     mac_mount()
 
 
-TESTS = [t14, t15, t16, t17, t18, t19, t20, t21, t22, t23, t24, t25]
+TESTS = [t14, t15, t16, t17, t18, t19, t20, t21, t22, t23, t24, t26, t25]
 
 
 def main():

@@ -10,26 +10,49 @@
 # - ROOT_MODE=tmpfs: /mnt/drive is a read-only tmpfs, remounted read-write only
 #   to add or remove a disk's folder. The macOS SMB client then treats the whole
 #   share as read-only, disks included (t14f): it does not work.
+# - ROOT_MODE=immutable: /mnt/drive is an ext4 folder with the immutable flag
+#   (chattr +i), which stops root too while the share stays read-write; the flag
+#   is lifted only to add or remove a disk's folder. In the VM it is the root
+#   file system's own folder; here a small ext4 image, since overlayfs has no flag.
 # `/perdisk-entrypoint.sh folder add|remove <name>` adds or removes a disk's folder.
 set -eu
 
+root_mode=${ROOT_MODE:-chmod}
 if [ "${1:-}" = folder ]; then
-  if mountpoint -q /mnt/drive; then mount -o remount,rw /mnt/drive; fi
+  case "$root_mode" in
+    tmpfs) mount -o remount,rw /mnt/drive ;;
+    immutable) chattr -i /mnt/drive ;;
+  esac
   case "$2" in
     add) mkdir -p "/mnt/drive/$3" ;;
     remove) rmdir "/mnt/drive/$3" ;;
     *) echo "folder add|remove <name>" >&2; exit 2 ;;
   esac
   chmod 0555 /mnt/drive
-  if mountpoint -q /mnt/drive; then mount -o remount,ro /mnt/drive; fi
+  case "$root_mode" in
+    tmpfs) mount -o remount,ro /mnt/drive ;;
+    immutable) chattr +i /mnt/drive ;;
+  esac
   exit 0
 fi
 
 : "${SMB_PASSWORD:?}"
 mkdir -p /mnt/drive /cache
-if [ "${ROOT_MODE:-chmod}" = tmpfs ] && ! mountpoint -q /mnt/drive; then
-  mount -t tmpfs -o size=1m,mode=0555 floppy-root /mnt/drive
-  mount -o remount,ro /mnt/drive
+if ! mountpoint -q /mnt/drive; then
+  case "$root_mode" in
+    tmpfs)
+      mount -t tmpfs -o size=1m,mode=0555 floppy-root /mnt/drive
+      mount -o remount,ro /mnt/drive
+      ;;
+    immutable)
+      [ -f /cache/root.ext4 ] || { truncate -s 8M /cache/root.ext4 && mkfs.ext4 -q /cache/root.ext4; }
+      mount -o loop /cache/root.ext4 /mnt/drive
+      chattr -i /mnt/drive # the image keeps the flag from an earlier start
+      rmdir /mnt/drive/lost+found 2>/dev/null || true
+      chmod 0555 /mnt/drive
+      chattr +i /mnt/drive
+      ;;
+  esac
 fi
 chmod 0555 /mnt/drive 2>/dev/null || true
 
