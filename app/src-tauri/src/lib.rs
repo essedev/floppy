@@ -1,16 +1,18 @@
 //! Floppy's menu bar app (DECISIONS #9, #12): a tray icon with the disk's
 //! state, a panel under it, Settings and a first-run window. The engine is the
-//! `floppy` command; `core` runs it, this module wires it to Tauri.
+//! `floppy` command; `core` runs it, `account` signs the Mac in to the
+//! control plane, this module wires both to Tauri.
 
+mod account;
 mod commands;
 mod core;
 mod engine;
-mod fake;
 mod prefs;
 mod text;
 mod tray;
 mod windows;
 
+use crate::account::{Account, AccountEvent, Timing, api, secrets};
 use crate::core::{Core, Event};
 use std::sync::Arc;
 use tauri::menu::{Menu, MenuItem};
@@ -35,6 +37,45 @@ fn on_event(app: &tauri::AppHandle, tray: &tray::TrayState, event: Event) {
             let _ = app.emit_to(windows::PANEL, "notify", &notice);
         }
     }
+}
+
+fn on_account(app: &tauri::AppHandle, event: AccountEvent) {
+    match event {
+        AccountEvent::Changed(view) => {
+            let _ = app.emit("auth", &view);
+        }
+        // The link was opened in the browser: back to the window that asked.
+        AccountEvent::LinkOpened => {
+            let welcome_open = app
+                .get_webview_window(windows::WELCOME)
+                .is_some_and(|w| w.is_visible().unwrap_or(false));
+            windows::show(
+                app,
+                if welcome_open {
+                    windows::WELCOME
+                } else {
+                    windows::SETTINGS
+                },
+            );
+        }
+    }
+}
+
+/// The macOS version as the server accepts it (`^[0-9A-Za-z.+-]+$`).
+fn macos_version() -> String {
+    std::process::Command::new("/usr/bin/sw_vers")
+        .arg("-productVersion")
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .filter(|v| {
+            !v.is_empty()
+                && v.len() <= 40
+                && v.chars()
+                    .all(|c| c.is_ascii_alphanumeric() || ".+-".contains(c))
+        })
+        .unwrap_or_else(|| "unknown".to_string())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -67,6 +108,14 @@ pub fn run() {
             commands::open_settings,
             commands::open_welcome,
             commands::finish_welcome,
+            commands::auth_view,
+            commands::auth_start,
+            commands::auth_resend,
+            commands::auth_back,
+            commands::auth_submit_code,
+            commands::auth_retry_register,
+            commands::auth_sign_out,
+            commands::auth_set_server,
             commands::hide_panel,
             commands::quit_app,
         ])
@@ -108,8 +157,25 @@ pub fn run() {
             app.manage(Arc::clone(&core));
             let prefs = prefs::PrefsStore::new(&app.path().app_config_dir()?);
             let first_run = !prefs.load().first_run_done;
-            app.manage(prefs);
+            app.manage(prefs.clone());
             core.start_checking();
+
+            let version = app.package_info().version.to_string();
+            let macos = macos_version();
+            let account_handle = app.handle().clone();
+            let account = Account::new(
+                Arc::new(api::Http::new(&format!("Floppy/{version} (macOS {macos})"))),
+                Arc::new(secrets::Keychain),
+                prefs,
+                api::Versions {
+                    app_version: version,
+                    macos_version: macos,
+                },
+                Timing::default(),
+                move |event| on_account(&account_handle, event),
+            );
+            account.start_worker();
+            app.manage(account);
 
             if let Some(panel) = app.get_webview_window(windows::PANEL) {
                 let p = panel.clone();

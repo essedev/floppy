@@ -1,10 +1,10 @@
 //! Tauri commands: thin wrappers over `Core` and the windows. The frontend
 //! calls them through `src/lib/backend.ts`.
 
+use crate::account::{Account, AuthView, Refused};
 use crate::core::{Core, CoreError, DiskStatus, Folder, SetupProgress};
 use crate::engine::JobKind;
-use crate::fake;
-use crate::prefs::{Prefs, PrefsStore};
+use crate::prefs::PrefsStore;
 use crate::windows;
 use serde::Serialize;
 use std::process::Command;
@@ -30,6 +30,18 @@ impl From<CoreError> for CommandError {
         };
         CommandError {
             code,
+            message: e.to_string(),
+        }
+    }
+}
+
+impl From<Refused> for CommandError {
+    fn from(e: Refused) -> Self {
+        CommandError {
+            code: match e {
+                Refused::Busy => "auth_busy",
+                Refused::State => "auth_state",
+            },
             message: e.to_string(),
         }
     }
@@ -124,30 +136,98 @@ pub fn run_setup(core: CoreState) -> Result<(), CommandError> {
 pub struct AppInfo {
     pub version: String,
     pub engine_path: String,
+    /// The Mac's name in Sharing settings: the default device name.
     pub computer_name: Option<String>,
-    /// Placeholder until the control plane exists: see `fake.rs`.
-    pub account: fake::Account,
+}
+
+/// The Mac's name (System Settings, General, Sharing).
+pub fn computer_name() -> Option<String> {
+    Command::new("/usr/sbin/scutil")
+        .args(["--get", "ComputerName"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .filter(|s| !s.is_empty())
 }
 
 #[tauri::command]
 pub async fn app_info(app: AppHandle, core: CoreState<'_>) -> Result<AppInfo, CommandError> {
-    let computer_name = tauri::async_runtime::spawn_blocking(|| {
-        Command::new("/usr/sbin/scutil")
-            .args(["--get", "ComputerName"])
-            .output()
-            .ok()
-            .filter(|o| o.status.success())
-            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-            .filter(|s| !s.is_empty())
-    })
-    .await
-    .map_err(io_error)?;
+    let computer_name = tauri::async_runtime::spawn_blocking(computer_name)
+        .await
+        .map_err(io_error)?;
     Ok(AppInfo {
         version: app.package_info().version.to_string(),
         engine_path: core.engine().display().to_string(),
         computer_name,
-        account: fake::account(),
     })
+}
+
+type AccountState<'a> = State<'a, Arc<Account>>;
+
+/// Runs an account step off the main thread: each may wait on the network.
+async fn account_step(
+    account: AccountState<'_>,
+    step: impl FnOnce(&Arc<Account>) -> Result<AuthView, Refused> + Send + 'static,
+) -> Result<AuthView, CommandError> {
+    let account = Arc::clone(&account);
+    tauri::async_runtime::spawn_blocking(move || step(&account))
+        .await
+        .map_err(io_error)?
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn auth_view(account: AccountState) -> AuthView {
+    account.view()
+}
+
+#[tauri::command]
+pub async fn auth_start(
+    account: AccountState<'_>,
+    email: String,
+    device_name: String,
+) -> Result<AuthView, CommandError> {
+    account_step(account, move |a| a.start(&email, &device_name, false)).await
+}
+
+#[tauri::command]
+pub async fn auth_resend(account: AccountState<'_>) -> Result<AuthView, CommandError> {
+    account_step(account, |a| a.resend()).await
+}
+
+#[tauri::command]
+pub async fn auth_back(account: AccountState<'_>) -> Result<AuthView, CommandError> {
+    account_step(account, |a| a.back()).await
+}
+
+#[tauri::command]
+pub async fn auth_submit_code(
+    account: AccountState<'_>,
+    code: String,
+) -> Result<AuthView, CommandError> {
+    account_step(account, move |a| a.submit_code(&code)).await
+}
+
+#[tauri::command]
+pub async fn auth_retry_register(account: AccountState<'_>) -> Result<AuthView, CommandError> {
+    account_step(account, |a| a.retry_register()).await
+}
+
+#[tauri::command]
+pub async fn auth_sign_out(
+    account: AccountState<'_>,
+    local_only: bool,
+) -> Result<AuthView, CommandError> {
+    account_step(account, move |a| a.sign_out(local_only)).await
+}
+
+#[tauri::command]
+pub async fn auth_set_server(
+    account: AccountState<'_>,
+    url: Option<String>,
+) -> Result<AuthView, CommandError> {
+    account_step(account, move |a| a.set_server(url.as_deref())).await
 }
 
 #[tauri::command]
@@ -164,9 +244,7 @@ pub fn open_welcome(app: AppHandle) {
 #[tauri::command]
 pub fn finish_welcome(app: AppHandle, prefs: State<PrefsStore>) -> Result<(), CommandError> {
     prefs
-        .save(&Prefs {
-            first_run_done: true,
-        })
+        .update(|p| p.first_run_done = true)
         .map_err(io_error)?;
     windows::hide(&app, windows::WELCOME);
     Ok(())
