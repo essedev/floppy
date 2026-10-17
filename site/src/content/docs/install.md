@@ -3,10 +3,6 @@ title: Install on a Mac
 description: Install the app with Homebrew, sign in, and find the disk in the Finder.
 ---
 
-:::caution[Not released yet]
-The cask and the menu bar app are being built. Until the first release, testers get a zip built from the repository: see the [README](%repo%#install).
-:::
-
 ## Before you start
 
 - A Mac with Apple Silicon and macOS 13 or later.

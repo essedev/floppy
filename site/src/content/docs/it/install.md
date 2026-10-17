@@ -3,10 +3,6 @@ title: Installare su un Mac
 description: Installare l’app con Homebrew, accedere e trovare il disco nel Finder.
 ---
 
-:::caution[Non ancora pubblicato]
-Il cask e l’app nella barra dei menu sono in costruzione. Fino alla prima versione, chi prova riceve uno zip costruito dal repository: vedi il [README](%repo%/blob/main/README.it.md#installazione).
-:::
-
 ## Prima di iniziare
 
 - Un Mac con Apple Silicon e macOS 13 o successivo.

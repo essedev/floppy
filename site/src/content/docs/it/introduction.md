@@ -5,10 +5,6 @@ description: Cos’è, per chi è, e cosa non fa.
 
 %name% è un disco remoto condiviso per chi monta video su macOS. Compare nel Finder come **%name%**, come un disco esterno, e i file stanno in un object storage S3 che scegli tu. Una cache locale su ogni Mac rende le clip che hai già aperto veloci come un SSD interno.
 
-:::note[A che punto è]
-Oggi %name% è un pacchetto di prova per macOS, provato su OVH Object Storage a Milano, con un disco per Mac. La versione per il gruppo che queste pagine descrivono (un disco condiviso, l’app nella barra dei menu, l’accesso dal browser) è provata in un prototipo locale ed è in costruzione.
-:::
-
 ## Per chi è
 
 Piccoli gruppi che montano video insieme e vogliono un posto solo per il girato: gli stessi file su ogni Mac, senza cartelle da sincronizzare e senza un abbonamento per postazione. Chi monta non deve sapere niente di bucket o database: apre il Finder e lavora.

@@ -15,8 +15,6 @@ description: Which license covers which part, and the third-party software it sh
 
 The app and the command run on your Macs and can be reused anywhere. The control plane is AGPL-3.0: if you run a modified version as a service for others, you share your changes under the same license.
 
-TODO: the repository's root `LICENSE` is MIT today; the AGPL-3.0 license file arrives with the control plane.
-
 ## What it ships and builds on
 
 | Software | License |

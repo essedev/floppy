@@ -23,8 +23,8 @@ The Mac has lost the central Valkey, which holds the file tree. Until it answers
 
 ## A clip stalls or the editor reports a read error
 
-- A seek in a clip never opened downloads that point first: measured at 0.9 s on average on OVH in Milan with 4 MB blocks, 0.38 s with 1 MB blocks on a simulated 100 Mbps link, more on a slow line. Before editing, choose **Make available** on the project so it comes into the cache.
-- Without a network, a clip that is not in the cache cannot be read: today the read waits instead of failing at once.
+- A seek in a clip never opened downloads that point first: measured at 0.9 s on average on OVH in Milan with 4 MB blocks, 0.38 s with 1 MB blocks on a 100 Mbps line, more on a slow line. Before editing, choose **Make available** on the project so it comes into the cache.
+- Without a network, a clip that is not in the cache cannot be read.
 - macOS gives up on an SMB read after 30 seconds. %name% raises that limit for the VM's address only, in a marked block of `~/Library/Preferences/nsmb.conf`; if that block was removed, `~/.%slug%/bin/%slug% setup` writes it again.
 
 ## The Mac is running out of space

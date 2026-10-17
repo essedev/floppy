@@ -5,10 +5,6 @@ description: Run your own control plane, with a central Valkey and an S3 bucket.
 
 Everything %name% needs runs on infrastructure you pick. It speaks only standard S3 and the Redis protocol, which Valkey implements: no provider API is part of the core.
 
-:::note[Draft]
-The control plane is being built. This page describes the planned setup; commands and variable names will follow the first release.
-:::
-
 ## What you run
 
 - **The control plane**: an API with a web admin, shipped as Docker Compose, with its own PostgreSQL for its tables. It holds organizations, people, devices and volumes, sends the sign-in links, and creates or deletes the Valkey users of the Macs. It holds no file data.

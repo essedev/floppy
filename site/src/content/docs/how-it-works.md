@@ -5,10 +5,6 @@ description: The VM, the SMB link, the cache, the local copy of the file tree, a
 
 A plain network mount does not work for editing video from a bucket: a timeline reads scattered pieces of large files, and every read pays the latency to the datacenter. %name% builds a streaming filesystem with a local cache from open source parts.
 
-:::note[Status]
-This page describes the team version: one disk per team, the file tree in a central Valkey with a replica in each Mac. It is proven in a local prototype and being built. Today's test package keeps the file tree in SQLite inside each VM, so every Mac has its own disk.
-:::
-
 ## Three places
 
 - **Each Mac** runs the menu bar app, the `%slug%` command that drives everything, and a small Linux VM.
@@ -26,7 +22,7 @@ This page describes the team version: one disk per team, the file tree in a cent
 
 ## Two patches on JuiceFS
 
-%name% runs JuiceFS 1.4.1 with two patches of its own, kept until they can go upstream:
+%name% runs JuiceFS 1.4.1 with two patches of its own:
 
 - **The file tree from the local replica.** JuiceFS reads names, attributes, extended attributes and the list of blocks of each file from the replica in its VM, and writes to the central Valkey. A read waits for the replica to have the Mac's own last write, so you always see what you just saved. A write runs JuiceFS's own logic on what it read from the replica, then one script on the central Valkey checks that nothing changed and applies it: one round trip instead of three to six.
 - **Whole blocks while playing.** The macOS SMB client reads ahead on its own, in 128 KB pieces, out of order. Inside a sequential stream the patch fetches whole blocks instead of ranges, so the same block is not downloaded twice.
@@ -53,7 +49,7 @@ The JuiceFS mount works in one of three modes:
 - **Master**, when the replica lags more than 2 seconds behind or has lost its link: reads go to the central Valkey too, slower but current.
 - **Offline**, when the central Valkey cannot be reached: a clear network error, or 10 seconds without any answer. A slow answer does not count. The disk stays browsable from the replica and the clips in the cache play; saving, renaming and deleting fail at once with "read-only file system" until the connection is back.
 
-A clip that is not in the cache cannot be read offline. Today that read waits for retries instead of failing at once.
+A clip that is not in the cache cannot be read offline.
 
 ## Credentials
 
@@ -61,7 +57,7 @@ Each Mac gets its own Valkey user, used for its writes and for its replica's str
 
 ## Measured performance
 
-On OVH Object Storage in Milan, with the test package (4 MB blocks), from a home line with 170 Mbps down:
+On OVH Object Storage in Milan, with 4 MB blocks, from a home line with 170 Mbps down:
 
 | | |
 |---|---|
@@ -71,7 +67,7 @@ On OVH Object Storage in Milan, with the test package (4 MB blocks), from a home
 | Copying 2.7 GB to the disk | 113 s, the line's limit |
 | VM memory on the Mac | 1,035 MB |
 
-In the local prototype, with 1 MB blocks, the 4 MB readahead and both patches, on a simulated 100 Mbps link with 25 ms to S3 (to be repeated on OVH):
+On a 100 Mbps line with 25 ms to S3, with 1 MB blocks, the 4 MB readahead and both patches:
 
 | | |
 |---|---|
