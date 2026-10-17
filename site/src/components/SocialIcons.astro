@@ -1,6 +1,6 @@
 ---
-// Starlight SocialIcons override: the same links as the landing's header, a text link to the
-// docs and the repository.
+// Starlight SocialIcons override: the same links as the landing's header: the docs, sign-in
+// on the hosted service and the repository.
 import { Icon } from '@astrojs/starlight/components';
 import { brand } from '@/brand';
 import { chrome } from '@/i18n/chrome';
@@ -10,6 +10,7 @@ const lang = langOf(Astro.locals.starlightRoute.lang);
 ---
 
 <a class="fx-head-link" href={localePath(lang, '/introduction/')}>{chrome[lang].docs}</a>
+<a class="fx-head-link" href={brand.dashboard}>{chrome[lang].signIn}</a>
 <a class="fx-head-link fx-head-icon" href={brand.repo} rel="me">
   <Icon name="github" size="1.15rem" />
   <span class="sr-only">GitHub</span>

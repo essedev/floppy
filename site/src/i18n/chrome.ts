@@ -1,5 +1,5 @@
-// Strings of the site's header controls (theme switch, language selector, docs link, menu
-// button), shared by the landing's own header and Starlight's on the docs pages.
+// Strings of the site's header controls (theme switch, language selector, docs and sign-in
+// links, menu button), shared by the landing's own header and Starlight's on the docs pages.
 
 import type { Lang } from '@/brand';
 
@@ -15,6 +15,8 @@ export interface ChromeStrings {
   languageName: string;
   /** Header link to the docs. */
   docs: string;
+  /** Header link to the hosted service's admin web. */
+  signIn: string;
   /** Accessible name of the docs pages' menu button. */
   menu: string;
   /** The landing's skip link. */
@@ -31,6 +33,7 @@ export const chrome: Record<Lang, ChromeStrings> = {
     languageLabel: 'Language',
     languageName: 'English',
     docs: 'Docs',
+    signIn: 'Sign in',
     menu: 'Menu',
     nav: 'Main',
     skip: 'Skip to content',
@@ -41,6 +44,7 @@ export const chrome: Record<Lang, ChromeStrings> = {
     languageLabel: 'Lingua',
     languageName: 'Italiano',
     docs: 'Documentazione',
+    signIn: 'Accedi',
     menu: 'Menu',
     nav: 'Principale',
     skip: 'Vai al contenuto',

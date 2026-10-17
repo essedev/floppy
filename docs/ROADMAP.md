@@ -30,6 +30,6 @@ One shared disk, one or two weeks of real work in CapCut, on the first instance.
 ## 5. Alongside
 
 - **The JuiceFS patch upstream**: propose the read replica and the optimistic transactions to JuiceFS, so the fork does not have to live forever.
-- **Site**: Astro and Starlight in `site/` (DECISIONS #13), with the domain once there is one, and links to sign in to the hosted web and to download the Mac app.
+- **Site**: Astro and Starlight in `site/` (DECISIONS #13), with the domain once there is one. The header links to sign in on the hosted web (`brand.dashboard`, `app.` on the domain); the Mac app is installed through the Homebrew cask on the landing (DECISIONS #10).
 - **Comparison with SpaceFS**: their 7-day trial on the same project as the pilot.
 - **At the end of the tests**: revoke the test S3 key and empty the test bucket.

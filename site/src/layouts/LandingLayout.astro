@@ -66,7 +66,8 @@ const fonts = [
         <Wordmark href={localePath(lang, '/')} />
         <nav class="fx-header-nav" aria-label={t.nav}>
           <a class="fx-head-link fx-head-docs" href={localePath(lang, '/introduction/')}>{t.docs}</a>
-          <a class="fx-head-link" href={brand.repo}>
+          <a class="fx-head-link" href={brand.dashboard}>{t.signIn}</a>
+          <a class="fx-head-link fx-head-repo" href={brand.repo}>
             <Icon name="github" size="1.15rem" />
             <span class="sr-only">GitHub</span>
           </a>
@@ -165,6 +166,7 @@ const fonts = [
     font-size: 0.9375rem;
     font-weight: 600;
     text-decoration: none;
+    white-space: nowrap;
   }
   .fx-head-link:hover {
     color: var(--ink);
@@ -174,8 +176,11 @@ const fonts = [
     outline-offset: 3px;
     border-radius: 4px;
   }
+  /* On a phone the header keeps sign-in; the docs and the repository are linked further down
+     the page. */
   @media (max-width: 40rem) {
-    .fx-head-docs {
+    .fx-head-docs,
+    .fx-head-repo {
       display: none;
     }
     .fx-header-controls {

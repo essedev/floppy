@@ -5,6 +5,8 @@
 
 const name = 'Floppy';
 const slug = name.toLowerCase();
+/** TODO: the domain depends on the final name. `.example` is reserved and resolves nowhere. */
+const domain = 'floppy.example';
 
 /** Name, derived forms, links and tagline of the product. */
 export const brand = {
@@ -21,8 +23,10 @@ export const brand = {
   /** What `brew install --cask` takes: the cask through its tap. */
   caskRef: `essedev/tap/${slug}`,
   repo: 'https://github.com/essedev/fluix',
-  /** TODO: the domain depends on the final name. `.example` is reserved and resolves nowhere. */
-  domain: 'floppy.example',
+  domain,
+  /** The hosted service's admin web (web/), where the header's sign-in link goes. A
+   *  self-hosted team signs in on its own instance's address instead. */
+  dashboard: `https://app.${domain}`,
   tagline: {
     en: 'A shared disk for big files, right in the Finder.',
     it: 'Un disco condiviso per file grandi, direttamente nel Finder.',
