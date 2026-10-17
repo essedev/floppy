@@ -7,7 +7,7 @@ paths:
 Commands, from `server/` (secrets in `server/.env`, copied from `.env.example`, outside git):
 
 ```bash
-docker compose up -d db valkey                      # only the stores, for the tests
+docker compose --profile test up -d db meta-test-1 meta-test-2 meta-test-3   # the stores for the tests (the fixtures empty meta-test-*; meta-1..3 are the dev pool)
 docker compose up -d --build                        # full stack: migrates, bootstraps, serves on :4507
 uv run --env-file .env pytest
 uv run --env-file .env floppy-server migrate|bootstrap --from-env|reconcile|reencrypt

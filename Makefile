@@ -24,7 +24,7 @@ app: ## Floppy.app with the engine inside and the cask's DMG, in dist/app (needs
 web-check: ## The admin web: typecheck, lint and build
 	cd web && pnpm install --frozen-lockfile && pnpm typecheck && pnpm lint && pnpm build
 
-server-check: ## The control plane: format, lint, types and tests (needs `docker compose up -d db valkey` in server/)
+server-check: ## The control plane: format, lint, types and tests (needs `docker compose --profile test up -d db meta-test-1 meta-test-2 meta-test-3` in server/)
 	cd server && uv run ruff format --check . && uv run ruff check . && uv run mypy && uv run --env-file .env pytest
 
 site-check: ## The site: Astro check and build
