@@ -1,5 +1,5 @@
 SCRIPTS := macos/bin/floppy macos/install.sh macos/vm/guest/guest-install.sh \
-	macos/vm/guest/floppy-mount macos/vm/guest/floppy-disks scripts/package.sh scripts/build-engine.sh scripts/build-app.sh \
+	macos/vm/guest/floppy-mount macos/vm/guest/floppy-disks macos/tests/engine.sh scripts/package.sh scripts/build-engine.sh scripts/build-app.sh \
 	scripts/release-app.sh packaging/homebrew/render.sh spike/setup.sh spike/bench.sh spike/data-bench.sh spike/meta-bench.sh spike/meta-access.sh spike/meta-tls.sh \
 	spike/juicefs-replica/build.sh spike/juicefs-replica/test.sh \
 	spike/drive/entrypoint.sh spike/drive/perdisk-entrypoint.sh app/scripts/render-marks.sh server/docker/db-init.sh
@@ -13,6 +13,9 @@ lint: ## bash -n, shellcheck and the prose language check
 	@for f in $(SCRIPTS); do bash -n "$$f" || exit 1; done
 	shellcheck $(SCRIPTS)
 	python3 scripts/check-prose.py
+
+engine-test: ## The floppy command without a VM: engine lock, disks clear (fake limactl)
+	macos/tests/engine.sh
 
 app-check: ## The menu bar app: typecheck and build, frontend and Rust tests, clippy
 	cd app && pnpm install --frozen-lockfile && pnpm build && pnpm test
@@ -30,6 +33,6 @@ server-check: ## The control plane: format, lint, types and tests (needs `docker
 site-check: ## The site: Astro check and build
 	cd site && pnpm install --frozen-lockfile && pnpm check && pnpm build
 
-check: lint app-check web-check server-check site-check ## The full quality pass
+check: lint engine-test app-check web-check server-check site-check ## The full quality pass
 
-.PHONY: help lint app-check app web-check server-check site-check check
+.PHONY: help lint engine-test app-check app web-check server-check site-check check

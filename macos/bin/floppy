@@ -33,7 +33,7 @@ RESTART_STAMP="$FLOPPY_HOME/last-vm-restart"
 DISKS_FILE="$FLOPPY_HOME/disks.json"
 # The password between this Mac and its own VM, made by setup.
 SMB_SECRET="$FLOPPY_HOME/smb-password"
-LOCK_DIR="$FLOPPY_HOME/lock"
+LOCK_FILE="$FLOPPY_HOME/engine.lock"
 # How often the agent checks the VM, the share and the Mac's free space.
 TICK_SECONDS=120
 
@@ -62,8 +62,9 @@ trim_log() {
   fi
 }
 # fd 3 is closed for limactl: `lima start` leaves a host agent running in the
-# background, which would keep the terminal of the install open forever.
-lima() { trim_log; "$LIMACTL" "$@" 3>&-; }
+# background, which would keep the terminal of the install open forever. fd 9,
+# the engine lock, likewise: the host agent would hold the lock for good.
+lima() { trim_log; "$LIMACTL" "$@" 3>&- 9>&-; }
 vm_status() { lima list --format '{{.Status}}' "$VM" 2>/dev/null || true; }
 in_vm() { lima shell --workdir / "$VM" "$@"; }
 config() { grep "^$1=" "$FLOPPY_HOME/config.env" | cut -d= -f2- || true; }
@@ -105,24 +106,16 @@ smb_password() {
 
 # One engine command at a time: `tick` from launchd and the app's `disks
 # apply` must not start and stop the same units. tick skips its round instead
-# of waiting.
+# of waiting. The lock is the kernel's (flock on fd 9, through lockf): it
+# dies with the process that holds it, so there is no stale lock to take
+# over and no race between two processes taking over the same one.
 take_lock() {
-  local pid waited=0
   mkdir -p "$FLOPPY_HOME"
-  while ! mkdir "$LOCK_DIR" 2>/dev/null; do
-    pid=$(cat "$LOCK_DIR/pid" 2>/dev/null || true)
-    if { [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null; } \
-        || { [ -z "$pid" ] && [ -n "$(find "$LOCK_DIR" -maxdepth 0 -mmin +1 2>/dev/null)" ]; }; then
-      rm -rf "$LOCK_DIR"
-      continue
-    fi
-    [ "$1" = try ] && return 1
-    waited=$((waited + 1))
-    [ "$waited" -lt 900 ] || die "another floppy command is still running (pid ${pid:-?})"
-    sleep 1
-  done
-  echo $$ > "$LOCK_DIR/pid"
-  trap 'rm -rf "$LOCK_DIR"' EXIT
+  # The lock directory of an earlier version, if a crash left it behind.
+  if [ -d "$FLOPPY_HOME/lock" ]; then rm -rf "${FLOPPY_HOME:?}/lock"; fi
+  exec 9>>"$LOCK_FILE"
+  if [ "$1" = try ]; then /usr/bin/lockf -s -t 0 9; return $?; fi
+  /usr/bin/lockf -s -t 900 9 || die "another floppy command is still running"
 }
 
 # Where macOS mounted the share. Usually /Volumes/Floppy, but macOS picks
@@ -220,11 +213,13 @@ size_stopped_vm() {
     || log "floppy: could not change the VM's memory, it keeps $(gib "$have") GiB"
 }
 
+# With "keep" the VM starts with the memory it has (a revoked device being
+# cleared needs no resize).
 start_vm() {
   case "$(vm_status)" in
     Running) ;;
     "") die "VM not set up, run: floppy setup" ;;
-    *) size_stopped_vm
+    *) [ "${1:-}" = keep ] || size_stopped_vm
        log "Starting the VM..."
        # A start that cannot finish (a download that never resolves) gives up
        # instead of hanging the install.
@@ -530,14 +525,29 @@ cmd_setup_quiet() { cmd_setup >&3; }
 
 # A revoked device: every team disk unmounted, its cache and replica deleted
 # in the VM, the disks file gone. Nothing in the buckets is touched.
+# A stopped VM is started for it, because its secrets, caches and enabled
+# units would come back at the next start, and stopped again afterwards. A VM
+# that cannot be cleaned (it does not start or does not answer) fails the
+# command and keeps the disks file, so the app retries. Without a VM there is
+# nothing to clean.
 disks_clear() {
+  local st was_stopped=""
+  st=$(vm_status)
+  if [ -n "$st" ]; then
+    if [ "$st" != Running ]; then
+      was_stopped=1
+      start_vm keep
+    fi
+    vm_healthy || die "the VM is not responding: the disks are not cleared yet, run floppy disks clear again"
+  fi
   # The share first, by force: the device has no access left, and the open
   # SMB files hold the VM's mounts.
   unmount_share
-  if [ "$(vm_status)" = Running ] && vm_healthy; then
+  if [ -n "$st" ]; then
     in_vm sudo /usr/local/sbin/floppy-disks clear >/dev/null
   fi
   rm -f "$DISKS_FILE"
+  if [ -n "$was_stopped" ]; then lima stop "$VM" >>"$LIMA_LOG" 2>&1 || true; fi
   printf '{"version":1,"cleared":true}\n'
 }
 
