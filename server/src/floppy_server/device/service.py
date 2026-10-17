@@ -106,12 +106,17 @@ class RegisterResponse(CamelModel):
 
 class DeviceConfig(CamelModel):
     """
-    Everything the app needs to mount, no secret. `s3AccessKeyTail` is the tail of the
-    device's own key (managed), to check that the one in the Keychain is current.
+    Everything the app needs to mount, no secret. `valkeyUsername` is the device's user on
+    every instance (its password came once, at registration). `s3AccessKeyTail` is the tail of
+    the device's own key (managed), to check that the one in the Keychain is current.
+    `metaCa` is the PEM of the private CA the disks' metadata TLS uses, to trust it; null
+    when the certificate is public.
     """
 
+    valkey_username: str
     storage_mode: StorageMode
     s3_access_key_tail: str | None
+    meta_ca: str | None
     organization: OrganizationRef
     user: UserRef
     disks: list[DiskConfig]
@@ -324,8 +329,10 @@ async def config(ctx: Context, token: str) -> DeviceConfig:
             ).scalar_one_or_none()
         organization, user = _refs(org, await _owner(db, device))
         return DeviceConfig(
+            valkey_username=device.valkey_username,
             storage_mode=org.storage_mode,
             s3_access_key_tail=tail,
+            meta_ca=ctx.settings.meta_ca,
             organization=organization,
             user=user,
             disks=await _disks(db, device),

@@ -131,6 +131,10 @@ class Settings(BaseSettings):
     # `url|admin_url`), all with the admin credentials below; `fake` invents them.
     meta_backend: Literal["pool", "fake"] = "pool"
     meta_pool: str = ""
+    # The private CA the disks' metadata TLS is signed by, for devices to trust (a PEM, or a
+    # path to one); unset when the certificate is public (Let's Encrypt). Not a secret.
+    meta_ca_pem: str | None = None
+    meta_ca_file: str | None = None
     valkey_admin_username: str | None = None
     valkey_admin_password: SecretStr | None = None
 
@@ -187,9 +191,31 @@ class Settings(BaseSettings):
                 fakes.append("meta")
             if fakes:
                 raise ValueError(f"fake backends are for development and tests only: {fakes}")
+        if self.meta_ca_pem and self.meta_ca_file:
+            raise ValueError("set FLOPPY_META_CA_PEM or FLOPPY_META_CA_FILE, not both")
+        _ = self.meta_ca
         if not self.public_url.startswith(("http://", "https://")):
             raise ValueError("FLOPPY_PUBLIC_URL must be an http(s) address")
         return self
+
+    @cached_property
+    def meta_ca(self) -> str | None:
+        """The PEM of the metadata TLS's private CA, read and checked once; None when public."""
+        pem = self.meta_ca_pem
+        if self.meta_ca_file:
+            try:
+                with open(self.meta_ca_file, encoding="ascii") as handle:
+                    pem = handle.read()
+            except (OSError, UnicodeDecodeError) as error:
+                raise ValueError(
+                    f"FLOPPY_META_CA_FILE cannot be read: {type(error).__name__}"
+                ) from error
+        if not pem or not pem.strip():
+            return None
+        text = pem.replace("\\n", "\n").strip() + "\n"
+        if "-----BEGIN CERTIFICATE-----" not in text or "PRIVATE KEY" in text:
+            raise ValueError("the metadata CA must be PEM certificates only, no private key")
+        return text
 
     @cached_property
     def key_ring(self) -> dict[int, bytes]:

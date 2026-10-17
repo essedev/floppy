@@ -5,8 +5,11 @@ disk's instance, and the device token's refusals.
 
 import hashlib
 from datetime import timedelta
+from pathlib import Path
 
 import httpx
+import pytest
+from pydantic import ValidationError
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncEngine
 
@@ -14,7 +17,7 @@ from floppy_server.background import expire_stale_rows, reconcile_instances
 from floppy_server.context import Context, utcnow
 from floppy_server.crypto import token_hash
 from floppy_server.models import AuditEvent, Device, KeyExposure, MetaUser, SignInRequest
-from tests.conftest import ClientFactory, Org
+from tests.conftest import ClientFactory, Org, make_settings
 from tests.helpers import (
     code_in,
     create_disk,
@@ -58,8 +61,10 @@ async def test_the_bootstrap_registers_a_user_on_each_visible_disk(
 
     config = (await app.get("/device/config", headers=device.auth)).json()
     assert config == {
+        "valkeyUsername": device.valkey_user,
         "storageMode": "manual",
         "s3AccessKeyTail": None,
+        "metaCa": None,
         "organization": {"id": str(org.id), "name": "Studio studio-a"},
         "user": {"email": org.admin_email, "name": "Giulia"},
         "disks": [
@@ -512,3 +517,34 @@ async def test_device_endpoints_need_a_valid_token(client: httpx.AsyncClient, or
     ):
         assert (response.status_code, response.json()["code"]) == (401, "unauthorized")
         assert response.json()["details"] == {"reason": "token_unknown"}
+
+
+CA_PEM = "-----BEGIN CERTIFICATE-----\nMIIBfakeCA\n-----END CERTIFICATE-----"
+
+
+async def test_the_configuration_carries_the_metadata_ca_when_private(
+    org: Org, ctx: Context, admin: httpx.AsyncClient, clients: ClientFactory, tmp_path: Path
+) -> None:
+    app = clients()
+    device = await enrol_device(app, admin, ctx, org.admin_email)
+    # As the environment gives it: one line, newlines escaped.
+    ctx.settings = make_settings(meta_ca_pem=CA_PEM.replace("\n", "\\n"))
+    config = (await app.get("/device/config", headers=device.auth)).json()
+    assert config["metaCa"] == CA_PEM + "\n"
+    assert config["valkeyUsername"] == device.valkey_user
+    path = tmp_path / "meta-ca.pem"
+    path.write_text(CA_PEM + "\n")
+    ctx.settings = make_settings(meta_ca_file=str(path))
+    assert (await app.get("/device/config", headers=device.auth)).json()["metaCa"] == CA_PEM + "\n"
+
+
+def test_the_metadata_ca_is_checked_at_startup(tmp_path: Path) -> None:
+    with pytest.raises(ValidationError, match="certificates only"):
+        make_settings(meta_ca_pem="-----BEGIN PRIVATE KEY-----\nx\n-----END PRIVATE KEY-----")
+    with pytest.raises(ValidationError, match="certificates only"):
+        make_settings(meta_ca_pem="not a certificate")
+    with pytest.raises(ValidationError, match="cannot be read"):
+        make_settings(meta_ca_file=str(tmp_path / "missing.pem"))
+    with pytest.raises(ValidationError, match="not both"):
+        make_settings(meta_ca_pem=CA_PEM, meta_ca_file=str(tmp_path / "x.pem"))
+    assert make_settings(meta_ca_pem="  ").meta_ca is None
