@@ -1,16 +1,27 @@
 #!/bin/bash
 # Floppy for macOS: runs JuiceFS in a small Lima VM and mounts it in the
 # Finder over SMB. Everything lives in ~/.floppy; no admin rights needed.
+#
+# Two modes. With ~/.floppy/config.env, the single-user volume of the test zip
+# (metadata in SQLite inside the VM). Without it, the team version: the menu
+# bar app writes ~/.floppy/disks.json and pipes the secrets to `floppy disks
+# apply`, and each disk is a folder of /Volumes/Floppy with its own Valkey
+# replica and JuiceFS mount in the VM (docs/ARCHITECTURE.md, "Team disks").
 set -eEuo pipefail
 
 FLOPPY_HOME="${FLOPPY_HOME:-$HOME/.floppy}"
 export LIMA_HOME="$FLOPPY_HOME/vms"
 LIMACTL="$FLOPPY_HOME/lima/bin/limactl"
-VM=floppy
+# Another name only for development VMs next to a real install: it also
+# changes the launchd agent and the nsmb.conf block, so the two never meet.
+VM="${FLOPPY_VM:-floppy}"
 SHARE=Floppy
 AGENT_LABEL=dev.esse.floppy
+[ "$VM" = floppy ] || AGENT_LABEL="dev.esse.floppy.$VM"
 AGENT_PLIST="$HOME/Library/LaunchAgents/$AGENT_LABEL.plist"
 NSMB_CONF="$HOME/Library/Preferences/nsmb.conf"
+NSMB_BEGIN="# $VM begin"
+NSMB_END="# $VM end"
 LIMA_LOG="$FLOPPY_HOME/lima.log"
 # Written once setup has completed; a VM without it is a leftover of a failed
 # install and holds no data.
@@ -18,6 +29,11 @@ INSTALLED_MARK="$FLOPPY_HOME/installed"
 IMAGE="$FLOPPY_HOME/vm/debian.qcow2"
 STOPPED_FLAG="$FLOPPY_HOME/stopped"
 RESTART_STAMP="$FLOPPY_HOME/last-vm-restart"
+# The team version's input, written by the app (no secrets in it).
+DISKS_FILE="$FLOPPY_HOME/disks.json"
+# The password between this Mac and its own VM, made by setup.
+SMB_SECRET="$FLOPPY_HOME/smb-password"
+LOCK_DIR="$FLOPPY_HOME/lock"
 # How often the agent checks the VM, the share and the Mac's free space.
 TICK_SECONDS=120
 
@@ -54,6 +70,61 @@ config() { grep "^$1=" "$FLOPPY_HOME/config.env" | cut -d= -f2- || true; }
 notify() {
   /usr/bin/osascript -e "display notification \"$1\" with title \"Floppy\"" >/dev/null 2>&1 || true
 }
+
+# The team version runs where there is no single-user config.
+team() { [ ! -f "$FLOPPY_HOME/config.env" ]; }
+
+# A value of the disks file, or empty. plutil reads JSON and is on every Mac.
+disks_value() {
+  [ -f "$DISKS_FILE" ] || return 0
+  /usr/bin/plutil -extract "$1" raw -o - "$DISKS_FILE" 2>/dev/null || true
+}
+# The Mac-side settings: config.env in the single-user mode, the disks file in
+# the team version (the app's Settings write them there).
+setting() {
+  if ! team; then config "$1"; return 0; fi
+  case "$1" in
+    RESERVE_MB) disks_value reserve_mb ;;
+    CACHE_SIZE_MB) disks_value cache_max_mb ;;
+  esac
+}
+# How many disks of the file are enabled.
+enabled_disks() {
+  local n i count=0
+  n=$(disks_value disks)
+  case "$n" in ""|*[!0-9]*) echo 0; return 0 ;; esac
+  for ((i = 0; i < n; i++)); do
+    [ "$(disks_value "disks.$i.enabled")" = true ] && count=$((count + 1))
+  done
+  echo "$count"
+}
+
+smb_password() {
+  if team; then cat "$SMB_SECRET" 2>/dev/null || true; else config SMB_PASSWORD; fi
+}
+
+# One engine command at a time: `tick` from launchd and the app's `disks
+# apply` must not start and stop the same units. tick skips its round instead
+# of waiting.
+take_lock() {
+  local pid waited=0
+  mkdir -p "$FLOPPY_HOME"
+  while ! mkdir "$LOCK_DIR" 2>/dev/null; do
+    pid=$(cat "$LOCK_DIR/pid" 2>/dev/null || true)
+    if { [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null; } \
+        || { [ -z "$pid" ] && [ -n "$(find "$LOCK_DIR" -maxdepth 0 -mmin +1 2>/dev/null)" ]; }; then
+      rm -rf "$LOCK_DIR"
+      continue
+    fi
+    [ "$1" = try ] && return 1
+    waited=$((waited + 1))
+    [ "$waited" -lt 900 ] || die "another floppy command is still running (pid ${pid:-?})"
+    sleep 1
+  done
+  echo $$ > "$LOCK_DIR/pid"
+  trap 'rm -rf "$LOCK_DIR"' EXIT
+}
+
 # Where macOS mounted the share. Usually /Volumes/Floppy, but macOS picks
 # Floppy-1 and so on when the name is taken, so it is never assumed.
 mount_point() {
@@ -85,7 +156,8 @@ mount_alive() {
   return 1
 }
 
-# Maps a path under the Finder volume to the same path inside the VM.
+# Maps a path under the Finder volume to the same path inside the VM. In the
+# team version the first folder is the disk, and the disk is mounted there too.
 vm_path() {
   local p mp
   mp=$(mount_point)
@@ -101,25 +173,59 @@ vm_path() {
 # with the cache, and JuiceFS's own free-space check only looks inside the VM.
 # When the Mac fills up the file cannot grow and the VM's disk breaks.
 mac_free_mb() { df -m "$HOME" | awk 'NR == 2 {print $4}'; }
-reserve_mb() { local r; r=$(config RESERVE_MB); echo "${r:-20480}"; }
+reserve_mb() { local r; r=$(setting RESERVE_MB); echo "${r:-20480}"; }
 cache_used_mb() { in_vm sudo du -sm /var/cache/floppy 2>/dev/null | cut -f1 || echo 0; }
 
 # The cache limit: half of what the Mac can spare above the reserve, capped by
-# CACHE_SIZE_MB. Space the cache already holds counts as spare.
+# CACHE_SIZE_MB. Space the cache already holds counts as spare. In the team
+# version it is split among the mounts, since JuiceFS enforces --cache-size
+# per mount.
 cache_limit_mb() {
   local used="${1:-0}" max spare limit
-  max=$(config CACHE_SIZE_MB); max="${max:-102400}"
+  max=$(setting CACHE_SIZE_MB); max="${max:-102400}"
   spare=$(( $(mac_free_mb) + used - $(reserve_mb) ))
   limit=$(( spare / 2 ))
   [ "$limit" -gt "$max" ] && limit=$max
   echo "$limit"
 }
 
+# The VM's memory in the team version: 1 GiB holds one disk (JuiceFS peaks
+# near 420 MB copying), and each more disk adds about 50 MB at rest (a replica
+# of 12-15 MB, a mount of 34-39 MB). Rounded to quarter GiB, at most 4 GiB.
+vm_memory_mib() {
+  local n="$1" m
+  [ "$n" -gt 1 ] || n=1
+  m=$(( 1024 + 64 * (n - 1) ))
+  m=$(( (m + 255) / 256 * 256 ))
+  [ "$m" -le 4096 ] || m=4096
+  echo "$m"
+}
+vm_memory_now() {
+  local b
+  b=$(lima list --format '{{.Memory}}' "$VM" 2>/dev/null || true)
+  case "$b" in ""|*[!0-9]*) echo "" ;; *) echo $(( b / 1048576 )) ;; esac
+}
+gib() { awk -v m="$1" 'BEGIN { printf "%g", m / 1024 }'; }
+
+# `memory` in lima.yaml applies only at creation: an existing VM changes it
+# here, and only while it is stopped, so a disk in use is never cut off for it.
+size_stopped_vm() {
+  team || return 0
+  local want have
+  want=$(vm_memory_mib "$(enabled_disks)")
+  have=$(vm_memory_now)
+  [ -n "$have" ] && [ "$have" != "$want" ] || return 0
+  log "Giving the VM $(gib "$want") GiB of memory for $(enabled_disks) disks..."
+  lima edit --tty=false --memory="$(gib "$want")" "$VM" >>"$LIMA_LOG" 2>&1 \
+    || log "floppy: could not change the VM's memory, it keeps $(gib "$have") GiB"
+}
+
 start_vm() {
   case "$(vm_status)" in
     Running) ;;
     "") die "VM not set up, run: floppy setup" ;;
-    *) log "Starting the VM..."
+    *) size_stopped_vm
+       log "Starting the VM..."
        # A start that cannot finish (a download that never resolves) gives up
        # instead of hanging the install.
        lima start --tty=false --timeout=5m "$VM" >>"$LIMA_LOG" 2>&1 ;;
@@ -131,11 +237,11 @@ start_vm() {
 # I/O error. Raise the limit for the VM's address only, in the user's
 # nsmb.conf, inside a block this script owns.
 set_smb_timeout() {
-  local ip="$1" begin="# floppy begin" end="# floppy end" rest=""
-  [ -f "$NSMB_CONF" ] && rest=$(sed "/^$begin\$/,/^$end\$/d" "$NSMB_CONF")
+  local ip="$1" rest=""
+  [ -f "$NSMB_CONF" ] && rest=$(sed "/^$NSMB_BEGIN\$/,/^$NSMB_END\$/d" "$NSMB_CONF")
   {
     [ -n "$rest" ] && printf '%s\n' "$rest"
-    printf '%s\n[%s]\nmax_resp_timeout=600\n%s\n' "$begin" "$ip" "$end"
+    printf '%s\n[%s]\nmax_resp_timeout=600\n%s\n' "$NSMB_BEGIN" "$ip" "$NSMB_END"
   } > "$NSMB_CONF.tmp"
   mv "$NSMB_CONF.tmp" "$NSMB_CONF"
 }
@@ -182,7 +288,7 @@ mount_share() {
     rmdir "/Volumes/$SHARE" 2>/dev/null || true
     sleep 1
   done
-  /usr/bin/osascript -e "mount volume \"smb://drive:$(config SMB_PASSWORD)@$ip/$SHARE\"" >/dev/null
+  /usr/bin/osascript -e "mount volume \"smb://drive:$(smb_password)@$ip/$SHARE\"" >/dev/null
   is_mounted || die "mount failed"
   if [ "$(mount_point)" != "/Volumes/$SHARE" ]; then
     log "$(date '+%F %T') warning: mounted at $(mount_point), CapCut links to /Volumes/$SHARE will break"
@@ -191,8 +297,16 @@ mount_share() {
   /usr/bin/mdutil -i off "$(mount_point)" >/dev/null 2>&1 || true
 }
 
+# The share is mounted when it has something to show: always for the
+# single-user volume, once a disk is enabled for the team version.
+want_share() { ! team || [ "$(enabled_disks)" -gt 0 ]; }
+
 # Drops the whole cache and gives the space back to the Mac.
 evict_all() {
+  if team; then
+    in_vm sudo /usr/local/sbin/floppy-disks evict-all >/dev/null 2>&1 || true
+    return 0
+  fi
   in_vm sudo juicefs warmup --evict /mnt/drive >/dev/null 2>&1 || true
   in_vm sudo fstrim / >/dev/null 2>&1 || true
 }
@@ -207,6 +321,11 @@ install_agent() {
   <key>Label</key><string>$AGENT_LABEL</string>
   <key>ProgramArguments</key>
   <array><string>$FLOPPY_HOME/bin/floppy</string><string>tick</string></array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>FLOPPY_HOME</key><string>$FLOPPY_HOME</string>
+    <key>FLOPPY_VM</key><string>$VM</string>
+  </dict>
   <key>RunAtLoad</key><true/>
   <key>StartInterval</key><integer>$TICK_SECONDS</integer>
   <key>StandardOutPath</key><string>$FLOPPY_HOME/agent.log</string>
@@ -224,7 +343,7 @@ EOF
 discard_failed_vm() {
   [ -n "$(vm_status)" ] || return 0
   [ -f "$INSTALLED_MARK" ] && return 0
-  if [ "$(vm_status)" = Running ] && vm_healthy && in_vm test -f /etc/floppy/config.env; then
+  if ! team && [ "$(vm_status)" = Running ] && vm_healthy && in_vm test -f /etc/floppy/config.env; then
     touch "$INSTALLED_MARK"
     return 0
   fi
@@ -233,7 +352,7 @@ discard_failed_vm() {
   lima delete --force "$VM" >>"$LIMA_LOG" 2>&1 || true
   # The failed attempt may have formatted its volume in the bucket: start
   # from a new name so the new metadata does not meet the old data.
-  if grep -qE '^VOLUME_NAME=floppy-.+-[0-9a-f]{6}$' "$FLOPPY_HOME/config.env"; then
+  if ! team && grep -qE '^VOLUME_NAME=floppy-.+-[0-9a-f]{6}$' "$FLOPPY_HOME/config.env"; then
     sed -i '' -E "s/^(VOLUME_NAME=floppy-.+-)[0-9a-f]{6}\$/\1$(openssl rand -hex 3)/" "$FLOPPY_HOME/config.env"
   fi
 }
@@ -241,17 +360,33 @@ discard_failed_vm() {
 # Debian ships inside the package: some office DNS servers do not resolve
 # cloud.debian.org, and the download was the first thing to fail for a tester.
 create_vm() {
-  local disk_gib="$1" set_image=()
+  local disk_gib="$1" set_image=() memory=()
   if [ -f "$IMAGE" ]; then
     set_image=(--set ".images = [{\"location\": \"$IMAGE\", \"arch\": \"aarch64\", \"digest\": \"$(cat "$IMAGE.digest")\"}]")
   fi
+  if team; then memory=(--memory="$(gib "$(vm_memory_mib "$(enabled_disks)")")"); fi
   log "Creating the VM (first time, a few minutes)..."
-  lima create --name="$VM" --tty=false --disk="$disk_gib" ${set_image[@]+"${set_image[@]}"} "$FLOPPY_HOME/vm/lima.yaml" >>"$LIMA_LOG" 2>&1
+  lima create --name="$VM" --tty=false --disk="$disk_gib" ${memory[@]+"${memory[@]}"} \
+    ${set_image[@]+"${set_image[@]}"} "$FLOPPY_HOME/vm/lima.yaml" >>"$LIMA_LOG" 2>&1
+}
+
+# Copies the guest files into the VM and runs the install; extra arguments
+# reach it as its stdin (the team version's SMB password).
+install_guest() {
+  in_vm rm -rf /tmp/floppy-guest
+  lima copy -r "$FLOPPY_HOME/vm/guest" "$VM:/tmp/floppy-guest"
+  if [ -n "${1:-}" ]; then lima copy "$1" "$VM:/tmp/floppy-guest/config.env"; fi
+  if [ -n "${2:-}" ]; then
+    printf '%s\n' "$2" | in_vm sudo bash /tmp/floppy-guest/guest-install.sh >>"$LIMA_LOG" 2>&1
+  else
+    in_vm sudo bash /tmp/floppy-guest/guest-install.sh >>"$LIMA_LOG" 2>&1 </dev/null
+  fi
+  in_vm rm -rf /tmp/floppy-guest
 }
 
 cmd_setup() {
-  [ -f "$FLOPPY_HOME/config.env" ] || die "missing $FLOPPY_HOME/config.env"
   local used=0 limit disk_gib conf
+  if ! team; then [ -f "$FLOPPY_HOME/config.env" ] || die "missing $FLOPPY_HOME/config.env"; fi
   discard_failed_vm
   if [ -n "$(vm_status)" ]; then
     start_vm
@@ -268,28 +403,44 @@ cmd_setup() {
     create_vm "$disk_gib"
     start_vm
   fi
-  log "Installing the drive in the VM (cache up to $(( limit / 1024 )) GB)..."
-  conf=$(mktemp)
-  sed '/^CACHE_SIZE_MB=/d' "$FLOPPY_HOME/config.env" > "$conf"
-  echo "CACHE_SIZE_MB=$limit" >> "$conf"
-  in_vm rm -rf /tmp/floppy-guest
-  lima copy -r "$FLOPPY_HOME/vm/guest" "$VM:/tmp/floppy-guest"
-  lima copy "$conf" "$VM:/tmp/floppy-guest/config.env"
-  rm -f "$conf"
-  in_vm sudo bash /tmp/floppy-guest/guest-install.sh >>"$LIMA_LOG" 2>&1
-  in_vm rm -rf /tmp/floppy-guest
+  if team; then
+    # The VM is ready before sign-in: the disks come with `floppy disks apply`.
+    if [ ! -s "$SMB_SECRET" ]; then
+      (umask 077; openssl rand -hex 12 > "$SMB_SECRET")
+    fi
+    log "Installing Floppy in the VM..."
+    install_guest "" "$(cat "$SMB_SECRET")"
+  else
+    log "Installing the drive in the VM (cache up to $(( limit / 1024 )) GB)..."
+    conf=$(mktemp)
+    sed '/^CACHE_SIZE_MB=/d' "$FLOPPY_HOME/config.env" > "$conf"
+    echo "CACHE_SIZE_MB=$limit" >> "$conf"
+    install_guest "$conf"
+    rm -f "$conf"
+  fi
   rm -f "$STOPPED_FLAG"
   install_agent
-  mount_share
   touch "$INSTALLED_MARK"
-  log "Ready: $(mount_point)"
+  if team; then
+    # Disks applied before keep their secrets in the VM: bring them back.
+    if [ -f "$DISKS_FILE" ] && in_vm sudo test -f /etc/floppy/team/secrets.json; then
+      disks_apply >/dev/null
+    else
+      log "Installed; the disks are set up after sign-in."
+      return 0
+    fi
+  else
+    mount_share
+  fi
+  if is_mounted; then log "Ready: $(mount_point)"; fi
 }
 
 cmd_start() {
   rm -f "$STOPPED_FLAG"
   start_vm
   vm_healthy || die "the VM is not responding, run: floppy status"
-  mount_share
+  want_share && mount_share
+  return 0
 }
 
 # Run by the launchd agent at login and every TICK_SECONDS: brings the VM and
@@ -312,10 +463,14 @@ cmd_tick() {
     start_vm
     vm_healthy || { notify "Il disco non riparte. Scrivi a chi ti ha installato Floppy."; return 0; }
   fi
+  if team; then
+    # Samba and every enabled disk that is not mounted; a mounted disk is
+    # never touched, even if the disks file asks for a change.
+    in_vm sudo /usr/local/sbin/floppy-disks tick >>"$LIMA_LOG" 2>&1 || true
   # JuiceFS can restart on its own; Samba then serves a dead path until it is
   # restarted as well.
   # One unit per call: with several units is-active succeeds if any is active.
-  if ! in_vm systemctl is-active --quiet floppy-mount || ! in_vm systemctl is-active --quiet smbd; then
+  elif ! in_vm systemctl is-active --quiet floppy-mount || ! in_vm systemctl is-active --quiet smbd; then
     log "$(date '+%F %T') drive services down, restarting them"
     in_vm sudo systemctl restart floppy-mount smbd >>"$LIMA_LOG" 2>&1 || true
   fi
@@ -326,7 +481,8 @@ cmd_tick() {
     notify "Spazio quasi finito sul Mac: ho liberato le copie locali del disco. I file restano online."
     evict_all
   fi
-  mount_share keep
+  want_share && mount_share keep
+  return 0
 }
 
 cmd_stop() {
@@ -334,6 +490,69 @@ cmd_stop() {
   unmount_share
   [ "$(vm_status)" = Running ] && lima stop "$VM" >>"$LIMA_LOG" 2>&1
   return 0
+}
+
+# The team disks: the VM reconciles its replicas, mounts and folders with the
+# disks file. The secrets come on stdin, held in memory only, never in argv
+# or a file on the Mac; with nothing on stdin the VM keeps the last ones.
+# Prints one JSON object (docs/ARCHITECTURE.md, "Team disks").
+disks_apply() {
+  local secrets="${1:-}" n per used limit out want have
+  [ -f "$DISKS_FILE" ] || die "missing $DISKS_FILE"
+  /usr/bin/plutil -extract disks raw -o - "$DISKS_FILE" >/dev/null 2>&1 || die "$DISKS_FILE is not a disks file"
+  if [ ! -f "$INSTALLED_MARK" ] || [ -z "$(vm_status)" ]; then cmd_setup_quiet; fi
+  start_vm
+  vm_healthy || die "the VM is not responding, run: floppy status"
+  in_vm sudo /usr/local/sbin/floppy-disks config < "$DISKS_FILE"
+  if [ -n "$secrets" ]; then
+    printf '%s' "$secrets" | in_vm sudo /usr/local/sbin/floppy-disks secrets
+  fi
+  n=$(enabled_disks)
+  used=$(cache_used_mb)
+  limit=$(cache_limit_mb "$used")
+  per=$limit
+  [ "$n" -gt 1 ] && per=$(( limit / n ))
+  # Below this a disk would refetch every clip; the Mac-side guard in tick
+  # still frees everything when the Mac runs low.
+  [ "$per" -ge 512 ] || per=512
+  out=$(in_vm sudo /usr/local/sbin/floppy-disks apply "$per" </dev/null)
+  rm -f "$STOPPED_FLAG"
+  want_share && mount_share keep
+  want=$(vm_memory_mib "$n")
+  have=$(vm_memory_now)
+  printf '{"version":1,"mount_point":%s,"cache_per_disk_mb":%s,"vm_memory_mib":%s,"vm_memory_wanted_mib":%s,"restart_needed":%s,"vm":%s}\n' \
+    "$(json_str "$(mount_point)")" "$per" "$(json_int "$have")" "$want" \
+    "$([ -n "$have" ] && [ "$have" -lt "$want" ] && echo true || echo false)" "$out"
+}
+
+# Setup inside `disks apply`, with its messages kept off the JSON on stdout.
+cmd_setup_quiet() { cmd_setup >&3; }
+
+# A revoked device: every team disk unmounted, its cache and replica deleted
+# in the VM, the disks file gone. Nothing in the buckets is touched.
+disks_clear() {
+  # The share first, by force: the device has no access left, and the open
+  # SMB files hold the VM's mounts.
+  unmount_share
+  if [ "$(vm_status)" = Running ] && vm_healthy; then
+    in_vm sudo /usr/local/sbin/floppy-disks clear >/dev/null
+  fi
+  rm -f "$DISKS_FILE"
+  printf '{"version":1,"cleared":true}\n'
+}
+
+cmd_disks() {
+  team || die "this Mac runs the single-user volume (config.env): team disks need the team install"
+  case "${1:-}" in
+    apply)
+      local secrets=""
+      # Read before anything runs in the VM: limactl shell would eat stdin.
+      if [ ! -t 0 ]; then secrets=$(cat); fi
+      exec </dev/null
+      disks_apply "$secrets" ;;
+    clear) disks_clear ;;
+    *) die "usage: floppy disks apply (secrets on stdin) | clear" ;;
+  esac
 }
 
 json_str() {
@@ -350,10 +569,12 @@ json_int() {
 # The same facts as `floppy status`, as one JSON object on stdout for the menu
 # bar app. A value the command cannot know is null. It only reads: it never
 # starts, mounts or repairs anything, and it works with no install at all.
+# shellcheck disable=SC2016 # the VM's own variables expand inside the VM
 cmd_status_json() {
-  local configured=false installed=false stopped=false st vm out="" mp
-  local responding=null drive="" used="" limit="" reserve=""
-  [ -f "$FLOPPY_HOME/config.env" ] && configured=true
+  local configured=false installed=false stopped=false st vm out="" mp mode=single
+  local responding=null drive="" used="" limit="" reserve="" disks=null mem="" want=""
+  team && mode=team
+  if team; then [ -f "$DISKS_FILE" ] && configured=true; else configured=true; fi
   [ -f "$INSTALLED_MARK" ] && installed=true
   [ -f "$STOPPED_FLAG" ] && stopped=true
   st=$(vm_status)
@@ -366,8 +587,23 @@ cmd_status_json() {
   if [ "$vm" = running ]; then
     # One call into the VM for its health, the drive service and the cache:
     # each call is a round trip through limactl.
-    # shellcheck disable=SC2016 # $CACHE_SIZE_MB expands inside the VM
-    if out=$(in_vm sudo sh -c '
+    if team; then
+      if out=$(in_vm sudo sh -c '
+          if [ -x /usr/local/sbin/floppy-disks ] && s=$(/usr/local/sbin/floppy-disks status); then
+            printf "%s\n" "$s" | jq -r ".cache_used_mb, .cache_limit_mb, .drive"
+            printf "%s\n" "$s" | jq -c .disks
+          else
+            du -sm /var/cache/floppy 2>/dev/null | cut -f1; echo; systemctl is-active smbd || true; echo "[]"
+          fi' 2>/dev/null); then
+        used=$(printf '%s\n' "$out" | sed -n 1p)
+        limit=$(printf '%s\n' "$out" | sed -n 2p)
+        drive=$(printf '%s\n' "$out" | sed -n 3p)
+        disks=$(printf '%s\n' "$out" | sed -n 4p)
+        [ -n "$disks" ] || disks=null
+      else
+        vm=broken
+      fi
+    elif out=$(in_vm sudo sh -c '
         du -sm /var/cache/floppy 2>/dev/null | cut -f1
         if [ -f /etc/floppy/config.env ]; then . /etc/floppy/config.env; fi
         echo "${CACHE_SIZE_MB:-}"
@@ -379,17 +615,23 @@ cmd_status_json() {
       vm=broken
     fi
   fi
+  if team && [ "$vm" != missing ]; then
+    mem=$(vm_memory_now)
+    want=$(vm_memory_mib "$(enabled_disks)")
+  fi
   mp=$(mount_point)
   if [ -n "$mp" ]; then
     if mount_alive; then responding=true; else responding=false; fi
   fi
   if [ "$configured" = true ]; then reserve=$(reserve_mb); fi
-  printf '{"version":1,"configured":%s,"installed":%s,"stopped":%s,"vm":"%s",' \
-    "$configured" "$installed" "$stopped" "$vm"
+  printf '{"version":1,"mode":"%s","configured":%s,"installed":%s,"stopped":%s,"vm":"%s",' \
+    "$mode" "$configured" "$installed" "$stopped" "$vm"
   printf '"mount_point":%s,"responding":%s,"drive":%s,' \
     "$(json_str "$mp")" "$responding" "$(json_str "$drive")"
-  printf '"cache_used_mb":%s,"cache_limit_mb":%s,"mac_free_mb":%s,"reserve_mb":%s}\n' \
+  printf '"cache_used_mb":%s,"cache_limit_mb":%s,"mac_free_mb":%s,"reserve_mb":%s,' \
     "$(json_int "$used")" "$(json_int "$limit")" "$(json_int "$(mac_free_mb)")" "$(json_int "$reserve")"
+  printf '"vm_memory_mib":%s,"vm_memory_wanted_mib":%s,"disks":%s}\n' \
+    "$(json_int "$mem")" "$(json_int "$want")" "$disks"
 }
 
 cmd_status() {
@@ -407,12 +649,19 @@ cmd_status() {
   # shellcheck disable=SC2016 # literal backticks around the command name
   [ -f "$STOPPED_FLAG" ] && printf 'Stopped: by the user, `floppy start` brings it back\n'
   printf 'Mac:     %s GB free\n' "$(( $(mac_free_mb) / 1024 ))"
-  if [ "$st" = Running ]; then
-    printf 'Drive:   %s\n' "$(in_vm systemctl is-active floppy-mount || true)"
-    # shellcheck disable=SC2016 # $CACHE_SIZE_MB expands inside the VM
-    printf 'Cache:   %s MB of %s MB\n' "$(cache_used_mb)" \
-      "$(in_vm sudo sh -c '. /etc/floppy/config.env; echo $CACHE_SIZE_MB' 2>/dev/null || echo '?')"
+  [ "$st" = Running ] || return 0
+  if team; then
+    printf 'Memory:  %s MB (%s MB for %s disks)\n' "$(vm_memory_now)" "$(vm_memory_mib "$(enabled_disks)")" "$(enabled_disks)"
+    # shellcheck disable=SC2016 # jq's own syntax
+    in_vm sudo sh -c '[ -x /usr/local/sbin/floppy-disks ] && /usr/local/sbin/floppy-disks status | jq -r "
+      \"Samba:   \(.smbd)\", \"Cache:   \(.cache_used_mb // 0) MB of \(.cache_limit_mb // 0) MB\",
+      (.disks[] | \"Disk:    \(.folder) (\(.access)): \(.state)\(if .pending then \", waiting to \(.pending)\" else \"\" end), metadata \(.mode // \"-\"), replica \(.replica), cache \(.cache_used_mb // 0) of \(.cache_size_mb // 0) MB\")"' 2>/dev/null || true
+    return 0
   fi
+  printf 'Drive:   %s\n' "$(in_vm systemctl is-active floppy-mount || true)"
+  # shellcheck disable=SC2016 # $CACHE_SIZE_MB expands inside the VM
+  printf 'Cache:   %s MB of %s MB\n' "$(cache_used_mb)" \
+    "$(in_vm sudo sh -c '. /etc/floppy/config.env; echo $CACHE_SIZE_MB' 2>/dev/null || echo '?')"
 }
 
 cmd_warmup() {
@@ -428,8 +677,13 @@ cmd_free() {
 }
 
 cmd_uninstall() {
-  log "This deletes the VM and its cache. With the test setup (metadata in the VM)"
-  log "the files in the bucket become unreadable. Type 'delete' to confirm:"
+  if team; then
+    log "This deletes the VM, the disks' cache and their replicas on this Mac."
+    log "The files stay on the team's storage. Type 'delete' to confirm:"
+  else
+    log "This deletes the VM and its cache. With the test setup (metadata in the VM)"
+    log "the files in the bucket become unreadable. Type 'delete' to confirm:"
+  fi
   read -r answer
   [ "$answer" = delete ] || die "cancelled"
   /bin/launchctl bootout "gui/$(id -u)/$AGENT_LABEL" 2>/dev/null || true
@@ -440,16 +694,19 @@ cmd_uninstall() {
     lima delete --force "$VM" >>"$LIMA_LOG" 2>&1
   fi
   if [ -f "$NSMB_CONF" ]; then
-    sed -i '' '/^# floppy begin$/,/^# floppy end$/d' "$NSMB_CONF"
+    sed -i '' "/^$NSMB_BEGIN\$/,/^$NSMB_END\$/d" "$NSMB_CONF"
     [ -s "$NSMB_CONF" ] || rm -f "$NSMB_CONF"
   fi
   # The config names a volume whose metadata died with the VM: a reinstall
-  # must start from a new name, so nothing of this install is kept.
+  # must start from a new name, so nothing of this install is kept. The team
+  # version's disks file and SMB password go with it.
   rm -rf "$FLOPPY_HOME"
   log "Removed."
 }
 
 case "${1:-}" in
-  setup|start|tick|stop|status|warmup|free|uninstall) cmd="$1"; shift; "cmd_$cmd" "$@" ;;
-  *) log "usage: floppy setup|start|stop|status [--json]|warmup <path>|free <path>|uninstall"; exit 2 ;;
+  status|warmup|free) cmd="$1"; shift; "cmd_$cmd" "$@" ;;
+  tick) shift; take_lock try || exit 0; cmd_tick "$@" ;;
+  setup|start|stop|uninstall|disks) cmd="$1"; shift; take_lock wait; "cmd_$cmd" "$@" ;;
+  *) log "usage: floppy setup|start|stop|status [--json]|warmup <path>|free <path>|disks apply|disks clear|uninstall"; exit 2 ;;
 esac

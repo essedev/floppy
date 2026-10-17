@@ -53,9 +53,11 @@ Serve un Mac con Apple Silicon e macOS 13 o successivo, ci vogliono circa 90 sec
 
 Un agente launchd controlla ogni 2 minuti che VM, JuiceFS e Samba siano attivi e che il disco sia montato, e svuota la cache se il Mac resta senza spazio. La dimensione della cache si calcola dallo spazio libero del Mac a ogni setup.
 
+Nella versione per i team, senza un `config.env`, l'app nella barra dei menu guida lo stesso comando: scrive in `~/.floppy/disks.json` i dischi che la persona può vedere, passa i segreti a `floppy disks apply`, e ogni disco compare come una cartella di **Floppy**, in sola lettura o in lettura e scrittura; `floppy disks clear` li toglie tutti da un Mac revocato. Il contratto è in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#team-disks).
+
 ## Stato
 
-Agli inizi: un pacchetto di test per macOS, provato su OVH Object Storage a Milano, con i metadati in SQLite dentro ogni VM, quindi ogni Mac ha il suo disco. La versione per i team è in costruzione: il control plane (`server/`, accesso, persone, dispositivi, dischi, cambio della chiave, modi dello storage) e la sua dashboard (`web/`) funzionano dall'inizio alla fine su uno stack locale; l'app nella barra dei menu (`app/`) ha l'interfaccia ma non è ancora collegata; il pacchetto di test usa già il JuiceFS patchato, e il resto del motore della versione per i team (una replica Valkey in ogni VM, i dischi come cartelle) è il prossimo passo. Misure, decisioni e alternative sono in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), i piani in [docs/ROADMAP.md](docs/ROADMAP.md).
+Agli inizi: un pacchetto di test per macOS, provato su OVH Object Storage a Milano, con i metadati in SQLite dentro ogni VM, quindi ogni Mac ha il suo disco. La versione per i team è in costruzione: il control plane (`server/`, accesso, persone, dispositivi, dischi, cambio della chiave, modi dello storage) e la sua dashboard (`web/`) funzionano dall'inizio alla fine su uno stack locale; l'app nella barra dei menu (`app/`) ha l'interfaccia ma non è ancora collegata; il motore della versione per i team (una replica Valkey e un mount JuiceFS per disco nella VM, i dischi come cartelle) funziona su uno stack locale e aspetta che l'app lo guidi. Misure, decisioni e alternative sono in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), i piani in [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Licenza
 

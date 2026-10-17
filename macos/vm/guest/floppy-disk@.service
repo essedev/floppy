@@ -1,0 +1,17 @@
+[Unit]
+Description=Floppy team disk %i (JuiceFS mount)
+After=network-online.target floppy-replica@%i.service
+Wants=network-online.target floppy-replica@%i.service
+
+[Service]
+ExecStart=/usr/local/sbin/floppy-disks mount %i
+ExecStartPost=/usr/local/sbin/floppy-disks ready %i
+# A plain umount: it refuses while the disk is in use. Only shutdown and
+# `floppy-disks clear` go further.
+ExecStop=/usr/local/sbin/floppy-disks unmount %i
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

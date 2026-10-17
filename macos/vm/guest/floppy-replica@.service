@@ -1,0 +1,15 @@
+[Unit]
+Description=Floppy metadata replica of team disk %i (Valkey)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=valkey
+Group=valkey
+RuntimeDirectory=floppy-replica/%i
+ExecStart=/usr/bin/valkey-server /etc/floppy-replica/%i.conf
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

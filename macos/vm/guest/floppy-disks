@@ -1,0 +1,537 @@
+#!/bin/bash
+# The team disks inside the VM: for each enabled disk a Valkey replica of its
+# metadata (floppy-replica@<id>) and a JuiceFS mount at /mnt/drive/<folder>
+# (floppy-disk@<id>), under the share's immutable root (DECISIONS #20, #23).
+# Driven by the Mac's `floppy disks ...`; the contract (disks file, secrets on
+# stdin, JSON out) is in docs/ARCHITECTURE.md, "Team disks".
+#
+#   floppy-disks config            the disks file on stdin, validated and kept
+#   floppy-disks secrets           the secrets on stdin; empty stdin keeps them
+#   floppy-disks apply <cache-mb>  reconcile replicas, mounts and folders; JSON out
+#   floppy-disks status            JSON out, reads only
+#   floppy-disks tick              starts what should run and does not
+#   floppy-disks evict-all         drops every disk's cache
+#   floppy-disks clear             revoked device: every team disk, cache and replica gone
+#   floppy-disks mount|ready|unmount <id>   for floppy-disk@.service
+set -euo pipefail
+
+ROOT=/mnt/drive
+TEAM=/etc/floppy/team
+DISKS_JSON=$TEAM/disks.json
+SECRETS_JSON=$TEAM/secrets.json
+CONF=/etc/floppy/disks
+REPLICA_CONF=/etc/floppy-replica
+REPLICA_STATE=/var/lib/floppy-replica
+REPLICA_RUN=/run/floppy-replica
+CACHE=/var/cache/floppy/disks
+RUN=/run/floppy/disks
+LOCK=/run/floppy-disks.lock
+# Applied when a remount cannot wait: a busy disk is never unmounted.
+MOUNT_WAIT=60
+
+die() { echo "floppy-disks: $*" >&2; exit 1; }
+
+# Values for files that are sourced: one KEY=value per line, shell-quoted.
+kv() { printf '%s=%q\n' "$1" "$2"; }
+
+# Valkey's config format: a double-quoted string with \ and " escaped.
+vq() { local s=${1//\\/\\\\}; printf '"%s"' "${s//\"/\\\"}"; }
+
+json_str() { jq -Rn --arg v "$1" '$v'; }
+
+# The disks file's problems, one per line; none means valid.
+check_disks() {
+  jq -r '
+    def bad($m): $m;
+    if type != "object" then bad("not a JSON object")
+    else
+      (if .version != 1 then bad("version must be 1") else empty end),
+      (if (.meta_user | type) != "string" or (.meta_user | test("^[A-Za-z0-9._-]{1,64}$") | not)
+        then bad("meta_user: 1-64 letters, digits, dot, hyphen, underscore") else empty end),
+      (if has("meta_ca") and .meta_ca != null and (.meta_ca | type) != "string" then bad("meta_ca: a PEM string or null") else empty end),
+      (if (.disks | type) != "array" then bad("disks must be an array")
+       else
+         (.disks[] | . as $d | ($d.id // "?" | tostring) as $id |
+           (if ($d.id | type) != "string" or ($d.id | test("^[a-z0-9][a-z0-9-]{0,62}$") | not)
+             then bad("disk \($id): id: lowercase letters, digits, hyphens") else empty end),
+           (if ($d.folder | type) != "string" or ($d.folder | test("^[A-Za-z0-9]([A-Za-z0-9 ._-]{0,62}[A-Za-z0-9])?$") | not)
+             then bad("disk \($id): folder: ASCII letters, digits, space, dot, hyphen, underscore, starting and ending with a letter or digit") else empty end),
+           (if $d.access != "read" and $d.access != "write" then bad("disk \($id): access: read or write") else empty end),
+           (if ($d.enabled | type) != "boolean" then bad("disk \($id): enabled: true or false") else empty end),
+           (if ($d.meta_url | type) != "string" or ($d.meta_url | test("^rediss?://[A-Za-z0-9.-]+:[0-9]{1,5}/[0-9]{1,5}$") | not)
+             then bad("disk \($id): meta_url: rediss://<host>:<port>/<db>, no credentials, no query")
+             elif ($d.meta_url | test("^rediss://[0-9.]+:"))
+             then bad("disk \($id): meta_url: a name, not an address (TLS routes by name)") else empty end),
+           (if has("bucket_url") | not then empty
+            elif $d.bucket_url != null and (($d.bucket_url | type) != "string" or ($d.bucket_url | test("^https?://[^\\s@]+$") | not))
+             then bad("disk \($id): bucket_url: an http(s) URL without credentials, or null") else empty end),
+           (if $d | has("cache_expire_days") | not then empty
+            elif ($d.cache_expire_days | type) != "number" or $d.cache_expire_days < 0
+             then bad("disk \($id): cache_expire_days: a number of days, 0 for none") else empty end)
+         ),
+         (if ([.disks[].id] | length) != ([.disks[].id] | unique | length) then bad("two disks with the same id") else empty end),
+         (if ([.disks[].folder | ascii_downcase] | length) != ([.disks[].folder | ascii_downcase] | unique | length)
+           then bad("two disks with the same folder (macOS compares names without case)") else empty end)
+       end)
+    end' 2>/dev/null || echo "not valid JSON"
+}
+
+check_secrets() {
+  jq -r '
+    if type != "object" then "not a JSON object"
+    else
+      (if .version != 1 then "version must be 1" else empty end),
+      (if (.meta_password | type) != "string" or .meta_password == "" then "meta_password missing" else empty end),
+      (if has("s3") and (.s3 | type) != "object" then "s3: an object by disk id" else empty end),
+      ((.s3 // {}) | to_entries[] |
+        if (.value | type) != "object" or (.value.access_key | type) != "string" or (.value.secret_key | type) != "string"
+          or .value.access_key == "" or .value.secret_key == ""
+        then "s3 \(.key): access_key and secret_key" else empty end)
+    end' 2>/dev/null || echo "not valid JSON"
+}
+
+# Writes stdin to a root-only file, atomically.
+put_private() {
+  local dest="$1" tmp
+  install -d -m 700 "$(dirname "$dest")"
+  tmp=$(mktemp "$dest.XXXXXX")
+  cat > "$tmp"
+  chmod 600 "$tmp"
+  mv "$tmp" "$dest"
+}
+
+cmd_config() {
+  local tmp problems
+  tmp=$(mktemp)
+  trap 'rm -f "$tmp"' RETURN
+  cat > "$tmp"
+  problems=$(check_disks < "$tmp")
+  [ -z "$problems" ] || die "disks file: ${problems//$'\n'/; }"
+  put_private "$DISKS_JSON" < "$tmp"
+}
+
+cmd_secrets() {
+  local tmp problems
+  tmp=$(mktemp)
+  trap 'rm -f "$tmp"' RETURN
+  chmod 600 "$tmp"
+  cat > "$tmp"
+  # Nothing sent: the stored secrets stay.
+  if ! grep -q '[^[:space:]]' "$tmp"; then return 0; fi
+  problems=$(check_secrets < "$tmp")
+  [ -z "$problems" ] || die "secrets: ${problems//$'\n'/; }"
+  put_private "$SECRETS_JSON" < "$tmp"
+}
+
+# The share's root is immutable (chattr +i) so nothing can be written beside
+# the disks, not even by Samba running as root; the flag is lifted only to add
+# or remove a disk's folder. Each folder is immutable too: while its disk is
+# not mounted, a copy into it would otherwise land on the VM's own disk.
+lock_root() { chmod 0555 "$ROOT"; chattr +i "$ROOT"; }
+folder_add() {
+  local dir="$ROOT/$1"
+  [ -d "$dir" ] && return 0
+  chattr -i "$ROOT"
+  if ! { mkdir "$dir" && chmod 0555 "$dir" && chattr +i "$dir"; }; then lock_root; return 1; fi
+  lock_root
+}
+folder_remove() {
+  local dir="$ROOT/$1"
+  [ -d "$dir" ] || return 0
+  mountpoint -q "$dir" && return 1
+  chattr -i "$ROOT" "$dir"
+  rmdir "$dir" || { chattr +i "$dir"; lock_root; return 1; }
+  lock_root
+}
+
+field() { jq -r --arg id "$1" ".disks[] | select(.id == \$id) | $2" "$DISKS_JSON"; }
+
+# The metadata URL JuiceFS mounts: the master through TLS by name, the device's
+# user without its password (META_PASSWORD, so it is not in argv), and the
+# replica on its socket (patch 0001; the replica takes the master's user and
+# password, which the replica's config also defines).
+juicefs_url() {
+  local id="$1" meta="$2" user="$3" scheme rest db q replica
+  scheme=${meta%%://*}
+  rest=${meta#*://}
+  db=${rest##*/}
+  replica=$(jq -rn --arg u "unix://$REPLICA_RUN/$id/valkey.sock?db=$db" '$u | @uri')
+  q="read-replica=$replica&max-lag=2s"
+  if [ "$scheme" = rediss ] && [ -f "$REPLICA_CONF/ca.pem" ]; then
+    q="tls-ca-cert-file=$REPLICA_CONF/ca.pem&$q"
+  fi
+  printf '%s://%s@%s?%s' "$scheme" "$user" "$rest" "$q"
+}
+
+# Writes the files of one enabled disk; prints "replica" when the replica's
+# configuration changed (a restart of it is harmless: the mount reads from the
+# master meanwhile).
+write_disk() {
+  local id="$1" cache_mb="$2" user pw folder access meta bucket expire host port ca hp changed=""
+  user=$(jq -r .meta_user "$DISKS_JSON")
+  pw=$(jq -r .meta_password "$SECRETS_JSON")
+  folder=$(field "$id" .folder)
+  access=$(field "$id" .access)
+  meta=$(field "$id" .meta_url)
+  bucket=$(field "$id" '.bucket_url // ""')
+  expire=$(field "$id" '.cache_expire_days // 30')
+  hp=${meta#*://}; hp=${hp%/*}
+  host=${hp%:*}; port=${hp##*:}
+  install -d -m 700 "$CONF/$id"
+  {
+    kv FOLDER "$folder"
+    kv ACCESS "$access"
+    kv META_URL "$(juicefs_url "$id" "$meta" "$user")"
+    kv BUCKET_URL "$bucket"
+    kv CACHE_MB "$cache_mb"
+    kv CACHE_EXPIRE "$((expire * 24))h"
+  } | put_private "$CONF/$id/mount.env"
+  printf '%s' "$folder" | put_private "$CONF/$id/folder"
+  {
+    kv META_PASSWORD "$pw"
+    jq -r --arg id "$id" '.s3[$id] // empty | "AWS_ACCESS_KEY_ID=\(.access_key | @sh)\nAWS_SECRET_ACCESS_KEY=\(.secret_key | @sh)"' "$SECRETS_JSON"
+  } | put_private "$CONF/$id/secret.env"
+
+  ca=/etc/ssl/certs/ca-certificates.crt
+  [ -f "$REPLICA_CONF/ca.pem" ] && ca=$REPLICA_CONF/ca.pem
+  local conf tmp
+  conf="$REPLICA_CONF/$id.conf"
+  tmp=$(mktemp)
+  {
+    echo "# Written by floppy-disks: the local replica of disk $id."
+    echo "port 0"
+    echo "unixsocket $REPLICA_RUN/$id/valkey.sock"
+    echo "unixsocketperm 700"
+    echo "dir $REPLICA_STATE/$id"
+    echo "replicaof $host $port"
+    echo "masteruser $(vq "$user")"
+    echo "masterauth $(vq "$pw")"
+    if [ "${meta%%://*}" = rediss ]; then
+      # A TLS context needs a certificate of its own even as a client; the
+      # master does not check it (tls-auth-clients is the master's business).
+      echo "tls-replication yes"
+      echo "tls-cert-file $REPLICA_CONF/tls.crt"
+      echo "tls-key-file $REPLICA_CONF/tls.key"
+      echo "tls-ca-cert-file $ca"
+    fi
+    echo "replica-read-only yes"
+    echo 'save ""'
+    echo "appendonly no"
+    # Local clients are the mount (as the device's user, which the patch reuses
+    # from the master URL) and status; nothing else.
+    echo "user default off"
+    echo "user $(vq "$user") on $(vq ">$pw") ~* &* +@all"
+    echo 'logfile ""'
+  } > "$tmp"
+  if ! cmp -s "$tmp" "$conf"; then
+    install -m 640 -o root -g valkey "$tmp" "$conf"
+    changed=replica
+  fi
+  rm -f "$tmp"
+  install -d -m 700 -o valkey -g valkey "$REPLICA_STATE/$id"
+  install -d -m 700 "$CACHE/$id"
+  printf '%s' "$changed"
+}
+
+# What the running mount was started with, to tell whether it needs a remount.
+mounted_record() { cat "$RUN/$1.mounted" 2>/dev/null || true; }
+wanted_record() { cat "$CONF/$1/mount.env"; printf 'SECRET=%s\n' "$(sha256sum < "$CONF/$1/secret.env" | cut -c1-16)"; }
+rec() { printf '%s\n' "$1" | sed -n "s/^$2=//p" | head -1; }
+
+# A remount is needed when anything but the cache size changed, or when the
+# cache must shrink: a bigger cache is not worth a remount.
+needs_remount() {
+  local id="$1" now want
+  now=$(mounted_record "$id")
+  want=$(wanted_record "$id")
+  [ -n "$now" ] || return 1
+  [ "$(printf '%s\n' "$now" | grep -v '^CACHE_MB=')" != "$(printf '%s\n' "$want" | grep -v '^CACHE_MB=')" ] && return 0
+  [ "$(rec "$want" CACHE_MB)" -lt "$(rec "$now" CACHE_MB)" ]
+}
+
+# A gentle unmount: plain umount, which refuses while any file or folder of
+# the disk is open (a copy, CapCut, a Finder window). Never lazy, never forced.
+gentle_unmount() {
+  local dir="$1"
+  mountpoint -q "$dir" || return 0
+  umount "$dir" 2>/dev/null
+}
+
+wait_mounted() {
+  local dir="$1"
+  for _ in $(seq $((MOUNT_WAIT * 2))); do
+    mountpoint -q "$dir" && return 0
+    sleep 0.5
+  done
+  return 1
+}
+
+configured_ids() { [ -d "$CONF" ] && find "$CONF" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort; return 0; }
+enabled_ids() { jq -r '.disks[] | select(.enabled) | .id' "$DISKS_JSON"; }
+
+# The folder a disk is configured with, and the one its running mount uses
+# (they differ only until a remount).
+conf_folder() { cat "$CONF/$1/folder" 2>/dev/null || true; }
+run_folder() { cat "$RUN/$1.folder" 2>/dev/null || true; }
+
+# Stops and removes one disk: mount, replica, folder, cache, files. Returns 1
+# when the disk is busy (gentle) and nothing was removed.
+remove_disk() {
+  local id="$1" mode="$2" folder
+  folder=$(run_folder "$id"); [ -n "$folder" ] || folder=$(conf_folder "$id")
+  if [ -n "$folder" ] && mountpoint -q "$ROOT/$folder"; then
+    if [ "$mode" = force ]; then
+      umount "$ROOT/$folder" 2>/dev/null || umount -l "$ROOT/$folder"
+    else
+      gentle_unmount "$ROOT/$folder" || return 1
+    fi
+  fi
+  systemctl disable --now "floppy-disk@$id.service" >/dev/null 2>&1 || true
+  systemctl disable --now "floppy-replica@$id.service" >/dev/null 2>&1 || true
+  systemctl reset-failed "floppy-disk@$id.service" "floppy-replica@$id.service" >/dev/null 2>&1 || true
+  [ -n "$folder" ] && folder_remove "$folder"
+  rm -rf "${CACHE:?}/$id" "${REPLICA_STATE:?}/$id" "$REPLICA_CONF/$id.conf" "${CONF:?}/$id" "$RUN/$id.mounted" "$RUN/$id.folder"
+  return 0
+}
+
+with_lock() { exec 9>"$LOCK"; flock "$@" 9; }
+
+refuse_single() {
+  if systemctl is-enabled --quiet floppy-mount 2>/dev/null \
+      || [ "$(findmnt -n -o FSTYPE --mountpoint "$ROOT" 2>/dev/null || true)" = fuse.juicefs ]; then
+    die "this VM holds the single-user volume (floppy-mount): team disks need a VM of their own"
+  fi
+}
+
+# One JSON object per disk in the file, enabled or not.
+disk_status() {
+  local id="$1" enabled folder access state="stopped" mounted_access=null size=null used=null replica="stopped" mode=null online=null pending="$2"
+  enabled=$(field "$id" .enabled)
+  folder=$(field "$id" .folder)
+  access=$(field "$id" .access)
+  local dir="$ROOT/$folder" rec_now
+  rec_now=$(mounted_record "$id")
+  if [ "$enabled" != true ]; then
+    state=disabled
+  else
+    case "$(systemctl is-active "floppy-disk@$id.service" 2>/dev/null || true)" in
+      active) state=mounted ;;
+      activating|reloading) state=starting ;;
+      failed) state=failed ;;
+      *) state=stopped ;;
+    esac
+    # A unit restarting after a failure says "activating": the mount decides.
+    if mountpoint -q "$dir"; then state=mounted; elif [ "$state" = mounted ]; then state=starting; fi
+  fi
+  if [ "$state" = mounted ] && [ -n "$rec_now" ]; then
+    mounted_access=$(json_str "$(rec "$rec_now" ACCESS)")
+    size=$(rec "$rec_now" CACHE_MB)
+    local m
+    m=$(timeout 3 sed -n 's/^juicefs_meta_replica_mode \(-\{0,1\}[0-9]*\).*/\1/p' "$dir/.stats" 2>/dev/null | head -1 || true)
+    case "$m" in
+      -1) mode='"unknown"' ;;
+      0) mode='"master"'; online=true ;;
+      1) mode='"replica"'; online=true ;;
+      2) mode='"offline"'; online=false ;;
+    esac
+  fi
+  [ -d "$CACHE/$id" ] && used=$(du -sm "$CACHE/$id" 2>/dev/null | cut -f1)
+  if [ "$(systemctl is-active "floppy-replica@$id.service" 2>/dev/null || true)" = active ]; then
+    local info
+    info=$(REDISCLI_AUTH=$(jq -r .meta_password "$SECRETS_JSON" 2>/dev/null) timeout 3 valkey-cli --no-auth-warning \
+      -s "$REPLICA_RUN/$id/valkey.sock" --user "$(jq -r .meta_user "$DISKS_JSON")" INFO replication 2>/dev/null | tr -d '\r' || true)
+    if printf '%s\n' "$info" | grep -q '^master_sync_in_progress:1'; then replica=syncing
+    elif printf '%s\n' "$info" | grep -q '^master_link_status:up'; then replica=up
+    else replica=down; fi
+  fi
+  [ -n "$pending" ] && pending=$(json_str "$pending") || pending=null
+  printf '{"id":%s,"folder":%s,"access":%s,"enabled":%s,"state":"%s","mounted_access":%s,"pending":%s,' \
+    "$(json_str "$id")" "$(json_str "$folder")" "$(json_str "$access")" "$enabled" "$state" "$mounted_access" "$pending"
+  printf '"cache_used_mb":%s,"cache_size_mb":%s,"replica":"%s","mode":%s,"online":%s}' \
+    "${used:-null}" "${size:-null}" "$replica" "$mode" "$online"
+}
+
+# The remount a disk still waits for (written by apply, cleared once done).
+pending_of() { cat "$RUN/$1.pending" 2>/dev/null || true; }
+
+status_json() {
+  local first=1 id smbd drive=active used total=0 any=0
+  smbd=$(systemctl is-active smbd 2>/dev/null || true)
+  printf '{"smbd":"%s","disks":[' "$smbd"
+  if [ -f "$DISKS_JSON" ]; then
+    while IFS= read -r id; do
+      [ $first = 1 ] || printf ','
+      first=0
+      disk_status "$id" "$(pending_of "$id")"
+    done < <(jq -r '.disks[].id' "$DISKS_JSON")
+  fi
+  printf ']'
+  used=$(du -sm "$CACHE" 2>/dev/null | cut -f1 || true)
+  for id in $(configured_ids); do
+    local r
+    r=$(mounted_record "$id")
+    [ -n "$r" ] && total=$((total + $(rec "$r" CACHE_MB)))
+    any=1
+  done
+  # The disk as a whole, for the app: active only when Samba and every enabled disk are up.
+  if [ "$smbd" != active ]; then drive=$smbd
+  elif [ -f "$DISKS_JSON" ]; then
+    for id in $(enabled_ids); do
+      if ! mountpoint -q "$ROOT/$(field "$id" .folder)"; then
+        case "$(systemctl is-active "floppy-disk@$id.service" 2>/dev/null || true)" in
+          failed) drive=failed; break ;;
+          *) drive=activating ;;
+        esac
+      fi
+    done
+  fi
+  [ "$any" = 1 ] || total=""
+  printf ',"drive":"%s","cache_used_mb":%s,"cache_limit_mb":%s}\n' "$drive" "${used:-null}" "${total:-null}"
+}
+
+cmd_apply() {
+  local cache_mb="${1:?usage: floppy-disks apply <cache MB per disk>}" id
+  [ -f "$DISKS_JSON" ] || die "no disks file, send it with: floppy-disks config"
+  refuse_single
+  with_lock -w 600
+  if [ -n "$(enabled_ids)" ] && [ ! -f "$SECRETS_JSON" ]; then die "no secrets yet: send them on stdin"; fi
+  install -d -m 700 "$RUN" "$CONF" "$CACHE"
+  install -d -m 750 -o root -g valkey "$REPLICA_CONF"
+  # The CA for the metadata's TLS, when the instance does not use a public one.
+  if jq -e '.meta_ca | type == "string"' "$DISKS_JSON" >/dev/null; then
+    jq -r .meta_ca "$DISKS_JSON" > "$REPLICA_CONF/ca.pem.tmp"
+    install -m 644 "$REPLICA_CONF/ca.pem.tmp" "$REPLICA_CONF/ca.pem"
+    rm -f "$REPLICA_CONF/ca.pem.tmp"
+  else
+    rm -f "$REPLICA_CONF/ca.pem"
+  fi
+
+  # Disks gone from the file or turned off: no mount, no replica, no folder,
+  # no cache. A busy one stays until a later apply.
+  local wanted
+  wanted=$(enabled_ids)
+  for id in $(configured_ids); do
+    if ! printf '%s\n' "$wanted" | grep -qx "$id"; then
+      if remove_disk "$id" gentle; then rm -f "$RUN/$id.pending"; else echo remove > "$RUN/$id.pending"; fi
+    fi
+  done
+
+  for id in $wanted; do
+    local folder changed dir unit=floppy-disk@$id.service old
+    folder=$(field "$id" .folder)
+    dir="$ROOT/$folder"
+    changed=$(write_disk "$id" "$cache_mb")
+    systemctl enable "floppy-replica@$id.service" >/dev/null 2>&1
+    if [ "$changed" = replica ] || ! systemctl is-active --quiet "floppy-replica@$id.service"; then
+      systemctl restart "floppy-replica@$id.service"
+    fi
+    systemctl enable "$unit" >/dev/null 2>&1
+    rm -f "$RUN/$id.pending"
+    old=$(run_folder "$id")
+    if [ -n "$old" ] && mountpoint -q "$ROOT/$old"; then
+      if needs_remount "$id"; then
+        # Access lowered or raised, another master, new secrets, a smaller
+        # cache: only a disk nobody is using is remounted.
+        if gentle_unmount "$ROOT/$old"; then
+          systemctl stop "$unit" >/dev/null 2>&1 || true
+          [ "$old" != "$folder" ] && folder_remove "$old"
+        else
+          echo remount > "$RUN/$id.pending"
+          continue
+        fi
+      else
+        continue
+      fi
+    fi
+    folder_add "$folder"
+    systemctl reset-failed "$unit" >/dev/null 2>&1 || true
+    # Not mounted, so nothing can break: a restart picks up the new files.
+    systemctl restart --no-block "$unit"
+  done
+  for id in $wanted; do
+    [ -n "$(pending_of "$id")" ] && continue
+    wait_mounted "$ROOT/$(field "$id" .folder)" || true
+  done
+  status_json
+}
+
+cmd_tick() {
+  [ -f "$DISKS_JSON" ] || return 0
+  with_lock -n || return 0
+  local id
+  # One unit per call: with several units is-active succeeds if any is active.
+  systemctl is-active --quiet smbd || systemctl restart smbd || true
+  for id in $(enabled_ids); do
+    [ -d "$CONF/$id" ] || continue
+    systemctl is-active --quiet "floppy-replica@$id.service" || systemctl restart "floppy-replica@$id.service" || true
+    # Only a disk that is not mounted is started; a mounted one is never touched.
+    if ! mountpoint -q "$ROOT/$(field "$id" .folder)"; then
+      case "$(systemctl is-active "floppy-disk@$id.service" 2>/dev/null || true)" in
+        active|activating) ;;
+        *) systemctl reset-failed "floppy-disk@$id.service" >/dev/null 2>&1 || true
+           systemctl start --no-block "floppy-disk@$id.service" || true ;;
+      esac
+    fi
+  done
+}
+
+cmd_evict_all() {
+  local id folder
+  for id in $(configured_ids); do
+    folder=$(run_folder "$id")
+    [ -n "$folder" ] && mountpoint -q "$ROOT/$folder" && juicefs warmup --evict "$ROOT/$folder" >/dev/null 2>&1 || true
+  done
+  fstrim / >/dev/null 2>&1 || true
+}
+
+cmd_clear() {
+  with_lock -w 600
+  local id
+  for id in $(configured_ids); do remove_disk "$id" force; done
+  rm -f "$SECRETS_JSON" "$DISKS_JSON" "$REPLICA_CONF/ca.pem" "$RUN"/*.pending
+  rm -rf "${CACHE:?}"/*
+  fstrim / >/dev/null 2>&1 || true
+  echo '{"cleared":true}'
+}
+
+cmd_mount() {
+  local id="${1:?}"
+  [ -f "$CONF/$id/mount.env" ] || die "disk $id is not configured"
+  local FOLDER ACCESS META_URL BUCKET_URL CACHE_MB CACHE_EXPIRE
+  # shellcheck disable=SC1090
+  . "$CONF/$id/mount.env"
+  set -a
+  # shellcheck disable=SC1090
+  . "$CONF/$id/secret.env"
+  set +a
+  install -d -m 700 "$RUN"
+  wanted_record "$id" > "$RUN/$id.mounted"
+  cp "$CONF/$id/folder" "$RUN/$id.folder"
+  local extra=()
+  [ -n "$BUCKET_URL" ] && extra+=(--bucket "$BUCKET_URL")
+  [ "$ACCESS" = read ] && extra+=(--read-only)
+  # The data path of floppy-mount (DECISIONS #15): 4 MB readahead, cached
+  # uploads, Finder metadata in extended attributes. The block size was fixed
+  # by the control plane when it formatted the disk.
+  exec juicefs mount "$META_URL" "$ROOT/$FOLDER" \
+    --cache-dir "$CACHE/$id" --cache-size "$CACHE_MB" --cache-expire "$CACHE_EXPIRE" \
+    --cache-large-write --prefetch 8 --buffer-size 256 --max-readahead 4 \
+    --enable-xattr --no-usage-report "${extra[@]}"
+}
+
+cmd_ready() { wait_mounted "$ROOT/$(conf_folder "${1:?}")"; }
+
+cmd_unmount() {
+  local folder
+  folder=$(run_folder "${1:?}")
+  [ -n "$folder" ] || exit 0
+  gentle_unmount "$ROOT/$folder"
+}
+
+[ "$(id -u)" = 0 ] || die "run as root"
+case "${1:-}" in
+  config|secrets|apply|status|tick|clear|mount|ready|unmount) cmd="$1"; shift ;;
+  evict-all) cmd=evict_all; shift ;;
+  *) die "usage: floppy-disks config|secrets|apply <cache-mb>|status|tick|evict-all|clear" ;;
+esac
+if [ "$cmd" = status ]; then status_json; else "cmd_$cmd" "$@"; fi

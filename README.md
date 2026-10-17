@@ -53,9 +53,11 @@ It needs Apple Silicon and macOS 13 or later, takes about 90 seconds, and the di
 
 A launchd agent checks every 2 minutes that the VM, JuiceFS and Samba are running and that the disk is mounted, and empties the cache if the Mac runs low on space. The cache size is computed from the Mac's free space at every setup.
 
+In the team version, without a `config.env`, the menu bar app drives the same command: it writes the disks the person may see to `~/.floppy/disks.json`, pipes the secrets to `floppy disks apply`, and each disk appears as a folder of **Floppy**, read-only or read-write; `floppy disks clear` removes them all from a revoked Mac. The contract is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#team-disks).
+
 ## Status
 
-Early: a test package for macOS, tried on OVH Object Storage in Milan, with the metadata in SQLite inside each VM, so every Mac has its own disk. The team version is being built: the control plane (`server/`, sign-in, people, devices, disks, key rotation, storage modes) and its admin web (`web/`) work end to end on a local stack; the menu bar app (`app/`) has its interface but is not connected yet; the test package already runs the patched JuiceFS, and the rest of the engine for the team version (a Valkey replica in each VM, disks as folders) is next. Measurements, decisions and alternatives are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), plans in [docs/ROADMAP.md](docs/ROADMAP.md).
+Early: a test package for macOS, tried on OVH Object Storage in Milan, with the metadata in SQLite inside each VM, so every Mac has its own disk. The team version is being built: the control plane (`server/`, sign-in, people, devices, disks, key rotation, storage modes) and its admin web (`web/`) work end to end on a local stack; the menu bar app (`app/`) has its interface but is not connected yet; the engine for the team version (a Valkey replica and a JuiceFS mount per disk in the VM, disks as folders) works on a local stack and waits for the app to drive it. Measurements, decisions and alternatives are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), plans in [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## License
 
