@@ -423,7 +423,7 @@ ul.slots li b { font-weight: 650; }
   <div class="table-wrap">
     <table>
       <tbody>
-        <tr><td class="k">Disk</td><td>One per team, the same files on every Mac, at <code>/Volumes/Floppy</code></td></tr>
+        <tr><td class="k">Disk</td><td>One in the Finder at <code>/Volumes/Floppy</code>, the same files on every Mac; a team with several disks sees each as a folder, <code>/Volumes/Floppy/Progetti</code></td></tr>
         <tr><td class="k">File tree</td><td>A central Valkey that writes every change to disk, with a replica in the datacenter and a daily dump</td></tr>
         <tr><td class="k">Browsing</td><td>Local: every Mac reads a replica in its own VM; a write costs one round trip to the center</td></tr>
         <tr><td class="k">Access</td><td>Sign-in in the browser, a Valkey user per Mac</td></tr>
@@ -533,7 +533,7 @@ ul.slots li b { font-weight: 650; }
         <!-- Mac nodes -->
         <rect class="node" x="50" y="62" width="170" height="56" rx="9"/>
         <text class="nt" x="64" y="86">Finder · CapCut</text>
-        <text class="ns" x="64" y="104">/Volumes/Floppy</text>
+        <text class="ns" x="64" y="104">/Volumes/Floppy/&lt;disk&gt;</text>
         <rect class="node hl" x="260" y="62" width="172" height="56" rx="9"/>
         <text class="nt" x="274" y="86">Floppy.app</text>
         <text class="ns" x="274" y="104">menu bar panel · Tauri</text>
@@ -620,9 +620,9 @@ ul.slots li b { font-weight: 650; }
       <h3>VM<span class="lic">MIT</span></h3>
       <div class="where">macos/vm/ · Lima, Debian 13</div>
       <ul>
-        <li>JuiceFS client and cache</li>
-        <li>Samba on the private link</li>
-        <li>A Valkey replica of the volume's metadata</li>
+        <li>A JuiceFS mount and cache per disk, under the share's read-only root</li>
+        <li>Samba on the private link: one <code>Floppy</code> share, each disk a folder</li>
+        <li>A Valkey replica of the organization's metadata, every disk</li>
         <li>Image and packages shipped, Valkey 8.1.1 from Debian 13 included: no downloads</li>
       </ul>
     </div>
@@ -838,42 +838,60 @@ ul.slots li b { font-weight: 650; }
 <section id="model">
   <p class="eyebrow">09 · Data model</p>
   <h2>The control plane's tables</h2>
-  <p>Soft delete everywhere (<code>deleted_at</code>). The control plane keeps its own tables in PostgreSQL. The file tree is not here: it lives in each volume's Valkey database, written by JuiceFS.</p>
+  <p>The control plane keeps its own tables in PostgreSQL 18; the full schema, with every column, index and state machine, is in <a href="DATABASE_SCHEMA.md">DATABASE_SCHEMA.md</a>. Ids are UUIDv7 and nothing is ever deleted: entities carry <code>deleted_at</code>, records end in a terminal state, and the application's role has no <code>DELETE</code> grant. Every row belongs to an organization through a composite key. The file tree is not here: it lives in each disk's Valkey database, written by JuiceFS.</p>
   <div class="legend" style="margin-top:12px">
     <span><i class="sw" style="background:var(--ctl)"></i>Control DB (PostgreSQL)</span>
-    <span><i class="sw" style="background:var(--meta)"></i>Created on the central Valkey</span>
+    <span><i class="sw" style="background:var(--meta)"></i>On the central Valkey</span>
   </div>
   <div class="er">
     <div class="ent where-cp"><h4>organizations <span>tenant</span></h4><ul>
-      <li><span class="pk">id</span><em>uuid</em></li><li>name, slug<em>text</em></li>
-      <li>s3_endpoint, bucket<em>text</em></li><li>key_rotated_at<em>timestamp</em></li><li>deleted_at<em>timestamp</em></li></ul></div>
+      <li><span class="pk">id</span><em>uuid v7</em></li><li>name, slug<em>text</em></li>
+      <li>s3_endpoint, s3_bucket<em>one per org</em></li><li>valkey_url<em>one per org</em></li>
+      <li>smtp_password_enc<em>AES-GCM</em></li><li>deleted_at<em>timestamptz</em></li></ul></div>
     <div class="ent where-cp"><h4>users <span>a person</span></h4><ul>
-      <li><span class="pk">id</span><em>uuid</em></li><li>email<em>unique</em></li><li>name<em>text</em></li>
-      <li>last_login_at<em>timestamp</em></li><li>deleted_at<em>timestamp</em></li></ul></div>
+      <li><span class="pk">id</span><em>uuid v7</em></li><li>email<em>unique, live</em></li><li>name<em>null until sign-in</em></li>
+      <li>last_sign_in_at<em>timestamptz</em></li><li>deleted_at<em>timestamptz</em></li></ul></div>
     <div class="ent where-cp"><h4>memberships <span>user in org</span></h4><ul>
-      <li><span class="fk">org_id, user_id</span><em>fk</em></li><li>role<em>admin | member</em></li>
-      <li>status<em>invited | active | revoked</em></li><li>invited_by<em>fk users</em></li><li>revoked_at<em>timestamp</em></li></ul></div>
-    <div class="ent where-cp"><h4>volumes <span>a disk</span></h4><ul>
-      <li><span class="pk">id</span><em>uuid</em></li><li><span class="fk">org_id</span><em>fk</em></li>
-      <li>name<em>VOLUME_NAME</em></li><li>meta_db<em>Valkey db number</em></li><li>block_size_kb, trash_days<em>int</em></li><li>deleted_at<em>timestamp</em></li></ul></div>
+      <li><span class="fk">organization_id, user_id</span><em>fk</em></li><li>role<em>admin | member</em></li>
+      <li>status<em>invited | active | removed</em></li><li>invited_by, removed_by<em>fk users</em></li><li>removed_at, deleted_at<em>timestamptz</em></li></ul></div>
+    <div class="ent where-cp"><h4>invitations <span>7 days</span></h4><ul>
+      <li><span class="fk">membership_id</span><em>fk</em></li><li>token_hash<em>SHA-256</em></li>
+      <li>state<em>sent | accepted | superseded | revoked</em></li><li>expires_at<em>timestamptz</em></li></ul></div>
+    <div class="ent where-cp"><h4>sign_in_requests <span>link + code</span></h4><ul>
+      <li><span class="pk">id</span><em>uuid v7</em></li><li>kind<em>web | app</em></li>
+      <li>link_token_hash<em>SHA-256</em></li><li>code_hmac, code_attempts<em>5 at most</em></li>
+      <li>code_challenge, redirect_uri<em>PKCE, app</em></li><li>state<em>pending | completed | locked</em></li></ul></div>
+    <div class="ent where-cp"><h4>web_sessions <span>admin web</span></h4><ul>
+      <li><span class="fk">membership_id</span><em>fk</em></li><li>token_hash<em>SHA-256</em></li>
+      <li>last_seen_at, expires_at<em>14 d idle, 30 d</em></li><li>revoked_at<em>timestamptz</em></li></ul></div>
     <div class="ent where-cp"><h4>devices <span>a Mac</span></h4><ul>
-      <li><span class="pk">id</span><em>uuid</em></li><li><span class="fk">user_id, org_id</span><em>fk</em></li>
-      <li>name, macos_version, app_version<em>text</em></li><li>token_hash<em>text</em></li>
-      <li>last_seen_at<em>timestamp</em></li><li>revoked_at<em>timestamp</em></li></ul></div>
+      <li><span class="pk">id</span><em>uuid v7</em></li><li><span class="fk">membership_id</span><em>owner</em></li>
+      <li>state<em>pending | active | revoked</em></li><li>token_hash<em>SHA-256</em></li>
+      <li>valkey_password_sha256<em>rebuilds the ACL</em></li><li>device_status<em>1:1, heartbeat</em></li></ul></div>
+    <div class="ent where-cp"><h4>volumes <span>a disk</span></h4><ul>
+      <li><span class="pk">id</span><em>uuid v7</em></li><li>name<em>its folder, never renamed</em></li>
+      <li>volume_name<em>JuiceFS slug</em></li><li>meta_db<em>Valkey db, never reused</em></li>
+      <li>trash_days, cache_expire_days<em>7, 30</em></li><li>s3_key_id<em>key in its format</em></li></ul></div>
+    <div class="ent where-cp"><h4>s3_keys <span>one active</span></h4><ul>
+      <li><span class="pk">id</span><em>uuid v7</em></li><li>access_key_id<em>tail shown</em></li>
+      <li>secret_key_enc<em>AES-GCM, wiped</em></li><li>state<em>pending | active | retiring | retired</em></li></ul></div>
+    <div class="ent where-cp"><h4>key_rotations <span>the job</span></h4><ul>
+      <li><span class="fk">old_key_id, new_key_id</span><em>fk</em></li><li>state<em>applying | awaiting | closed</em></li>
+      <li>probe_state<em>test write</em></li><li>key_rotation_volumes<em>one step per disk</em></li></ul></div>
+    <div class="ent where-cp"><h4>key_exposures <span>the window</span></h4><ul>
+      <li>kind<em>person removed | Mac revoked</em></li><li>label, occurred_at<em>snapshot</em></li>
+      <li>closed_by_rotation_id<em>started after it</em></li></ul></div>
+    <div class="ent where-cp"><h4>audit_events <span>append only</span></h4><ul>
+      <li><span class="pk">id</span><em>uuid v7</em></li><li><span class="fk">organization_id, actor_user_id</span><em>fk</em></li>
+      <li>action, category<em>text</em></li><li>target_kind, target_id, target_label<em>snapshot</em></li><li>detail<em>jsonb, no secrets</em></li></ul></div>
     <div class="ent where-db"><h4>device user <span>Valkey ACL</span></h4><ul>
       <li><span class="pk">floppy_d_&lt;id&gt;</span><em>ACL user</em></li><li>metadata commands<em>JuiceFS keys</em></li>
       <li>PSYNC, REPLCONF<em>its replica</em></li><li>password<em>shown once</em></li></ul></div>
-    <div class="ent where-cp"><h4>sign_in_requests <span>PKCE</span></h4><ul>
-      <li><span class="pk">id</span><em>uuid</em></li><li>code_challenge, redirect_uri<em>text</em></li>
-      <li>magic_link_hash<em>text</em></li><li>expires_at, used_at<em>timestamp</em></li></ul></div>
-    <div class="ent where-cp"><h4>audit_events <span>append only</span></h4><ul>
-      <li><span class="pk">id</span><em>bigint</em></li><li><span class="fk">org_id, actor_id</span><em>fk</em></li>
-      <li>action<em>text</em></li><li>target<em>jsonb</em></li><li>created_at<em>timestamp</em></li></ul></div>
-    <div class="ent where-db"><h4>volume database <span>Valkey db</span></h4><ul>
+    <div class="ent where-db"><h4>disk database <span>Valkey db</span></h4><ul>
       <li>i*, d*, c*, x*<em>file tree</em></li><li>setting<em>format + S3 key</em></li>
       <li>ryw&lt;sid&gt;<em>read-your-writes</em></li></ul></div>
   </div>
-  <p class="small muted" style="margin-top:14px">One Valkey user per Mac instead of per person: a lost or stolen laptop is revoked alone, and the person keeps working on the others. Replication copies a whole Valkey instance, not one database: a replica sees every volume on its master, so organizations never share an instance.</p>
+  <p class="small muted" style="margin-top:14px">One Valkey user per Mac on the organization's instance, not per disk: a lost or stolen laptop is revoked alone, and since replication copies a whole instance a replica sees every disk anyway, so organizations never share an instance. Valkey does not replicate ACL users: the control plane keeps each password's SHA-256 and rebuilds them on a promoted or restored master. The status tables (<code>organization_status</code>, <code>device_status</code>, <code>volume_status</code>) hold the latest observations, overwritten.</p>
 </section>
 
 <section id="failures">
@@ -1224,7 +1242,7 @@ ul.slots li b { font-weight: 650; }
       { f: "app", t: "vm", l: "floppy setup: create VM, set up the replica", c: "ink" },
       { f: "vk", t: "vm", l: "full sync, then live", c: "repl" },
       { k: "note", f: "vk", t: "vm", l: "mount: S3 key read from the replica" },
-      { k: "note", f: "u", t: "vm", l: "Floppy appears in the Finder at /Volumes/Floppy" }
+      { k: "note", f: "u", t: "vm", l: "Floppy appears in the Finder: /Volumes/Floppy, a folder per disk" }
     ]);
 
   seq("seq-read",
