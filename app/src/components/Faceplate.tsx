@@ -14,7 +14,7 @@ interface FaceplateProps {
   fill: number;
   /** The readout at the end of the slot (usage, free space). */
   right?: string;
-  /** A blinking orange head at the end of the fill while data moves. */
+  /** The fill's leading block blinks with the LED while data moves; colour stays in the LED. */
   activity?: boolean;
   /** Dims the fill when the disk is off. */
   dim?: boolean;
@@ -42,7 +42,7 @@ export function Faceplate({ led, blink, readout, fill, right = "", activity, dim
       <rect x="24" y="34" width="212" height="12" rx="6" fill="#0b0b0a" />
       {w > 0 && <rect x="27" y="37" width={w} height="6" rx="3" fill="#d9d4c8" opacity={dim ? 0.45 : 1} />}
       {activity && w > 14 && (
-        <rect x={27 + w - 14} y="37" width="14" height="6" rx="3" fill={LED.dl} className="face-blink" />
+        <rect x={27 + w - 14} y="37" width="14" height="6" rx="3" fill="#d9d4c8" className="face-blink" />
       )}
       <text x="24" y="76" fontFamily="Schibsted Grotesk" fontWeight="800" fontSize="15" letterSpacing="-.4" fill="#8f8b83">
         floppy

@@ -2,7 +2,7 @@
 // The Grafite drive faceplate (design/mark/faceplate.svg) as the hero object, with the LED
 // legend under it. The same dark body in both themes, colours from the --plate-* and
 // --led-*-plate tokens. It plays the panel's states in a loop: connected, a project
-// downloading (the slot fills, the orange head and the LED blink), connected again, then the
+// downloading (the slot fills, its leading block and the LED blink), connected again, then the
 // project freed. With prefers-reduced-motion it stays still on Connected.
 import { brand, type Lang } from '@/brand';
 import type { LandingStrings } from '@/i18n/landing';
@@ -156,9 +156,10 @@ const legend = (['ok', 'dl', 'err', 'off'] as const).map((state) => ({ state, la
   .fp-fill {
     fill: var(--plate-fill);
   }
-  /* The block arriving: shown only while downloading, blinking with the LED. */
+  /* The block arriving: the fill's own colour, blinking with the LED while downloading.
+     Colour lives only in the LED. */
   .fp-head {
-    fill: var(--led-dl-plate);
+    fill: var(--plate-fill);
     opacity: 0;
   }
   .is-downloading .fp-head {
