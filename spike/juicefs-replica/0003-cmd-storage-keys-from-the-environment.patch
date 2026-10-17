@@ -1,0 +1,214 @@
+From 16c1da8716ada6365ce36c6f0a8032e30f94248f Mon Sep 17 00:00:00 2001
+From: Simone Salerno <doppiaesse@proton.me>
+Date: Sat, 17 Oct 2026 21:00:00 +0200
+Subject: [PATCH] cmd: format and config take the storage keys from the
+ environment
+
+`juicefs format` reads ACCESS_KEY, SECRET_KEY and SESSION_TOKEN only when it
+creates a volume: on an existing volume, and in `juicefs config`, only flags
+given on the command line change, so changing a volume's key meant putting
+the secret in the process's arguments, where `ps` shows it.
+
+A key flag not given on the command line is now taken from its variable
+(access-key from ACCESS_KEY, secret-key from SECRET_KEY, session-token from
+SESSION_TOKEN) and counts as given: the key of an existing volume changes,
+and config's sanity check runs with the new key before saving it. The
+variables are removed afterwards, as format already did for a new volume. A
+flag on the command line wins over its variable.
+
+Tests: cmd/storage_env_test.go, and in spike/juicefs-replica/test.sh a
+config against Garage that rotates a volume's key from the environment.
+---
+ cmd/config.go           |  3 ++
+ cmd/format.go           |  3 ++
+ cmd/storage_env.go      | 50 ++++++++++++++++++++++
+ cmd/storage_env_test.go | 95 +++++++++++++++++++++++++++++++++++++++++
+ 4 files changed, 151 insertions(+)
+ create mode 100644 cmd/storage_env.go
+ create mode 100644 cmd/storage_env_test.go
+
+diff --git a/cmd/config.go b/cmd/config.go
+index d431fdc..0e6f04d 100644
+--- a/cmd/config.go
++++ b/cmd/config.go
+@@ -162,6 +162,9 @@ func userConfirmed() bool {
+ func config(ctx *cli.Context) error {
+ 	setup(ctx, 1)
+ 	removePassword(ctx.Args().Get(0))
++	if err := keysFromEnv(ctx); err != nil {
++		return err
++	}
+ 	m := meta.NewClient(ctx.Args().Get(0), nil)
+ 
+ 	format, err := m.Load(false)
+diff --git a/cmd/format.go b/cmd/format.go
+index a20f882..5580582 100644
+--- a/cmd/format.go
++++ b/cmd/format.go
+@@ -423,6 +423,9 @@ func maxVersion(v1, v2 string) string {
+ func format(c *cli.Context) error {
+ 	setup(c, 2)
+ 	removePassword(c.Args().Get(0))
++	if err := keysFromEnv(c); err != nil {
++		return err
++	}
+ 	m := meta.NewClient(c.Args().Get(0), nil)
+ 	name := c.Args().Get(1)
+ 	validName := regexp.MustCompile(`^[a-z0-9][a-z0-9\-]{1,61}[a-z0-9]$`)
+diff --git a/cmd/storage_env.go b/cmd/storage_env.go
+new file mode 100644
+index 0000000..aac8ff3
+--- /dev/null
++++ b/cmd/storage_env.go
+@@ -0,0 +1,50 @@
++/*
++ * JuiceFS, Copyright 2026 Juicedata, Inc.
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *     http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++package cmd
++
++import (
++	"os"
++
++	"github.com/urfave/cli/v2"
++)
++
++// storageKeyEnv maps the object storage key flags to the environment variables
++// that may carry them instead, so a key never has to appear in a process's
++// arguments.
++var storageKeyEnv = []struct{ flag, env string }{
++	{"access-key", "ACCESS_KEY"},
++	{"secret-key", "SECRET_KEY"},
++	{"session-token", "SESSION_TOKEN"},
++}
++
++// keysFromEnv sets the storage key flags of c that are not given on the
++// command line from ACCESS_KEY, SECRET_KEY and SESSION_TOKEN, and removes
++// those variables. `format` and `config` then change the keys of an existing
++// volume as if the flags had been given.
++func keysFromEnv(c *cli.Context) error {
++	for _, k := range storageKeyEnv {
++		v := os.Getenv(k.env)
++		if v == "" || c.IsSet(k.flag) {
++			continue
++		}
++		if err := c.Set(k.flag, v); err != nil {
++			return err
++		}
++		_ = os.Unsetenv(k.env)
++	}
++	return nil
++}
+diff --git a/cmd/storage_env_test.go b/cmd/storage_env_test.go
+new file mode 100644
+index 0000000..85da526
+--- /dev/null
++++ b/cmd/storage_env_test.go
+@@ -0,0 +1,95 @@
++/*
++ * JuiceFS, Copyright 2026 Juicedata, Inc.
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *     http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++package cmd
++
++import (
++	"os"
++	"slices"
++	"sort"
++	"testing"
++
++	"github.com/urfave/cli/v2"
++)
++
++// runWithStorageFlags runs check inside a command that has the storage key flags.
++func runWithStorageFlags(t *testing.T, args []string, check func(c *cli.Context)) {
++	t.Helper()
++	app := &cli.App{
++		Name: "juicefs",
++		Commands: []*cli.Command{{
++			Name: "config",
++			Flags: []cli.Flag{
++				&cli.StringFlag{Name: "access-key"},
++				&cli.StringFlag{Name: "secret-key"},
++				&cli.StringFlag{Name: "session-token"},
++				&cli.IntFlag{Name: "trash-days"},
++			},
++			Action: func(c *cli.Context) error {
++				if err := keysFromEnv(c); err != nil {
++					return err
++				}
++				check(c)
++				return nil
++			},
++		}},
++	}
++	if err := app.Run(append([]string{"juicefs", "config"}, args...)); err != nil {
++		t.Fatalf("run: %s", err)
++	}
++}
++
++func TestKeysFromEnvAreSetFlags(t *testing.T) {
++	t.Setenv("ACCESS_KEY", "env-ak")
++	t.Setenv("SECRET_KEY", "env-sk")
++	t.Setenv("SESSION_TOKEN", "")
++	runWithStorageFlags(t, []string{"--trash-days", "3", "meta-url"}, func(c *cli.Context) {
++		names := c.LocalFlagNames()
++		sort.Strings(names)
++		if want := []string{"access-key", "secret-key", "trash-days"}; !slices.Equal(names, want) {
++			t.Fatalf("flags %v, want %v", names, want)
++		}
++		if c.String("access-key") != "env-ak" || c.String("secret-key") != "env-sk" {
++			t.Fatalf("keys %q %q", c.String("access-key"), c.String("secret-key"))
++		}
++		if !c.IsSet("secret-key") || c.IsSet("session-token") {
++			t.Fatalf("IsSet secret-key %v session-token %v", c.IsSet("secret-key"), c.IsSet("session-token"))
++		}
++	})
++	if os.Getenv("SECRET_KEY") != "" || os.Getenv("ACCESS_KEY") != "" {
++		t.Fatal("the variables must not reach child processes")
++	}
++}
++
++func TestKeysOnTheCommandLineWin(t *testing.T) {
++	t.Setenv("ACCESS_KEY", "env-ak")
++	runWithStorageFlags(t, []string{"--access-key", "argv-ak", "meta-url"}, func(c *cli.Context) {
++		if c.String("access-key") != "argv-ak" {
++			t.Fatalf("access-key %q", c.String("access-key"))
++		}
++	})
++}
++
++func TestNoKeysInTheEnvironmentChangeNothing(t *testing.T) {
++	t.Setenv("ACCESS_KEY", "")
++	t.Setenv("SECRET_KEY", "")
++	t.Setenv("SESSION_TOKEN", "")
++	runWithStorageFlags(t, []string{"meta-url"}, func(c *cli.Context) {
++		if names := c.LocalFlagNames(); len(names) != 0 {
++			t.Fatalf("flags %v", names)
++		}
++	})
++}
