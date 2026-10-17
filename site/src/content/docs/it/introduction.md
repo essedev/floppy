@@ -3,11 +3,13 @@ title: Introduzione
 description: Cos’è, per chi è, e cosa non fa.
 ---
 
-%name% è un disco remoto condiviso per chi monta video su macOS. Compare nel Finder come **%name%**, come un disco esterno, e i file stanno in un object storage S3 che scegli tu. Una cache locale su ogni Mac rende le clip che hai già aperto veloci come un SSD interno.
+%name% è un disco remoto condiviso per gruppi su macOS che lavorano con file grandi. Compare nel Finder come **%name%**, come un disco esterno, e i file stanno in un object storage S3 che scegli tu. Una cache locale su ogni Mac rende i file che hai già aperto veloci come un SSD interno.
 
 ## Per chi è
 
-Piccoli gruppi che montano video insieme e vogliono un posto solo per il girato: gli stessi file su ogni Mac, senza cartelle da sincronizzare e senza un abbonamento per postazione. Chi monta non deve sapere niente di bucket o database: apre il Finder e lavora.
+Piccoli gruppi e studi che vogliono un posto solo per il loro lavoro: gli stessi file su ogni Mac, senza cartelle da sincronizzare e senza un abbonamento per postazione. È pensato per il video, dove le clip sono grandi e la timeline salta da un punto all’altro, e va bene anche per servizi fotografici, progetti di design e 3D, audio e archivi condivisi. Chi lo usa non deve sapere niente di bucket o database: apre il Finder e lavora.
+
+Non va bene per migliaia di file minuscoli scritti tutti insieme, per computer con Windows o Linux, o per lavorare del tutto offline; [Costi e alternative](/it/costs/) dice cosa scegliere invece.
 
 ## Cosa fa
 

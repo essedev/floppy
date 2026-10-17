@@ -3,11 +3,13 @@ title: Introduction
 description: What it is, who it is for, and what it does not do.
 ---
 
-%name% is a shared remote disk for video teams on macOS. It shows up in the Finder as **%name%**, like an external drive, and the files live in S3 object storage that you choose. A local cache on each Mac makes the clips you have already opened as fast as a local SSD.
+%name% is a shared remote disk for teams on macOS that work with large files. It shows up in the Finder as **%name%**, like an external drive, and the files live in S3 object storage that you choose. A local cache on each Mac makes the files you have already opened as fast as a local SSD.
 
 ## Who it is for
 
-Small teams that edit video together and want one place for the footage: the same files on every Mac, without a sync folder and without a per-seat subscription. The person editing does not need to know anything about buckets or databases: they open the Finder and work.
+Small teams and studios that want one place for their work: the same files on every Mac, without a sync folder and without a per-seat subscription. It is tuned for video, where clips are large and a timeline jumps around, and fits photo shoots, design and 3D projects, audio, and shared archives as well. The people using it do not need to know anything about buckets or databases: they open the Finder and work.
+
+It does not fit thousands of tiny files written at once, Windows or Linux desktops, or fully offline work; [Costs and alternatives](/costs/) says what to pick instead.
 
 ## What it does
 

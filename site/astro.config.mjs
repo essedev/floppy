@@ -46,7 +46,7 @@ export default defineConfig({
 				{
 					label: 'Start here',
 					translations: { it: 'Per iniziare' },
-					items: [{ slug: 'introduction' }, { slug: 'install' }, { slug: 'how-it-works' }],
+					items: [{ slug: 'introduction' }, { slug: 'install' }, { slug: 'how-it-works' }, { slug: 'costs' }],
 				},
 				{
 					label: 'Run your own',

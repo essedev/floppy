@@ -76,4 +76,12 @@ On a 100 Mbps line with 25 ms to S3, with 1 MB blocks, the 4 MB readahead and bo
 | First read after a jump while scrubbing | 0.40 s on average |
 | The same cold read on a 1 Gbps link | 103 MB/s |
 
+The file tree, with the central Valkey 15 ms away, from the Finder over SMB:
+
+| | File tree over the network | With the replica on the Mac |
+|---|---|---|
+| Listing a folder of 300 files | 75-117 s | 0.20-0.30 s |
+| A new file showing up on another Mac | 0.47 s | 0.00-0.01 s |
+| Creating 100 small files | 158-174 s | 13.7-17 s |
+
 How each number was measured is in [ARCHITECTURE.md](%repo%/blob/main/docs/ARCHITECTURE.md#measured-performance).
