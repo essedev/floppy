@@ -21,6 +21,9 @@ env_value() { grep "^$1=" .env | tail -1 | cut -d= -f2- || true; }
 if [ -z "$(env_value FLOPPY_GARAGE_RPC_SECRET)" ]; then
   set_env FLOPPY_GARAGE_RPC_SECRET "$(openssl rand -hex 32)"
 fi
+if [ -z "$(env_value FLOPPY_GARAGE_ADMIN_TOKEN)" ]; then
+  set_env FLOPPY_GARAGE_ADMIN_TOKEN "$(openssl rand -hex 32)"
+fi
 docker compose --profile s3 up -d --wait garage
 
 garage() { docker compose exec -T garage /garage "$@"; }
@@ -52,4 +55,4 @@ for prefix in FLOPPY_TEST_S3 FLOPPY_TEST_S3_SECOND; do
 done
 
 set_env FLOPPY_TEST_S3_BUCKET "$bucket"
-echo "Garage ready: http://127.0.0.1:4509 (bucket $bucket; keys in server/.env)"
+echo "Garage ready: S3 http://127.0.0.1:4509, admin http://127.0.0.1:4540 (bucket $bucket; keys in server/.env)"

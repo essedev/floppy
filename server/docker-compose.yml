@@ -78,12 +78,14 @@ services:
     profiles: [s3]
     environment:
       GARAGE_RPC_SECRET: ${FLOPPY_GARAGE_RPC_SECRET:?run docker/garage-setup.sh}
+      GARAGE_ADMIN_TOKEN: ${FLOPPY_GARAGE_ADMIN_TOKEN:?run docker/garage-setup.sh}
     volumes:
       - ./docker/garage.toml:/etc/garage.toml:ro
       - garage-meta:/var/lib/garage/meta
       - garage-data:/var/lib/garage/data
     ports:
       - "127.0.0.1:4509:3900"
+      - "127.0.0.1:4540:3903" # admin API, for the managed storage adapter (fluix-server range)
 
 volumes:
   db-data:
