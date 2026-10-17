@@ -4,7 +4,7 @@ paths:
 ---
 # The spike (spike/)
 
-The local test bench for the data path and the team engine: Garage as S3, PostgreSQL, Toxiproxy, a central Valkey with a replica per client, and two clients (`drive`, `drive-b`) that the Mac mounts over SMB. Secrets in `spike/.env`, outside git.
+The local test bench for the data path and the team engine: Garage as S3, PostgreSQL, Toxiproxy, a central Valkey with a replica per client, and two clients (`drive`, `drive-b`) that the Mac mounts over SMB; the `perdisk` profile adds three disks, each with its own Valkey, on one client (`drive-p`). Secrets in `spike/.env`, outside git.
 
 ```bash
 spike/setup.sh                 # Garage, PostgreSQL, Toxiproxy, drive; secrets in spike/.env
@@ -16,6 +16,7 @@ spike/juicefs-replica/build.sh # patched juicefs into dist/
 spike/juicefs-replica/test.sh  # the patches' Go tests
 JUICEFS_SOURCE=replica docker compose -f spike/docker-compose.yml --profile replica build drive drive-b
 spike/acceptance.py [--baseline] [t01 ...]   # two clients, central Valkey + replicas, 17 checks
+SMB_FORCE_USER=drive spike/perdisk.py [t14 ...]   # per-disk permissions: one Valkey and one bucket per disk, 52 checks
 ```
 
 ## Gotchas
