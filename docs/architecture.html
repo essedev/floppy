@@ -427,7 +427,7 @@ ul.slots li b { font-weight: 650; }
         <tr><td class="k">File tree</td><td>A central Valkey that writes every change to disk, with a replica in the datacenter and a daily dump</td></tr>
         <tr><td class="k">Browsing</td><td>Local: every Mac reads a replica in its own VM; a write costs one round trip to the center</td></tr>
         <tr><td class="k">Access</td><td>Sign-in in the browser, a Valkey user per Mac</td></tr>
-        <tr><td class="k">Someone leaves</td><td>One click deletes their user, then one key rotation that reaches every Mac on its own</td></tr>
+        <tr><td class="k">Someone leaves</td><td>One click deletes their user. With managed storage their Mac's own S3 key is deleted with it; with a team key one rotation follows and reaches every Mac on its own</td></tr>
         <tr><td class="k">Install</td><td><code>brew install --cask floppy</code>, then the app does the rest</td></tr>
         <tr><td class="k">Interface</td><td>A menu bar app driving the <code>floppy</code> command</td></tr>
         <tr><td class="k">Without network</td><td>Read only: the whole tree browsable, cached clips play, saving fails at once</td></tr>
@@ -526,7 +526,7 @@ ul.slots li b { font-weight: 650; }
         <path class="e ctl" d="M432 88 H590" marker-start="url(#a-ctl)" marker-end="url(#a-ctl)"/>
         <text class="el" x="452" y="78">login · config · heartbeat</text>
         <path class="e ctl" d="M745 126 V256 H905 V438" marker-end="url(#a-ctl)"/>
-        <text class="el" x="762" y="248">ACL users · volumes · key rotation</text>
+        <text class="el" x="762" y="248">ACL users · volumes · S3 keys</text>
         <path class="e ink" d="M760 98 H790" marker-start="url(#a-ink)" marker-end="url(#a-ink)"/>
         <path class="e ink" d="M660 152 V128" marker-end="url(#a-ink)"/>
 
@@ -587,7 +587,7 @@ ul.slots li b { font-weight: 650; }
         <text class="ns" x="604" y="518">every write on disk, a replica, a daily dump</text>
       </svg>
     </div>
-    <figcaption>The S3 key never travels through the control plane to the Mac: JuiceFS keeps it inside each volume's metadata, so it sits on the master and in every replica. Whoever can read the metadata can reach the bucket; deleting a Mac's Valkey user stops its writes and its replica's stream, and rotating the S3 key shuts out any copy of the old one.</figcaption>
+    <figcaption>Two storage modes, and a key scope in each (DECISIONS #22). With a team key JuiceFS keeps the key inside each volume's metadata, so it sits on the master and in every replica: deleting a Mac's Valkey user stops its writes and its replica's stream, and rotating the key shuts out any copy of the old one. With a key per person (manual or managed) or per Mac (managed), the metadata holds no key: each Mac gets its key from the control plane, passes it to JuiceFS at mount, and a revocation deletes that one key at the provider.</figcaption>
   </figure>
 </section>
 
@@ -628,12 +628,13 @@ ul.slots li b { font-weight: 650; }
     </div>
     <div class="card comp">
       <h3>JuiceFS<span class="lic">Apache-2.0</span></h3>
-      <div class="where">v1.4.1 with two patches, spike/juicefs-replica · a fork branch later</div>
+      <div class="where">v1.4.1 with its patches, spike/juicefs-replica · a fork branch later</div>
       <ul>
         <li>0001: lookups, attributes, listings, xattrs and slice lists from the local replica</li>
         <li>0001: writes on the master in one round trip, read-your-writes from a session counter in the same transaction</li>
         <li>0001: mode and lag in <code>.stats</code>: replica, master, offline</li>
         <li>0002: whole blocks inside a sequential stream, when the Mac reads out of order</li>
+        <li>0003, being written: <code>config</code> and <code>format</code> take the S3 key from the environment</li>
         <li>1 MB blocks, 4 MB readahead</li>
       </ul>
     </div>
@@ -654,7 +655,8 @@ ul.slots li b { font-weight: 650; }
         <li>Accounts, magic link sign-in, invites</li>
         <li>Organizations, volumes, devices, in its own PostgreSQL</li>
         <li>Creates and deletes the Valkey ACL users</li>
-        <li>Creates volumes (<code>juicefs format</code>), rotates the S3 key</li>
+        <li>Creates volumes (<code>juicefs format</code>), rotates a team S3 key</li>
+        <li>Optional storage adapters (OVH, AWS, MinIO, Garage): bucket and a key per Mac</li>
         <li>Audit log</li>
       </ul>
     </div>
@@ -672,8 +674,9 @@ ul.slots li b { font-weight: 650; }
       <div class="where">a bucket per organization</div>
       <ul>
         <li>Volumes are prefixes inside the bucket</li>
-        <li>One key per organization, stored in the metadata</li>
-        <li>Rotated by pasting a new key, no provider API</li>
+        <li>Manual: a team key in the metadata, or a key per person</li>
+        <li>With a team key, versioning on, checked by the control plane</li>
+        <li>Managed: a key per Mac or per person from the provider's API, outside the core</li>
       </ul>
     </div>
   </div>
@@ -682,7 +685,7 @@ ul.slots li b { font-weight: 650; }
 <section id="patches">
   <p class="eyebrow">05 · The JuiceFS patches</p>
   <h2>Two patches on JuiceFS, and why</h2>
-  <p>JuiceFS Community does the file system: data as blocks on S3, metadata in a Redis-compatible server, a cache on each client. Floppy runs it at v1.4.1 with two patches of its own, kept in <code>spike/juicefs-replica/</code> and applied in order when the binary is built. They change where JuiceFS reads its metadata, how it commits a write and how it groups a reader's pieces into block downloads; the volume format, the layout on S3 and the metadata keys stay JuiceFS's own, plus one counter per session. Without the replica option a patched JuiceFS behaves like upstream.</p>
+  <p>JuiceFS Community does the file system: data as blocks on S3, metadata in a Redis-compatible server, a cache on each client. Floppy runs it at v1.4.1 with two patches of its own and a third being written, kept in <code>spike/juicefs-replica/</code> and applied in order when the binary is built. They change where JuiceFS reads its metadata, how it commits a write and how it groups a reader's pieces into block downloads; the volume format, the layout on S3 and the metadata keys stay JuiceFS's own, plus one counter per session. Without the replica option a patched JuiceFS behaves like upstream.</p>
 
   <h3>Why upstream JuiceFS does not fit</h3>
   <div class="grid g2">
@@ -751,6 +754,10 @@ ul.slots li b { font-weight: 650; }
   <p class="readout" style="margin:-4px 0 12px">pkg/vfs/reader.go · 14 lines changed, a 119-line test</p>
   <p>When a read falls inside a sequential session, the patch widens the slice JuiceFS creates for it to the whole block that holds it: one slice per block. The small pieces the Mac sends out of order then join that slice instead of each loading a range of its own. Range loads are not cached, so the stream used to download the same block again moments later, and the extra slices pushed JuiceFS's request cleanup into cancelling downloads halfway. Random reads are untouched. On a clip, the download beyond what it plays stays at 4-6%.</p>
 
+  <h3>0003, and maybe 0004: the S3 key from the environment</h3>
+  <p class="readout" style="margin:-4px 0 12px">cmd/config.go, cmd/format.go · being written</p>
+  <p>On an existing volume, <code>juicefs config</code> and <code>juicefs format</code> change only the flags passed on the command line (<code>ctx.LocalFlagNames()</code>); <code>ACCESS_KEY</code> and <code>SECRET_KEY</code> from the environment count only for a new format. Rotating a team key would put the secret in argv, visible in <code>ps</code>: 0003 lets both commands take it from the environment. Keys per person or per Mac (DECISIONS #22) need <code>juicefs mount</code> to use a key that is not in the format: with no key stored, v1.4.1's S3 client already falls back to the AWS SDK's chain (<code>AWS_ACCESS_KEY_ID</code> in the mount's environment); if that does not hold against Garage and OVH, a 0004 adds it. Those scopes ship only once one of the two is proven.</p>
+
   <h3>How they are tested</h3>
   <ul class="slots">
     <li><code>spike/juicefs-replica/test.sh</code> runs the Go integration tests of 0001 against a real Valkey master and replica in Docker: read-your-writes, concurrent writers, a link that drops, lag, a master that goes down or answers slowly, writes while offline, round trips per operation, optimistic transactions and their conflicts, and JuiceFS's whole metadata test suite with reads on the replica, also with replication delayed by 5 ms.</li>
@@ -793,7 +800,7 @@ ul.slots li b { font-weight: 650; }
   </div>
   <div class="panel" id="f-revoke" hidden>
     <figure><div class="fig wide"><svg class="seq" id="seq-revoke"></svg></div>
-    <figcaption>Deleting the user stops the Mac's writes and its replica's stream at once. Until the app clears it, the replica still holds the old tree with the S3 key inside: the key rotation closes that window, as described under Credentials.</figcaption></figure>
+    <figcaption>Deleting the user stops the Mac's writes and its replica's stream at once. With a key per Mac the control plane then deletes that Mac's key at the provider, and there is nothing else to do. With a team key the replica still holds the old tree with the key inside until the app clears it: the rotation closes that window, by hand in manual mode, by the adapter in managed mode (Credentials).</figcaption></figure>
   </div>
 </section>
 
@@ -824,14 +831,16 @@ ul.slots li b { font-weight: 650; }
       <tbody>
         <tr><td class="k">Device token</td><td>Each Mac</td><td>Keychain</td><td>Control plane API as that Mac</td><td>Revoking the device <span class="st"><span class="led" data-state="ok"></span><span class="readout">Immediate</span></span></td></tr>
         <tr><td class="k">Valkey user</td><td>Each Mac</td><td>Keychain, passed to the VM for JuiceFS and the replica</td><td>Write the file tree, receive the replication stream, and through them the S3 key</td><td><code>ACL DELUSER</code> and <code>CLIENT KILL</code> <span class="st"><span class="led" data-state="ok"></span><span class="readout">Immediate</span></span></td></tr>
-        <tr><td class="k">S3 key</td><td>Every Mac with a Valkey user, implicitly</td><td>Volume format in the metadata, on the master and in every replica</td><td>Read, write, delete objects in the bucket</td><td>New key pasted, old one deleted at the provider <span class="st"><span class="led" data-state="dl"></span><span class="readout">Manual</span></span></td></tr>
+        <tr><td class="k">S3 key, per person</td><td>Each Mac of that person</td><td>Encrypted in the control plane, then the Keychain; never in the metadata</td><td>Read, write, delete objects in the bucket</td><td>Deleted at the provider: confirmed by the admin (manual), by the adapter (managed) <span class="st"><span class="led" data-state="dl"></span><span class="readout">One key</span></span></td></tr>
+        <tr><td class="k">S3 key, per Mac</td><td>Each Mac (managed storage)</td><td>Keychain, passed to JuiceFS at mount; never in the metadata</td><td>Read, write, delete objects in the bucket</td><td>Deleted at the provider by the adapter <span class="st"><span class="led" data-state="ok"></span><span class="readout">Immediate</span></span></td></tr>
+        <tr><td class="k">S3 key, team</td><td>Every Mac with a Valkey user, implicitly</td><td>Volume format in the metadata, on the master and in every replica</td><td>Read, write, delete objects in the bucket</td><td>Rotation: by hand in manual mode, by the adapter in managed mode <span class="st"><span class="led" data-state="dl"></span><span class="readout">Manual or minutes</span></span></td></tr>
         <tr><td class="k">SMB password</td><td>Mac and its VM</td><td>Keychain</td><td>The share, only on the private Mac-VM link</td><td>Reinstall</td></tr>
         <tr><td class="k">Valkey admin</td><td>Control plane</td><td>Server environment</td><td>Create and delete ACL users, format volumes</td><td>The operator</td></tr>
         <tr><td class="k">Magic link</td><td>The person's inbox</td><td>Hashed, single use, 15 minutes</td><td>One sign-in</td><td>Expiry</td></tr>
       </tbody>
     </table>
   </div>
-  <div class="notice"><div class="notice-h"><span class="st"><span class="led" data-state="dl"></span><span class="readout">Residual risk</span></span><b>The window before rotation</b></div><p>A revoked Mac keeps the replica it had, S3 key included, until the app clears it at the next heartbeat; whoever copied the key can delete or download raw blocks until the admin deletes it at the provider. Without metadata the blocks are 1 MB fragments with no names; deletion is the real risk. Mitigations: rotate right after revoking, and bucket versioning as a safety net (an open decision, it bills deleted blocks).</p></div>
+  <div class="notice"><div class="notice-h"><span class="st"><span class="led" data-state="dl"></span><span class="readout">Residual risk</span></span><b>The window before rotation, with a team key</b></div><p>Where the team key is in the metadata, a revoked Mac keeps the replica it had, key included, until the app clears it at the next heartbeat; whoever copied the key can delete or download raw blocks until the admin deletes it at the provider. Without metadata the blocks are 1 MB fragments with no names; deletion is the real risk. Mitigations: rotate right after revoking (the adapter does it within minutes in managed mode), and bucket versioning as a safety net (an open decision, it bills deleted blocks). With a team key, bucket versioning is recommended and the control plane shows whether it is on: deleted blocks stay recoverable for 7 days, and the key's policy denies deleting versions. With a key per person or per Mac there is no team window: only the one key that was reached has to go.</p></div>
   <div class="notice"><div class="notice-h"><span class="slot-mark"></span><b>Permissions stay all or nothing</b></div><p>Everyone in an organization sees and can delete every file of its volumes. JuiceFS Community has no per-folder permissions; trash (7 days) and the bucket's copy at a second provider cover mistakes. The replicas in the Macs are not a backup: they follow the master, deletions included.</p></div>
 </section>
 
@@ -846,7 +855,7 @@ ul.slots li b { font-weight: 650; }
   <div class="er">
     <div class="ent where-cp"><h4>organizations <span>tenant</span></h4><ul>
       <li><span class="pk">id</span><em>uuid v7</em></li><li>name, slug<em>text</em></li>
-      <li>s3_endpoint, s3_bucket<em>one per org</em></li><li>valkey_url<em>one per org</em></li>
+      <li>storage_mode<em>manual | managed</em></li><li>s3_endpoint, s3_bucket<em>one per org</em></li><li>valkey_url<em>one per org</em></li>
       <li>smtp_password_enc<em>AES-GCM</em></li><li>deleted_at<em>timestamptz</em></li></ul></div>
     <div class="ent where-cp"><h4>users <span>a person</span></h4><ul>
       <li><span class="pk">id</span><em>uuid v7</em></li><li>email<em>unique, live</em></li><li>name<em>null until sign-in</em></li>
@@ -874,7 +883,8 @@ ul.slots li b { font-weight: 650; }
       <li>trash_days, cache_expire_days<em>7, 30</em></li><li>s3_key_id<em>key in its format</em></li></ul></div>
     <div class="ent where-cp"><h4>s3_keys <span>one active</span></h4><ul>
       <li><span class="pk">id</span><em>uuid v7</em></li><li>access_key_id<em>tail shown</em></li>
-      <li>secret_key_enc<em>AES-GCM, wiped</em></li><li>state<em>pending | active | retiring | retired</em></li></ul></div>
+      <li>secret_key_enc<em>AES-GCM, wiped</em></li><li>state<em>pending | active | retiring | retired</em></li>
+      <li>holder<em>team | person | device | control plane</em></li></ul></div>
     <div class="ent where-cp"><h4>key_rotations <span>the job</span></h4><ul>
       <li><span class="fk">old_key_id, new_key_id</span><em>fk</em></li><li>state<em>applying | awaiting | closed</em></li>
       <li>probe_state<em>test write</em></li><li>key_rotation_volumes<em>one step per disk</em></li></ul></div>
@@ -944,7 +954,7 @@ ul.slots li b { font-weight: 650; }
       <ul>
         <li>Many organizations on one instance</li>
         <li>Isolation by a Valkey instance and a bucket per organization, not by application filters: replication copies a whole instance</li>
-        <li>The key's scope to its bucket is set by the operator in the provider console</li>
+        <li>Always managed storage: the adapter creates each organization's bucket and a key per Mac</li>
       </ul>
     </div>
   </div>
@@ -1087,11 +1097,11 @@ ul.slots li b { font-weight: 650; }
 
   <h3>Build</h3>
   <ul class="slots">
-    <li><span><b>Design on paper.</b> This page's team architecture into ARCHITECTURE.md, and <code>docs/DATABASE_SCHEMA.md</code> for the control plane.</span></li>
+    <li><span><b>Design on paper.</b> <code>docs/DATABASE_SCHEMA.md</code> is done; the rest of this page's team architecture into ARCHITECTURE.md.</span></li>
     <li><span><b>Engine.</b> The patched JuiceFS (both patches) and a Valkey replica in the VM's offline package set, <code>floppy status --json</code>, the metadata URL from the app instead of a config file, the SMB password in the Keychain.</span></li>
     <li><span><b>Fast failure when a file cannot be read.</b> With the network down, a read of blocks not in cache waits for JuiceFS's retries and the Mac's 600 s SMB timeout. It should fail at once, as JuiceMount refuses reads of files not kept offline in 4-67 ms from a local index; it needs to know, per path, what is in the cache.</span></li>
     <li><span><b>The Mac stays awake while data moves.</b> <code>caffeinate -i</code> during a copy, an upload or a warmup, released a couple of minutes after the traffic stops, so sleep does not cut a transfer halfway. No administrator rights.</span></li>
-    <li><span><b>Control plane.</b> FastAPI and React, accounts with magic link sign-in, organizations, disks, one Valkey user per Mac, key rotation, audit log, Docker Compose for self-hosting.</span></li>
+    <li><span><b>Control plane.</b> Phase 1 built in <code>server/</code>. Phase 2: the real <code>juicefs format</code> and <code>config</code>, the real S3 probe, the storage adapters with a key per Mac, rate limiting.</span></li>
     <li><span><b>App.</b> Tauri from the Portsage skeleton, built from the concepts: panel, settings, first run.</span></li>
     <li><span><b>Keeping the JuiceFS patches alive.</b> The fork branch and the scheduled job described under <a href="#patches">The JuiceFS patches</a>.</span></li>
     <li><span><b>Distribution and first instance.</b> The Homebrew cask, then the first self-hosted instance on Dokploy with a central Valkey and S3 in Milan.</span></li>
@@ -1104,7 +1114,7 @@ ul.slots li b { font-weight: 650; }
   <p>Everything already decided, with the alternative it ruled out, is in <a href="DECISIONS.md">DECISIONS.md</a>.</p>
   <div class="dec">
     <div class="card"><b>Cache on revocation</b><p>The cache and the replica hold the organization's footage and file tree on a Mac that is no longer allowed.</p><span class="rec"><span class="st"><span class="led"></span><span class="readout">Proposal</span></span><span>The app clears both at the first heartbeat that says revoked.</span></span></div>
-    <div class="card"><b>Bucket versioning</b><p>A safety net for the rotation window, but deleted and compacted blocks stay billed.</p><span class="rec"><span class="st"><span class="led"></span><span class="readout">Proposal</span></span><span>On, with a lifecycle rule that expires old versions after a few days.</span></span></div>
+    <div class="card"><b>Bucket versioning</b><p>A safety net for the rotation window, but deleted and compacted blocks stay billed.</p><span class="rec"><span class="st"><span class="led" data-state="ok"></span><span class="readout">Decided</span></span><span>With a team key: on, old versions expire after 7 days, the key cannot delete versions, the control plane shows it (DECISIONS #22).</span></span></div>
     <div class="card"><b>Where the central Valkey runs</b><p>A VPS next to the bucket in Milan, or a managed Valkey in the same region. It needs <code>appendfsync always</code>, a replica and replication open to the Macs.</p><span class="rec"><span class="st"><span class="led"></span><span class="readout">Proposal</span></span><span>Decided with the first instance, on durability first and price second.</span></span></div>
     <div class="card"><b>The Unreachable text</b><p>When the center does not answer, the disk stays browsable and cached clips play: the panel must not read as if the disk were gone.</p><span class="rec"><span class="st"><span class="led"></span><span class="readout">Proposal</span></span><span>Say that the disk is read only until the line is back, and that saving will work again on its own.</span></span></div>
   </div>
@@ -1238,10 +1248,10 @@ ul.slots li b { font-weight: 650; }
       { k: "note", f: "app", l: "token saved in the Keychain" },
       { f: "app", t: "cp", l: "register this Mac", c: "ctl" },
       { f: "cp", t: "vk", l: "ACL user for this Mac", c: "meta" },
-      { f: "cp", t: "app", l: "Valkey user and URLs, shown once", c: "ctl" },
+      { f: "cp", t: "app", l: "Valkey user, URLs, own S3 key if managed: shown once", c: "ctl" },
       { f: "app", t: "vm", l: "floppy setup: create VM, set up the replica", c: "ink" },
       { f: "vk", t: "vm", l: "full sync, then live", c: "repl" },
-      { k: "note", f: "vk", t: "vm", l: "mount: S3 key read from the replica" },
+      { k: "note", f: "vk", t: "vm", l: "mount: team key from the replica, or the Mac's own key" },
       { k: "note", f: "u", t: "vm", l: "Floppy appears in the Finder: /Volumes/Floppy, a folder per disk" }
     ]);
 
@@ -1287,7 +1297,7 @@ ul.slots li b { font-weight: 650; }
   seq("seq-revoke",
     [{ id: "ad", label: "Admin", sub: "in the browser" }, { id: "cp", label: "Control plane", sub: "API" },
      { id: "vk", label: "Valkey", sub: "central master" }, { id: "rm", label: "Revoked Mac", sub: "VM + replica" },
-     { id: "om", label: "Other Macs", sub: "replicas" }, { id: "s3", label: "S3 provider", sub: "console" }],
+     { id: "om", label: "Other Macs", sub: "replicas" }, { id: "s3", label: "S3 provider", sub: "console or API" }],
     [
       { k: "group", l: "Revoke" },
       { f: "ad", t: "cp", l: "revoke Mac or member", c: "ctl" },
@@ -1295,7 +1305,9 @@ ul.slots li b { font-weight: 650; }
       { k: "note", f: "vk", t: "rm", l: "writes refused, replica cut off" },
       { f: "rm", t: "cp", l: "next heartbeat: revoked", c: "ctl" },
       { f: "rm", t: "rm", l: "stop disk, clear cache and replica, delete token", c: "ink" },
-      { k: "group", l: "Rotate the S3 key" },
+      { k: "group", l: "A key per Mac or per person" },
+      { f: "cp", t: "s3", l: "delete that one key (adapter, or admin in manual mode)", c: "data" },
+      { k: "group", l: "Team key: rotate (the adapter does it in managed mode)" },
       { f: "ad", t: "s3", l: "create a new key", c: "ink" },
       { f: "ad", t: "cp", l: "paste the new key", c: "ctl" },
       { f: "cp", t: "s3", l: "test write with the new key", c: "data" },
