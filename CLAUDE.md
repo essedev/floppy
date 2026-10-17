@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Fluix is a shared remote disk for video teams on macOS: it shows up in the Finder as **Fluix**, and the files live on S3 object storage (OVH) through JuiceFS. On macOS JuiceFS runs in a Lima VM (Debian) and reaches the Mac over SMB, because mounting it directly would need macFUSE's kernel extension. The engine is a bash command (`macos/bin/fluix`) shipped in a private zip; the menu bar app is designed in `docs/concepts/concept-a-panel.html`.
+Fluix is a shared remote disk for video teams on macOS: it shows up in the Finder as **Fluix**, and the files live on S3 object storage (OVH) through JuiceFS. On macOS JuiceFS runs in a Lima VM (Debian) and reaches the Mac over SMB, because mounting it directly would need macFUSE's kernel extension. The engine is a bash command (`macos/bin/fluix`) shipped in a private zip. The team architecture (a central Valkey with a metadata replica in each VM, a patched JuiceFS, a control plane, a Tauri app) is drawn in `docs/architecture.html` and the concepts in `docs/concepts/`, proven in `spike/`, not built yet.
 
 Public repository: code, comments, docs and commits in English; README.md is mirrored in README.it.md in the same commit.
 
@@ -30,8 +30,16 @@ export LIMA_HOME=~/.fluix/vms
 ~/.fluix/lima/bin/limactl shell --workdir / fluix <cmd>   # e.g. sudo journalctl -u fluix-mount
 
 # Local spike
-spike/setup.sh                 # Garage + Toxiproxy + drive container, secrets in spike/.env
+spike/setup.sh                 # Garage, PostgreSQL, Toxiproxy, drive container; secrets in spike/.env
 spike/bench.sh                 # upload, cold/warm reads, seeks, warmup
+spike/meta-bench.sh            # metadata from the Mac over SMB: SQLite vs PostgreSQL at 0/15/30 ms
+spike/juicefs-replica/build.sh # patched juicefs (read replica, optimistic writes) into dist/
+spike/juicefs-replica/test.sh  # the patch's Go tests against Valkey master + replica
+JUICEFS_SOURCE=replica docker compose -f spike/docker-compose.yml --profile replica build drive drive-b
+spike/acceptance.py [--baseline] [t01 ...]   # two clients, central Valkey + replicas, 13 tests
+
+# Site (Astro + Starlight; the product name lives in site/src/brand.ts)
+cd site && pnpm dev            # pnpm build, pnpm check
 ```
 
 ## Gotchas
@@ -70,9 +78,19 @@ spike/bench.sh                 # upload, cold/warm reads, seeks, warmup
 
 **A UI is verified in a real browser.** The mockup passed checks in node and in the browser drew one variant out of three because of a JavaScript error. Load it in headless Chrome (Playwright with Chrome's `executablePath`) and look at the screenshot.
 
+**Samba multiplies metadata operations.** Listing 300 files from the Finder costs about 2,700 file system operations (lookups of `._` names, extended attributes); with the metadata across a network each is a round trip (117 s at 15 ms). Do not tune Samba or caches around it: reads must come from the local replica (DECISIONS #5).
+
+**macOS mounts a server and share only once.** A second mount of `localhost/Fluix`, even on another port, fails with "File exists": the spike reaches the second client by address (`127.0.0.1`).
+
+**Unmount SMB with `-f` in scripts.** A gentle unmount can leave a stale session, and the next mount of the same share answers I/O errors.
+
+**The spike needs the SMB timeout too.** The real install raises `max_resp_timeout` for the VM's address; the spike talks to `localhost` and `127.0.0.1`, so the same block (`# fluix-spike begin/end` in `~/Library/Preferences/nsmb.conf`) has to be there, or cold reads fail after 30 s.
+
+**The per-Mac Valkey user needs more than reads and writes**: INFO, INCR and DEL on `ryw*`, EVAL and EVALSHA for the optimistic writes, and PSYNC, REPLCONF, PING for its replica. A missing INCR aborts every write transaction.
+
 ## Secrets
 
-`spike/.env`, `my-test.env`, `~/.fluix/config.env` and every `dist/*.zip` hold S3 keys and the SMB password: they are outside git (`*.env`, `dist/`) and are never printed, not even in a debug log. To check a file, show the key names, not the values. `package.sh` builds the zip with `umask 077`. OVH S3 keys open every bucket in the project: a tester needs a dedicated user.
+`spike/.env` (with the PostgreSQL and Valkey passwords), `my-test.env`, `~/.fluix/config.env` and every `dist/*.zip` hold S3 keys and the SMB password: they are outside git (`*.env`, `dist/`) and are never printed, not even in a debug log. To check a file, show the key names, not the values. `package.sh` builds the zip with `umask 077`. OVH S3 keys open every bucket in the project: a tester needs a dedicated user.
 
 ## Touch every surface
 
@@ -90,7 +108,7 @@ Inverse states: `setup` writes the `nsmb.conf` block and the launchd agent, `uni
 
 ## Never compromise
 
-- **No administrator rights** to install and use the disk, and no kernel extension: it is the reason the VM exists.
+- **No administrator rights** to use the disk and run the app, and no kernel extension: it is the reason the VM exists. The one exception is installing Homebrew itself, once (DECISIONS #10).
 - **SMB only on the private Mac-VM link** (vzNAT address), with Lima's port forwarding off: SMB signing and encryption are off because the traffic never leaves the Mac.
 - **No user data deleted without confirmation**: `uninstall` asks to type `delete`, and data in the bucket is touched only on explicit request.
 
@@ -103,7 +121,8 @@ These are default rules for this repo: the global instructions sit below, and wh
 - [README.md](README.md): what it is, how to build and hand out the zip.
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): why JuiceFS, VM and SMB, configuration, measured performance, alternatives, costs.
 - [docs/CONVENTIONS.md](docs/CONVENTIONS.md): language, glossary, code conventions.
-- [docs/ROADMAP.md](docs/ROADMAP.md): open questions and next steps.
+- [docs/DECISIONS.md](docs/DECISIONS.md): what was decided and what it ruled out, cited as `DECISIONS #N`.
+- [docs/ROADMAP.md](docs/ROADMAP.md): next steps.
 - [docs/CYCLES.md](docs/CYCLES.md): what was done and when.
-- [docs/architecture.html](docs/architecture.html): the proposed team architecture (control plane, shared PostgreSQL, login) as diagrams and flows; a proposal until it lands in ARCHITECTURE.md.
+- [docs/architecture.html](docs/architecture.html): the team architecture (control plane, central Valkey with a replica per VM, login) as diagrams and flows; a proposal until it lands in ARCHITECTURE.md.
 - [docs/concepts/](docs/concepts/): HTML concepts with variants side by side, one file per design decision.

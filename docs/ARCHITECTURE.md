@@ -1,6 +1,6 @@
 # Architecture
 
-Fluix is a shared remote disk for teams that edit video: on a Mac it shows up as a volume in the Finder, the files live on S3 object storage, and the people working on it need to know nothing else. This document collects the analysis so far and the decisions that came out of it. The project is in testing: there is a test package for macOS on an OVH bucket in Milan, with the metadata inside each Mac, no shared PostgreSQL and no app.
+Fluix is a shared remote disk for teams that edit video: on a Mac it shows up as a volume in the Finder, the files live on S3 object storage, and the people working on it need to know nothing else. This document collects the analysis so far and the reasons behind the decisions, which are listed in [DECISIONS.md](DECISIONS.md). The project is between a test package (one disk per Mac, metadata in SQLite inside each VM, tested on an OVH bucket in Milan) and the team architecture: one disk per team, metadata in a central Valkey with a replica in each Mac's VM, a control plane for sign-in and access, a menu bar app. The team architecture is drawn in [architecture.html](architecture.html) and proven in a local spike; it is not built yet.
 
 Prices and features of third-party services were checked on 06/10/2026 and must be checked again before deciding.
 
@@ -26,21 +26,39 @@ S3 is also not a filesystem: it is fine for copying whole files, not for reading
 
 ## Solution: JuiceFS on OVH
 
-JuiceFS (Community Edition, open source) has the same architecture as LucidLink: data is stored as blocks on S3, metadata (names, folders, sizes) in a shared database, and every Mac keeps a local cache.
+JuiceFS (Community Edition, open source) splits a file system the way LucidLink does: data as blocks on S3, metadata (names, folders, sizes) in a shared database, a local cache on every Mac. LucidLink also keeps a replica of the metadata on every client; Fluix gets the same effect with a patch on JuiceFS (see [Shared metadata over the WAN](#shared-metadata-over-the-wan)).
 
 | Component | Choice | Role |
 |---|---|---|
 | Data | OVH Object Storage Standard bucket, versioning to be decided (see below) | The file blocks |
-| Metadata | PostgreSQL, preferably managed by OVH, in the same region | File and folder tree, locks |
+| Metadata | Valkey (Redis-compatible, BSD), central, durable, in the same region; a replica of it in each Mac's VM | File and folder tree, locks |
 | Client | `juicefs` in a small Linux machine on each Mac, shared to the Mac over SMB on the private Mac-VM link | The volume in the Finder and the cache |
 
 **Why a Linux machine and not `juicefs` directly on the Mac**: see [macFUSE](#macfuse). The Mac mounts an SMB network folder, which it can do on its own without extensions; JuiceFS runs in Linux, where FUSE is native. The price is one more component on each Mac.
 
-**Region**: data and metadata as close as possible to the people editing. Every file and folder operation is a round trip to the database: at 1-3 ms the disk feels local, at 30 ms it does not. Object Storage exists in Milan (region `EU-SOUTH-MIL`, 3-AZ): the test bucket lives there and answers in about 15 ms. Still to check: managed PostgreSQL in Milan, and whether a cheaper 1-AZ region is enough for production.
+**Region**: data and metadata as close as possible to the people editing. With the local replica, reads of the file tree no longer cross the network; every metadata write still costs a round trip to the central Valkey. Object Storage exists in Milan (region `EU-SOUTH-MIL`, 3-AZ): the test bucket lives there and answers in about 15 ms. Still to check: where the central Valkey runs (a VPS or a managed Valkey in Milan), and whether a cheaper 1-AZ region is enough for production.
 
 **Why OVH**: about 8 $/TB per month and free egress within Europe. For video, egress matters more than space, because every clip that is not cached is downloaded again.
 
-**Why managed PostgreSQL**: it is the critical component (see Backup), and a managed one brings backups and PITR without a server to look after, in line with the guiding principle. The price is to be checked; the alternative is a VPS at about 15-30 EUR/month.
+## Shared metadata over the WAN
+
+Measured in the spike at a simulated 15 ms, from the Mac over SMB (DECISIONS #5, CYCLES 6):
+
+| Operation | SQLite in the VM (one Mac) | PostgreSQL over the WAN | Valkey, no replica | Valkey with local replica |
+|---|---|---|---|---|
+| Cold listing of 300 files | 0.24 s | 117 s | 74.6 s | **0.20-0.30 s** |
+| Creating 100 small files | 3.7 s | 174 s | 158 s | **13.7-17 s** |
+| A file created on one Mac visible on another | n/a | n/a | 0.47 s | **0.00-0.01 s** |
+
+**Why a round trip per operation does not work**: Samba turns one listing of 300 files into about 2,700 file system operations (lookups of `._` AppleDouble names, extended attributes for the Finder), each a round trip to the metadata. Inside the VM, without Samba, the same listing takes 0.12 s. The fix is not to make Samba ask less but to make the answers local.
+
+**How the replica works**: the central Valkey pushes every write to the replicas as it executes it; each replica tracks an offset and resumes from a 256 MB backlog after a disconnection, or resyncs fully. JuiceFS (patched, `spike/juicefs-replica`, on v1.4.1) reads the tree, attributes, extended attributes and slice lists from the replica in its VM and writes to the master:
+
+- **Read-your-writes**: each write transaction also increments a counter of the session; a read goes to the replica only once the replica has that value. No extra round trip.
+- **Writes in one round trip**: JuiceFS's own logic runs on replica reads, then one script on the master checks that every value read is unchanged and applies the writes; a conflict retries the classic way (WATCH on the master). Create, setattr, setxattr, unlink and the commit of written data cost one round trip instead of 3-6. About 9 writes per file come from SMB, hence the 14-17 s for 100 files (DECISIONS #8).
+- **Modes**, exposed in the mount's `.stats` (`juicefs_meta_replica_mode`): replica; master, when the replica lags beyond 2 s, its link is down or it restarted empty; offline, when the master is unreachable: reads keep coming from the replica, writes fail at once with "read-only file system". A slow master must not count as unreachable (being fixed, ROADMAP 1).
+
+**Why Valkey and not PostgreSQL**: one round trip per write through server-side scripts, and native replication simple enough to run a replica in each VM. Valkey and not Redis: Redis moved to source-available licenses in 2024 and to AGPL as an option in 2025; Valkey is BSD and in Debian 13 (8.1.1). The price is durability, which has to be configured: every write on disk before the answer (`appendfsync always`), a replica in the datacenter, a daily `juicefs dump` (see Backup).
 
 **Versioning and Object Lock**: off on the test bucket. JuiceFS has its own trash; with versioning every block JuiceFS deletes or compacts would stay in the bucket and be billed, and Object Lock would stop it from deleting and compacting. Against deletions there are the trash and the replica (see Backup). For production it is an open decision.
 
@@ -53,7 +71,7 @@ The cache lives on each Mac's SSD, inside the Linux machine's disk, managed by t
 - **They survive a restart**, until: the cache reaches `--cache-size` (the least recently used blocks go), free space drops below `--free-space-ratio` (default 10%), `--cache-expire` runs out if set, or they are freed by hand with `juicefs warmup --evict <folder>`. The blocks of a deleted file disappear at once on the Mac that deletes it; on the others they become orphans and are the first to go.
 - **`--free-space-ratio` does not protect the Mac**: it looks at the Linux machine's disk, not the Mac's. In the package the cache ceiling and the emergency eviction are computed on the Mac side (see [macOS package](#macos-package)).
 - **Every Mac has its own cache**: what one person has watched does not help the others.
-- **It does not work offline**: even with the blocks cached, the file tree lives in the database. Without a network the disk cannot be used. The exception is the test setup, with the metadata in SQLite inside the VM: there the cached files should stay readable, but this is not tested.
+- **Offline it is read-only**: the file tree lives in the central Valkey, but each VM keeps a replica of it. Without a network the disk can still be browsed and the cached blocks read; writes fail with "read-only file system" until the master answers again. Measured in the spike; the panel has to say it (ROADMAP 3).
 - **Never stale data**: a modified file is written to new blocks, and the cached ones simply go unused.
 
 ## Measured performance
@@ -107,7 +125,7 @@ Measures from the 06/10/2026 spike (`spike/bench.sh`): an Apple Silicon Mac, Gar
 | `--prefetch` | 8 | Measured: the best value cold over SMB |
 | `--buffer-size` | 256 MB | Measured: as fast as 1 GB and leaves room in a 1 GiB VM (see "Footprint") |
 | `--enable-xattr` | on | Samba stores the Finder's metadata there; without it, deleting from the Mac fails with "Operation not supported" |
-| Metadata cache | JuiceFS defaults | Longer timeouts, to make fewer database round trips from the Finder, to be evaluated with shared PostgreSQL: with SQLite in the VM the round trip is local |
+| Metadata cache | JuiceFS defaults | With the local replica reads are local, so longer kernel caches buy little and would delay other people's changes |
 | Samba | `fruit` module (with `samba-vfs-modules`), signing and encryption off, asynchronous I/O | Finder compatibility; signing off and asynchronous I/O take cached reads from 69 to 163 MB/s. Off only because SMB stays on the private Mac-VM link |
 | Samba, hidden files | `veto files` on `.accesslog`, `.config`, `.stats`, `.trash` | JuiceFS's internal files do not show up in the Finder |
 | Spotlight | `mdutil -i off` on the volume | No indexing that reads everything |
@@ -121,38 +139,27 @@ Measures from the 06/10/2026 spike (`spike/bench.sh`): an Apple Silicon Mac, Gar
 
 ## Interface
 
-JuiceFS Community has no end-user interface at all: it is a terminal program. People editing see only a volume in the Finder.
+JuiceFS Community has no end-user interface at all: it is a terminal program. People editing see only a volume in the Finder; everything else comes from Fluix.
 
-**Phase 1, pilot**: the Finder plus two Quick Actions in the right-click menu, "Make available" (`juicefs warmup`) and "Free up space" (`juicefs warmup --evict`), run inside the Linux machine, and the SMB folder mounted at login.
+**A menu bar app in Tauri** (DECISIONS #9), built on the skeleton of [Portsage](https://github.com/essedev/portsage), which already has a menu bar icon and panel, launch at login and an external binary bundled in the app (`externalBin`). The `fluix` command stays the engine the app drives. Swift would only be needed for native Finder badges and menus, which a Swift extension could add next to the app.
 
-**Phase 2, only if the pilot justifies it**: a menu bar app. It is the part commercial products charge for. The candidate features, each tied to a problem to observe:
+**Designed surface by surface**, each in a concept with the decisions set (DECISIONS #11, #12):
+
+- [concept-c-app](concepts/concept-c-app.html): the panel in every state (connected, downloading, starting, unreachable with automatic reconnection every 30 s, off, revoked, Mac nearly full, update available), the project menu, the Settings window, notifications, the menu bar icon. It re-renders from a row of choices.
+- [concept-d-onboarding](concepts/concept-d-onboarding.html): from `brew install` to the disk in the Finder, sign-in in the browser with a magic link and a 6-digit code, an invited colleague, the edge cases.
+- [concept-e-admin](concepts/concept-e-admin.html): the control plane's web: people, Macs, disks, the S3 key rotation, the log, settings.
+- [concept-b-identity](concepts/concept-b-identity.html): the identity, the drive with a Grafite faceplate and the slot-and-LED mark.
+
+The problems each feature answers, to verify in the pilot:
 
 | Problem | Feature |
 |---|---|
-| The disk does not show up after sleep or a network change | Mount at login, connected/not connected status, Reconnect |
-| Can I close the Mac? | Files being uploaded and a warning before shutdown (only needed with `writeback` on) |
+| The disk does not show up after sleep or a network change | Mount at login, the state on the faceplate's LED, automatic reconnection |
 | This clip stutters | How much of a project is already on the Mac, "Make available" with progress |
-| The Mac is full | Space used by the cache, freeing per project |
-| Plain-text credentials on every Mac | Login with SSO and personal, revocable credentials |
+| The Mac is full | Space used by the cache, freeing per project, the least recently used blocks freed when the cache is full |
+| Credentials on every Mac | Sign-in in the browser, one revocable user per Mac |
+| The network drops | Read-only browsing from the local replica, stated in the panel |
 | It does not work and nobody knows why | "Send diagnostics" with logs and status |
-
-Planned form: a **Tauri app** in the menu bar, built on the skeleton of [Portsage](https://github.com/essedev/portsage), which already has a menu bar icon and panel, launch at login and an external binary bundled in the app (`externalBin`). Swift was ruled out: it would only be needed for native Finder badges and menus, which a Swift extension could add next to the app without rewriting it.
-
-**Early first version, command only.** Work on the app starts before the pilot ends, but the first version does only what the `fluix` command already does (status, turn on and off, make available, free up space, space used on the Mac): that is the engine the app drives, so it is not wasted work. The features in the table above stay tied to what the pilot shows.
-
-**Panel mockup**: `docs/concepts/concept-a-panel.html`, three variants side by side with the Normal, Downloading, Unreachable, Starting and Off states, and buttons that simulate a download at the speed measured on OVH. Style and colors are Portsage's. The variant is still to be chosen:
-
-- **A, Projects first**: the list of projects with how much is already on the Mac and the action to change it; the disk status is a label that expands only when something is wrong. Same skeleton as Portsage's panel.
-- **B, Status first**: one sentence and a large button that does the right thing in the current state (Open in Finder, Reconnect, Turn on); below, the Mac's space split by project, with the actions in each row's menu.
-- **C, Compact, like the Finder**: the disk is an entry with Eject, the projects a list with iCloud Drive's status icons; selecting a row shows details and actions.
-
-Decisions the mockup leaves open:
-
-- **Text when the disk is unreachable**: the mockup says files will not open until the disk comes back. That holds with shared PostgreSQL, not entirely with the metadata in the VM (see [The cache](#the-cache)). It is chosen with the final setup.
-- **Full cache**: the mockup blocks a project that does not fit with "Space needed". The alternative is to warn and let JuiceFS free the least recently used blocks.
-- **Automatic reconnection**: the panel promises a new attempt every 30 seconds; today the agent remounts a missing disk every 2 minutes (see "Agent").
-- **"Turn off" or "Eject"**: the variants use different words for the same action; the app uses one.
-- Project names, version and dates are made up.
 
 **macOS only for now, with the system layer isolated.** The interface (status, cache, warmup) is shared; only how JuiceFS runs changes, behind a single interface (mount, unmount, status, warmup, free up space) with one module per system selected by `#[cfg(target_os)]`, like Portsage's scanner:
 
@@ -162,22 +169,20 @@ Decisions the mockup leaves open:
 | Windows | native `juicefs.exe` with WinFsp, a drive letter | no |
 | Linux | native with FUSE | no |
 
-Only the macOS module is built; Windows is added as a module, not a rewrite, when needed. At that point the maturity of JuiceFS's Windows client and a distribution channel other than Homebrew (installer or winget) need checking.
+Only the macOS module is built; Windows is added as a module, not a rewrite, when needed.
 
-**Distribution with Homebrew**, like Portsage: a cask in its own tap, without an Apple Developer ID, with `xattr -cr` in postflight. Limits: Homebrew has to be installed on every Mac, updates need `brew upgrade`, and the trick for unsigned apps depends on Homebrew's rules, which are getting stricter. Login with SSO comes later.
-
-Estimated effort, a guess: 3-4 days for status, mounting, warmup and cache starting from Portsage, plus managing the Linux machine. Maintenance at every macOS or JuiceFS update.
+**Distribution with Homebrew** (DECISIONS #10), like Portsage: a cask in its own tap, without an Apple Developer ID, with `xattr -cr` in postflight. Homebrew needs administrator rights once to install itself; the app and the disk never do. Limits: updates need `brew upgrade`, and the trick for unsigned apps depends on Homebrew's rules, which are getting stricter. A DMG in `~/Applications` stays the fallback.
 
 ## Access and security
 
-- Every Mac holds the database and bucket credentials. **There are no per-person permissions**: whoever has the disk sees and can delete everything. Trash and replica mitigate deletions.
-- **OVH S3 keys open every bucket in the Public Cloud project**, not just their own. The test user (Object Storage Operator role) sees only the test bucket today because the project has no other; if others arrive, the user needs a policy limited to its bucket.
-- **Someone leaving**: without the app, the credentials have to be rotated on every Mac. With the phase 2 app, personal credentials (one PostgreSQL role and one S3 key per person) are revoked one by one. Permissions stay "all or nothing" anyway.
-- If per-user or per-folder control is needed, JuiceFS Community does not offer it simply; SpaceFS and LucidLink do.
+- **One Valkey user per Mac** (DECISIONS #7), created by the control plane when the Mac signs in: it writes the metadata and feeds the Mac's replica. Revoking it ends both; the app then stops the disk and clears the cache.
+- **The S3 key lives in the volume's metadata** (DECISIONS #4), encrypted only with the volume's UUID, which sits next to it: any Mac with metadata access can read it. A revoked Mac loses the metadata, not the key it may have copied, so a revocation is followed by a key rotation: a new key pasted in the control plane, applied with `juicefs config` (mounted clients pick it up), the old one deleted at the provider. Until then the revoked Mac could still delete raw blocks; bucket versioning is the safety net to decide.
+- **OVH S3 keys open every bucket in the Public Cloud project**, not just their own. A key needs a policy limited to its bucket, set in the provider console.
+- **Permissions stay all or nothing**: whoever has the disk sees and can delete everything. Trash and replica mitigate deletions. If per-user or per-folder control is needed, JuiceFS Community does not offer it simply; SpaceFS and LucidLink do.
 
 ## Backup and resilience
 
-- **The metadata database is the critical point**: lose it and the filesystem is lost, because the blocks on S3 alone cannot be put back together into files. PITR is needed, plus a daily `juicefs dump` kept outside the database.
+- **The metadata is the critical point**: lose it and the filesystem is lost, because the blocks on S3 alone cannot be put back together into files. The central Valkey writes every change to disk before answering (`appendfsync always`), has a replica in the datacenter, and a daily `juicefs dump` is kept outside it. The replicas in the Macs' VMs are not a backup: they follow the master, deletions included.
 - **JuiceFS is not a backup**: the bucket has to be replicated to a second provider (Backblaze B2, about 7 $/TB) with versioning.
 - **Archive**: closed projects leave JuiceFS and go with `rclone` to a separate bucket, as normal files, readable even without the database.
 - Minimal monitoring: an alert if the database or the bucket stops answering. JuiceFS exposes Prometheus metrics.
@@ -214,7 +219,7 @@ The macOS module, a command today (`macos/bin/fluix`) and the engine of the Taur
 - **The log does not grow without limit**: the script's messages go to the terminal it started from (fd 3), never to the log, and error handling fires only once; `lima.log` is trimmed past 50 MB and `install.sh` empties it if it is huge. On a tester's Mac the log reached 50 GB and filled the disk: it was confirmed that the error blocks ended up in the log, once per function level; the growth to 50 GB was not reproduced (on that Mac the VM start hung), so the guards hold for anything that writes. The VM start has a 5-minute timeout.
 - **Configuration**: `config.env` (template in `macos/config.env.example`) with bucket, keys, the SMB password between Mac and VM, cache and simulated bandwidth limits. The zip holds the keys: share it privately, with an OVH key dedicated to the test bucket, to be revoked at the end of the test.
 - **One volume per Mac**: with `VOLUME_NAME` empty, `install.sh` generates `fluix-<user>-<code>`, so the same zip goes to several people on the same bucket, each with their own disk. Reinstalling over an existing install keeps the configuration; `uninstall` deletes everything, because the volume is lost with the VM.
-- **Test metadata**: SQLite inside the VM. Uninstalling the package or losing the VM makes the files in the bucket unreadable; several people need PostgreSQL (`META_URL`).
+- **Test metadata**: SQLite inside the VM. Uninstalling the package or losing the VM makes the files in the bucket unreadable; several people need the shared metadata (see [Shared metadata over the WAN](#shared-metadata-over-the-wan)).
 - **Footprint**: on the Mac the VM takes at most 1 GB of RAM (1,035 MB measured, 670 MB right after start), against 2,060 MB for the first version with 2 GiB. The ceiling is the assigned memory, not JuiceFS's buffer: Linux fills free RAM with the page cache, Apple's framework keeps every touched page and Lima does not use the balloon to give it back, so after the first read of a clip the VM weighs its whole `memory`. Inside the VM JuiceFS reaches 420 MB copying 2.7 GB with `--buffer-size` at 256 MB (it was 1 GB), with no processes killed for running out of memory. Performance stays that of 2 GiB: cold read 11.6-13 MB/s, cold seek 0.8-1 s, warmup of a clip 27-33 s, copying 2.7 GB 129 s (133 s with the previous setup, at the same time). Only rereading after an unmount changes, 0.5 s instead of 0.2, because it comes from the disk cache instead of RAM. On disk the VM grows with the cache. `memory` applies to VMs created from now on: `setup` does not change it on an existing VM, which has to be updated by hand or reinstalled.
 - **Measured install**: about 90 s from the zip with image and JuiceFS bundled (84-111 s with the version that downloaded the image). It needs a Mac with Apple Silicon and macOS 13 or later, which `install.sh` checks.
 - **Performance**: like the Docker spike at a simulated 100 Mbps: cold read 5.3-7.2 MB/s, cold seek 0.8 s on average. Warm reads are also served by the macOS SMB client's cache.

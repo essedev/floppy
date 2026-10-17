@@ -2,6 +2,22 @@
 
 Log of the work done, most recent first. Plans are in [ROADMAP.md](ROADMAP.md), the reasons behind the choices in [ARCHITECTURE.md](ARCHITECTURE.md).
 
+## 6. Shared metadata that stays fast over the WAN (17/10/2026)
+
+- **Step 0 measured** (`spike/meta-bench.sh`, `spike/meta-access.sh`): with the metadata in PostgreSQL behind a simulated 15 ms link, creating 450 files from the Finder took 820 s and listing 300 files 117 s, against 14 s and 0.24 s with SQLite in the VM. Inside the VM, without Samba, the same listing took 0.12 s: Samba asks JuiceFS about 2,700 questions for it (lookups of `._` names, extended attributes), each a round trip.
+- **Architecture chosen** after comparing alternatives (DECISIONS #5): central Valkey with a replica in each VM, JuiceFS patched to read from it (`spike/juicefs-replica`, on v1.4.1), writes as optimistic transactions at one round trip (DECISIONS #6), offline as read-only.
+- **Acceptance suite** (`spike/acceptance.py`): two clients, the Mac over SMB, 13 tests. With the patch: cold listing of 300 files 0.2-0.3 s (74.6 s without the replica), a new file visible on the other Mac in 0.01 s, 100 small files in 14-17 s (158 s), offline browsing works and writes fail in 0.1 s, read-your-writes, concurrent renames, revocation all pass. Open: a slow master turns writes read-only (being fixed), and cold reads are capped by SMB at about half the line, the same as with local metadata (a data-path spike follows).
+- **Found while testing**: macOS refuses a second SMB mount of the same server and share even on another port; a gentle unmount can leave a stale SMB session that answers I/O errors; the spike needs the SMB timeout raised for `localhost` too.
+
+## 5. Team architecture, identity and the app's design (16-17/10/2026)
+
+- **Team architecture**: login in the browser, a control plane off the data path, the same code self-hosted or hosted, MIT for the app and AGPL-3.0 for the control plane, only standard S3 and database protocols (DECISIONS #2-#4). Drawn in [architecture.html](architecture.html).
+- **Identity**: four directions compared ([concept-b-identity](concepts/concept-b-identity.html)); chosen the drive with the Grafite faceplate and the Essenziale icons, and a vocabulary of details taken from the object (DECISIONS #11).
+- **Concepts of every surface**: the app panel, settings and notifications ([concept-c-app](concepts/concept-c-app.html), dynamic on the choices), first run and sign-in ([concept-d-onboarding](concepts/concept-d-onboarding.html)), the admin web ([concept-e-admin](concepts/concept-e-admin.html)); every open decision set (DECISIONS #12).
+- **Tauri** confirmed over Swift, **Homebrew** as the only channel, **Astro and Starlight** for the site (DECISIONS #9, #10, #13).
+- **Name**: "Fluix" collides with Fluix Limited in software; a new name is being chosen (DECISIONS #14).
+- **The tester's run** on the 08/10 zip ended well.
+
 ## 4. Offline install and open source (16/10/2026)
 
 - **Debian packages in the zip**: Samba, FUSE and their whole dependency closure (94 `.deb`, 38 MB) ship as a local apt repository, fetched by `package.sh` from a `debian:trixie` container with an empty dpkg status. The install no longer reaches any external host; `deb.debian.org` stays as a fallback. Tested on a VM from the zip's image with `deb.debian.org` blocked (18 packages installed from the zip) and with a corrupted `.deb` (fallback taken, same 18 packages).
