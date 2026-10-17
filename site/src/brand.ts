@@ -24,8 +24,8 @@ export const brand = {
   /** TODO: the domain depends on the final name. `.example` is reserved and resolves nowhere. */
   domain: 'floppy.example',
   tagline: {
-    en: 'A shared disk for video teams, right in the Finder.',
-    it: 'Un disco condiviso per chi monta video, direttamente nel Finder.',
+    en: 'A shared disk for big files, right in the Finder.',
+    it: 'Un disco condiviso per file grandi, direttamente nel Finder.',
   },
 } as const;
 

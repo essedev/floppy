@@ -1,46 +1,26 @@
 // Strings of the landing page in both languages. The product name, the cask and the links
-// come from brand.ts. The site describes the finished product (site/README.md); every number
-// is a measured or estimated one from docs/ARCHITECTURE.md (measured performance, costs,
-// alternatives): change it there first, then here.
+// come from brand.ts. The site describes the finished product (site/README.md); the landing
+// speaks in plain benefits and leaves the technical detail and the tables to the docs. Its
+// few numbers come from docs/ARCHITECTURE.md: change them there first, then here.
 
 import { brand, type Lang } from '@/brand';
 
 const { name } = brand;
 
-/** A titled paragraph with a short readout under it. */
-interface Property {
+/** A benefit with a short readout and the doc page that explains it. */
+interface Benefit {
   title: string;
   text: string;
   readout: string;
+  /** Docs path (without the language prefix) and the link's text. */
+  more: { path: string; label: string };
 }
 
-/** One kind of traffic in the "How it works" diagram. */
-interface Traffic {
-  kind: 'data' | 'meta' | 'ctl';
+/** One use case: who, what they do with it, why it fits. */
+interface UseCase {
   title: string;
+  who: string;
   text: string;
-}
-
-/** One measured operation and its value. */
-interface Measure {
-  label: string;
-  value: string;
-  /** What qualifies the value (mean, share of the line), printed after the label. */
-  note?: string;
-}
-
-/** A set of measures taken on the same setup. */
-interface MeasureGroup {
-  title: string;
-  /** The setup it was measured on, as a readout. */
-  setup: string;
-  rows: Measure[];
-}
-
-/** One product in the comparison with the category. */
-interface Competitor {
-  name: string;
-  facts: string[];
 }
 
 /** The four states the faceplate's LED can show. */
@@ -64,10 +44,15 @@ export interface LandingStrings {
   };
   whoTitle: string;
   whoLead: string;
-  properties: [Property, Property, Property];
+  benefits: [Benefit, Benefit, Benefit];
+  usesTitle: string;
+  usesLead: string;
+  uses: UseCase[];
+  notFitTitle: string;
+  notFit: string[];
   howTitle: string;
   howLead: string;
-  traffic: [Traffic, Traffic, Traffic];
+  howMore: string;
   diagram: {
     label: string;
     mac: string;
@@ -75,7 +60,7 @@ export interface LandingStrings {
     app: string;
     vm: string;
     vmSub: string;
-    /** The VM's subtitle where the wide diagram has room. */
+    /** The subtitle where the wide diagram has room. */
     vmSubLong: string;
     smb: string;
     controlPlane: string;
@@ -88,27 +73,15 @@ export interface LandingStrings {
     edgeMeta: string;
     edgeCtl: string;
   };
-  measuredTitle: string;
-  measuredLead: string;
-  measures: [MeasureGroup, MeasureGroup, MeasureGroup];
-  measuredMore: string;
   costTitle: string;
   costLead: string;
-  costCaption: string;
-  costHead: [string, string, string, string, string];
-  costRows: [string, string, string, string, string][];
-  costNote: string;
-  costHiddenTitle: string;
+  costReadout: string;
+  costCompare: string;
   costHidden: string;
-  compareTitle: string;
-  compareLead: string;
-  competitors: [Competitor, Competitor, Competitor];
-  compareNote: string;
-  elsewhereTitle: string;
-  elsewhere: string[];
+  costMore: string;
   openTitle: string;
-  openSource: Property & { more: string };
-  hosting: Property & { more: string };
+  openSource: { title: string; text: string; readout: string; more: string };
+  hosting: { title: string; text: string; readout: string; more: string };
   installTitle: string;
   installText: string;
   installCopy: string;
@@ -116,7 +89,7 @@ export interface LandingStrings {
   installRequirements: string[];
   installMore: string;
   linksTitle: string;
-  links: { docs: string; how: string; selfHosting: string; licenses: string; github: string };
+  links: { docs: string; how: string; costs: string; selfHosting: string; licenses: string; github: string };
   /** Link to the same page in the other language. */
   otherLanguage: string;
   /** The line at the foot of the page. */
@@ -126,176 +99,119 @@ export interface LandingStrings {
 /** Landing strings by language. */
 export const landing: Record<Lang, LandingStrings> = {
   en: {
-    pageTitle: 'A shared disk for video teams',
-    description: `${name} is a shared disk for video teams on Macs: it shows up in the Finder, the files live in an S3 bucket you choose, and a cache keeps the clips you open on the Mac. Open source, self-hosted or hosted.`,
-    lead: `${name} mounts like an external drive on every Mac of the team. The footage lives in your S3 bucket; what you open stays on the Mac and plays as if it were local.`,
+    pageTitle: 'A shared disk for big files',
+    description: `${name} is a shared disk for teams on Macs: it shows up in the Finder, the files live in an S3 bucket you choose, and what you open stays on the Mac. Tuned for video. Open source, self-hosted or hosted.`,
+    lead: `${name} mounts like an external drive on every Mac of the team. The files live in your own storage; what you open stays on the Mac, so even large video plays as if it were local.`,
     installCta: 'Install',
     docsCta: 'Read the docs',
     requirements: 'Apple Silicon · macOS 13 or later · no administrator rights · no kernel extension',
     faceplate: {
-      label: `The ${name} faceplate: a slot that fills with what this Mac keeps in its cache, 48.2 of 100 GB, and an LED for the state of the disk.`,
+      label: `The ${name} faceplate: a slot that fills with what this Mac keeps, 48.2 of 100 GB, and an LED for the state of the disk.`,
       caption: 'The faceplate of the menu bar app: the slot fills with what this Mac keeps, the LED shows what the disk is doing.',
       plateOk: 'CONNECTED',
       states: { ok: 'Connected', dl: 'Downloading', err: 'Unreachable', off: 'Off' },
     },
-    whoTitle: 'For teams that edit video on Macs',
-    whoLead: 'Small teams cutting phone footage in CapCut and similar editors. Everyone sees the same files; nobody syncs, uploads, or needs to know what a bucket is.',
-    properties: [
+    whoTitle: 'For teams on Macs that share big files',
+    whoLead: 'Studios and small teams who keep their work on their own storage and want it on every Mac as a plain disk. Tuned for video, where files are large and the timeline jumps around.',
+    benefits: [
       {
         title: 'A disk in the Finder',
-        text: `Mounted at ${brand.volume}, the same path on every Mac, so CapCut always finds its clips.`,
+        text: 'Every app opens files in place, at the same path on every Mac. Nobody syncs, uploads or learns what a bucket is.',
         readout: brand.volume,
+        more: { path: '/introduction/', label: 'What it does' },
       },
       {
-        title: 'Only what you play is downloaded',
-        text: 'Files sit in S3 as 1 MB blocks, and a jump fetches only the blocks there. What you open stays on the SSD; a whole project can be made available before you edit.',
-        readout: 'Jump in cache: 0-3 ms',
+        title: 'Fast for what you use',
+        text: 'Only what you open is downloaded, and it stays on the Mac. Make a project available before you start, free it when you are done.',
+        readout: 'A clip on the Mac jumps in 0-3 ms',
+        more: { path: '/how-it-works/', label: 'How the cache works' },
       },
       {
         title: 'One disk for the whole team',
-        text: 'Each Mac keeps a copy of the file tree: folders open at once, and a new file appears on every Mac in a moment. Offline the disk is read-only: you browse and play what is cached.',
-        readout: '300 files listed in 0.2-0.3 s',
+        text: 'A new file shows up on every Mac in a moment, and folders open at once. Without a network you can still browse and open what is on the Mac.',
+        readout: '300 files listed in a quarter of a second',
+        more: { path: '/how-it-works/#when-the-network-drops', label: 'Offline and sharing' },
       },
+    ],
+    usesTitle: 'What teams use it for',
+    usesLead: 'Anything big that a team opens more often than it writes.',
+    uses: [
+      {
+        title: 'Video editing',
+        who: 'Editors, production teams',
+        text: 'Cut in CapCut, Final Cut or Premiere with the media on the disk. Large clips stream and stay on the Mac, so scrubbing stays smooth. This is what it is tuned for.',
+      },
+      {
+        title: 'Photo shoots and libraries',
+        who: 'Photographers, studios',
+        text: 'Keep every shoot on the shared disk and open the RAW files from any Mac. Catalogs stay on each Mac, the photos in one place.',
+      },
+      {
+        title: 'Design, 3D and architecture',
+        who: 'Design and architecture studios',
+        text: 'Heavy project files, models, textures and renders, in one copy on your storage. Each person keeps on the Mac what they work on.',
+      },
+      {
+        title: 'Audio and music',
+        who: 'Producers, sound designers',
+        text: 'Sample libraries, stems and session audio on the shared disk. Large audio files are read from the network once, then from the Mac.',
+      },
+      {
+        title: 'A shared archive',
+        who: 'Any team',
+        text: 'Finished projects on your own bucket instead of a cloud drive priced per seat. You pay for the storage, not for the people.',
+      },
+    ],
+    notFitTitle: 'Where it does not fit',
+    notFit: [
+      'Thousands of tiny files written at once: each new file costs a trip to the server, about 0.14 s.',
+      `Windows and Linux desktops: ${name} is for macOS.`,
+      'Working fully offline: without a network the disk is read-only.',
+      'Permissions per person or per folder: whoever has the disk sees everything.',
     ],
     howTitle: 'How it works',
-    howLead: 'A small Linux VM on each Mac runs JuiceFS and serves the disk to the Finder over SMB, on a link that never leaves the Mac. No kernel extension, no administrator rights.',
-    traffic: [
-      {
-        kind: 'data',
-        title: 'File data',
-        text: '1 MB blocks between the VM and your bucket. The heavy traffic, and what the cache saves.',
-      },
-      {
-        kind: 'meta',
-        title: 'File tree',
-        text: 'A central Valkey with a replica in each VM. Reads stay on the Mac; each write is one round trip.',
-      },
-      {
-        kind: 'ctl',
-        title: 'Control',
-        text: 'Sign-in and one revocable access per Mac. Off the data path: if it stops, disks keep working.',
-      },
-    ],
+    howLead: `${name} runs out of sight on each Mac and shows the disk in the Finder, with no kernel extension and no administrator password. The files live in your bucket; the list of files lives on a small server, with a copy on every Mac so folders open at once.`,
+    howMore: 'The full picture, with the numbers',
     diagram: {
-      label: `Diagram: on each Mac the Finder reaches a Linux VM over SMB on a private link; the VM sends file data to the S3 bucket and file tree changes to a central Valkey, which keeps a replica in the VM up to date; the ${name} app talks to the control plane.`,
+      label: `Diagram: on each Mac the Finder shows the ${name} disk, served on a private link from ${name} on the same Mac, which keeps the cache and a copy of the file list; the files go to your S3 bucket, changes to the file list go to one server for the team, and the app signs in with the control plane.`,
       mac: 'Each Mac',
       finder: 'Finder',
       app: `${name}.app`,
-      vm: 'Linux VM',
-      vmSub: 'JuiceFS · cache · replica',
-      vmSubLong: 'JuiceFS · cache · a replica of the file tree',
-      smb: 'SMB, private link',
-      controlPlane: 'Control plane',
-      controlPlaneSub: 'sign-in, access per Mac',
-      meta: 'Valkey',
-      metaSub: 'the file tree, central',
-      s3: 'S3 bucket',
-      s3Sub: '1 MB blocks',
-      edgeData: 'data',
-      edgeMeta: 'file tree',
-      edgeCtl: 'control',
+      vm: name,
+      vmSub: 'cache · file list copy',
+      vmSubLong: 'the cache and a copy of the file list',
+      smb: 'private link',
+      controlPlane: 'Sign-in',
+      controlPlaneSub: 'access per Mac',
+      meta: 'File list',
+      metaSub: 'one server for the team',
+      s3: 'Your bucket',
+      s3Sub: 'the files',
+      edgeData: 'files',
+      edgeMeta: 'changes',
+      edgeCtl: 'sign-in',
     },
-    measuredTitle: 'Measured numbers',
-    measuredLead: 'From runs written up in the repository. For scale: a 60 Mbps phone clip needs 7.5 MB/s.',
-    measures: [
-      {
-        title: 'OVH in Milan, 170 Mbps',
-        setup: 'Home fiber · 4 MB blocks · Mac over SMB',
-        rows: [
-          { label: 'Reading a 434 MB clip not in cache', value: '12.1 MB/s' },
-          { label: 'Jumping to a point in cache', value: '0-3 ms' },
-          { label: 'Jumping to a point not in cache', value: '0.9 s', note: 'mean' },
-          { label: 'Making that clip available', value: '30 s' },
-          { label: 'Copying 2.7 GB to the disk', value: '113 s', note: 'the line’s limit' },
-        ],
-      },
-      {
-        title: 'A 100 Mbps line, 1 MB blocks',
-        setup: '25 ms to S3 · 4 MB readahead · Mac over SMB',
-        rows: [
-          { label: 'Reading a clip not in cache', value: '11.6 MB/s', note: '93% of the line' },
-          { label: 'Jumping to a point not in cache', value: '0.38 s', note: 'mean' },
-          { label: 'First read after a jump while scrubbing', value: '0.40 s', note: 'mean' },
-          { label: 'The same cold read on a 1 Gbps line', value: '103 MB/s' },
-        ],
-      },
-      {
-        title: 'The file tree, 15 ms away',
-        setup: 'Valkey · from the Finder over SMB',
-        rows: [
-          { label: 'Listing 300 files, tree over the network', value: '75-117 s' },
-          { label: 'The same, with the replica on the Mac', value: '0.20-0.30 s' },
-          { label: 'A new file showing up on another Mac', value: '0.00-0.01 s' },
-          { label: 'Creating 100 small files', value: '13.7-17 s' },
-        ],
-      },
-    ],
-    measuredMore: 'How each number was measured',
-    costTitle: 'Your bucket, no per-seat price',
-    costLead: 'Any S3 provider works: on OVH in Milan, about $8 per TB a month with free egress in Europe. Self-hosted, add a fixed €20-30 a month for the metadata server. A new person costs nothing.',
-    costCaption: 'Estimated monthly cost',
-    costHead: ['Active data', 'SpaceFS Teams, 3 people', 'SpaceFS Teams, 10 people', `${name}, any team size`, `${name}’s bucket backup`],
-    costRows: [
-      ['3 TB', '$90', '$300', 'about €40-55', 'about €20'],
-      ['5 TB', '$114-138', '$300', 'about €55-70', 'about €35'],
-      ['10 TB', '$174-258', '$300', 'about €95-110', 'about €70'],
-    ],
-    costNote: 'Estimates from published prices. The backup is a copy of the bucket on Backblaze B2, which a self-hosted disk needs; the commercial prices do not say whether they include one.',
-    costHiddenTitle: 'What the table leaves out',
-    costHidden: 'Your time: keeping Valkey and its backups healthy, helping a Mac that does not mount, carrying the JuiceFS patches to new releases. For a small team that is the real price; it pays off with more people, more TB, or data that must stay on your own infrastructure.',
-    compareTitle: 'Next to LucidLink and SpaceFS',
-    compareLead: `Both stream files from object storage with a local cache, and LucidLink replicates the file tree to every client, as ${name} does. Both are priced per person.`,
-    competitors: [
-      {
-        name: 'LucidLink',
-        facts: [
-          'The industry standard.',
-          'Per member a month: $7 with 100 GB, $27 with 400 GB.',
-          'Your own bucket on Enterprise, about €45 per TB with the storage.',
-          'Permissions per person and per folder.',
-        ],
-      },
-      {
-        name: 'SpaceFS Teams',
-        facts: [
-          'The same architecture, app and support included.',
-          '$30 per person a month, 1 TB per person, pooled.',
-          'Private beta; macOS 26.4 or later on Apple Silicon.',
-          'Permissions per person and per folder.',
-        ],
-      },
-      {
-        name,
-        facts: [
-          'Open source, on any S3 bucket.',
-          'No per-seat price: storage plus a fixed metadata server.',
-          'macOS 13 or later on Apple Silicon, no administrator rights.',
-          'Permissions are all or nothing.',
-        ],
-      },
-    ],
-    compareNote: 'Prices and features as each vendor publishes them.',
-    elsewhereTitle: 'Pick something else if',
-    elsewhere: [
-      'your team works in one office: a NAS on 10 GbE is faster and simpler;',
-      'you need permissions per person or per folder: LucidLink and SpaceFS have them;',
-      `you edit on Windows or Linux: ${name} is for macOS.`,
-    ],
+    costTitle: 'Your storage, no per-seat price',
+    costLead: 'Use any S3-compatible storage. A team pays for the storage and one small server, however many people use the disk.',
+    costReadout: '3 TB for any team size: about €40-55 a month',
+    costCompare: `LucidLink and SpaceFS do the same job, priced per person and with permissions per folder. ${name} has neither the price nor the permissions.`,
+    costHidden: 'What it does cost is the time to run it, which pays off with more people, more data, or data that must stay on your own infrastructure.',
+    costMore: 'Costs and alternatives, in detail',
     openTitle: 'Open source, self-hosted or hosted',
     openSource: {
       title: 'Open source',
-      text: 'The app and the command are MIT. The control plane is AGPL-3.0: offer a modified copy as a service and you share the changes. Built on JuiceFS, Lima and Samba.',
+      text: 'The app and the command are MIT. The control plane is AGPL-3.0: offer a modified copy as a service and you share the changes.',
       readout: 'MIT · AGPL-3.0',
       more: 'Licenses',
     },
     hosting: {
       title: 'Self-hosted or hosted',
-      text: 'One codebase, two ways to run it. Self-hosted: your bucket, your Valkey, the control plane in Docker Compose. Hosted: run for you, one Valkey instance per organization. Only standard S3 and the Redis protocol, so no provider lock-in.',
-      readout: 'S3 · Valkey',
+      text: 'Run it on your own servers with Docker Compose, or have it run for you. Either way it works with any S3 storage, so you are tied to no provider.',
+      readout: 'Docker Compose · any S3',
       more: 'Self-hosting',
     },
     installTitle: 'Install',
-    installText: 'One Homebrew cask. On first start the app signs you in through the browser, creates the VM and mounts the disk.',
+    installText: 'One Homebrew cask. On first start the app signs you in through the browser and mounts the disk.',
     installCopy: 'Copy',
     installCopied: 'Copied',
     installRequirements: [
@@ -308,6 +224,7 @@ export const landing: Record<Lang, LandingStrings> = {
     links: {
       docs: 'Introduction',
       how: 'How it works',
+      costs: 'Costs and alternatives',
       selfHosting: 'Self-hosting',
       licenses: 'Licenses',
       github: 'GitHub',
@@ -316,176 +233,119 @@ export const landing: Record<Lang, LandingStrings> = {
     footer: `${name}: the app and the command under MIT, the control plane under AGPL-3.0.`,
   },
   it: {
-    pageTitle: 'Un disco condiviso per chi monta video',
-    description: `${name} è un disco condiviso per chi monta video su Mac: compare nel Finder, i file stanno in un bucket S3 che scegli tu, e una cache tiene sul Mac le clip che apri. Open source, in proprio o in hosting.`,
-    lead: `${name} si monta come un disco esterno su ogni Mac del gruppo. Il girato sta nel tuo bucket S3; quello che apri resta sul Mac e scorre come se fosse in locale.`,
+    pageTitle: 'Un disco condiviso per file grandi',
+    description: `${name} è un disco condiviso per gruppi che lavorano su Mac: compare nel Finder, i file stanno in un bucket S3 che scegli tu, e quello che apri resta sul Mac. Pensato per il video. Open source, in proprio o in hosting.`,
+    lead: `${name} si monta come un disco esterno su ogni Mac del gruppo. I file stanno nel tuo spazio; quello che apri resta sul Mac, così anche il video più pesante scorre come se fosse in locale.`,
     installCta: 'Installa',
     docsCta: 'Leggi la documentazione',
     requirements: 'Apple Silicon · macOS 13 o successivo · senza diritti di amministratore · senza estensioni del kernel',
     faceplate: {
-      label: `Il frontale di ${name}: una fessura che si riempie con quello che il Mac tiene in cache, 48,2 GB su 100, e un LED per lo stato del disco.`,
+      label: `Il frontale di ${name}: una fessura che si riempie con quello che il Mac tiene, 48,2 GB su 100, e un LED per lo stato del disco.`,
       caption: 'Il frontale dell’app nella barra dei menu: la fessura si riempie con quello che il Mac tiene, il LED dice cosa sta facendo il disco.',
       plateOk: 'COLLEGATO',
       states: { ok: 'Collegato', dl: 'Download', err: 'Non raggiungibile', off: 'Spento' },
     },
-    whoTitle: 'Per chi monta video in gruppo, su Mac',
-    whoLead: 'Piccoli gruppi che montano girato da telefono con CapCut e programmi simili. Tutti vedono gli stessi file; nessuno sincronizza, carica, o deve sapere cos’è un bucket.',
-    properties: [
+    whoTitle: 'Per gruppi su Mac che condividono file grandi',
+    whoLead: 'Studi e piccoli gruppi che tengono il lavoro nel proprio spazio e lo vogliono su ogni Mac come un disco qualsiasi. Pensato per il video, dove i file sono grandi e la timeline salta da un punto all’altro.',
+    benefits: [
       {
         title: 'Un disco nel Finder',
-        text: `Montato in ${brand.volume}, lo stesso percorso su ogni Mac: CapCut ritrova sempre le sue clip.`,
+        text: 'Ogni programma apre i file dove sono, allo stesso percorso su ogni Mac. Nessuno sincronizza, carica o deve sapere cos’è un bucket.',
         readout: brand.volume,
+        more: { path: '/introduction/', label: 'Cosa fa' },
       },
       {
-        title: 'Si scarica solo quello che guardi',
-        text: 'I file stanno su S3 in blocchi da 1 MB, e un salto scarica solo i blocchi di quel punto. Quello che apri resta sull’SSD; un progetto intero si può rendere disponibile prima di montare.',
-        readout: 'Salto in cache: 0-3 ms',
+        title: 'Veloce su quello che usi',
+        text: 'Si scarica solo quello che apri, e resta sul Mac. Rendi disponibile un progetto prima di iniziare, liberalo quando hai finito.',
+        readout: 'Una clip sul Mac salta in 0-3 ms',
+        more: { path: '/how-it-works/', label: 'Come funziona la cache' },
       },
       {
         title: 'Un disco per tutto il gruppo',
-        text: 'Ogni Mac tiene una copia dell’albero dei file: le cartelle si aprono subito, e un file nuovo compare su ogni Mac in un attimo. Senza rete il disco è in sola lettura: sfogli e riproduci quello che è in cache.',
-        readout: '300 file elencati in 0,2-0,3 s',
+        text: 'Un file nuovo compare su ogni Mac in un attimo, e le cartelle si aprono subito. Senza rete puoi ancora sfogliare e aprire quello che è sul Mac.',
+        readout: '300 file elencati in un quarto di secondo',
+        more: { path: '/how-it-works/#when-the-network-drops', label: 'Senza rete e in gruppo' },
       },
+    ],
+    usesTitle: 'Per cosa lo usano',
+    usesLead: 'Qualsiasi cosa pesante che un gruppo apre più spesso di quanto la scriva.',
+    uses: [
+      {
+        title: 'Montaggio video',
+        who: 'Montatori, produzioni',
+        text: 'Monta in CapCut, Final Cut o Premiere con il materiale sul disco. Le clip grandi arrivano in streaming e restano sul Mac, così scorrere la timeline resta fluido. È il caso per cui è pensato.',
+      },
+      {
+        title: 'Servizi e archivi fotografici',
+        who: 'Fotografi, studi',
+        text: 'Ogni servizio sul disco condiviso, con i RAW apribili da qualsiasi Mac. I cataloghi restano su ogni Mac, le foto in un posto solo.',
+      },
+      {
+        title: 'Design, 3D e architettura',
+        who: 'Studi di design e di architettura',
+        text: 'File di progetto pesanti, modelli, texture e render, in una copia sola nel tuo spazio. Ognuno tiene sul Mac quello su cui lavora.',
+      },
+      {
+        title: 'Audio e musica',
+        who: 'Produttori, sound designer',
+        text: 'Librerie di campioni, stem e audio delle sessioni sul disco condiviso. I file audio grandi si leggono dalla rete una volta, poi dal Mac.',
+      },
+      {
+        title: 'Un archivio condiviso',
+        who: 'Qualsiasi gruppo',
+        text: 'I progetti finiti nel tuo bucket invece che in un cloud con prezzo a persona. Paghi lo spazio, non le persone.',
+      },
+    ],
+    notFitTitle: 'Dove non va bene',
+    notFit: [
+      'Migliaia di file minuscoli scritti tutti insieme: ogni file nuovo costa un giro fino al server, circa 0,14 s.',
+      `Computer con Windows o Linux: ${name} è per macOS.`,
+      'Lavorare del tutto offline: senza rete il disco è in sola lettura.',
+      'Permessi per persona o per cartella: chi ha il disco vede tutto.',
     ],
     howTitle: 'Come funziona',
-    howLead: 'Una piccola VM Linux su ogni Mac esegue JuiceFS e passa il disco al Finder via SMB, su un collegamento che non esce dal Mac. Niente estensioni del kernel, niente diritti di amministratore.',
-    traffic: [
-      {
-        kind: 'data',
-        title: 'Dati dei file',
-        text: 'Blocchi da 1 MB fra la VM e il tuo bucket. Il traffico pesante, e quello che la cache risparmia.',
-      },
-      {
-        kind: 'meta',
-        title: 'Albero dei file',
-        text: 'Un Valkey centrale con una replica in ogni VM. Le letture restano sul Mac; ogni scrittura è un solo giro.',
-      },
-      {
-        kind: 'ctl',
-        title: 'Controllo',
-        text: 'Accesso e un permesso revocabile per ogni Mac. Fuori dal percorso dei dati: se si ferma, i dischi continuano a funzionare.',
-      },
-    ],
+    howLead: `${name} lavora dietro le quinte su ogni Mac e mostra il disco nel Finder, senza estensioni del kernel e senza password di amministratore. I file stanno nel tuo bucket; l’elenco dei file sta su un piccolo server, con una copia su ogni Mac perché le cartelle si aprano subito.`,
+    howMore: 'Il quadro completo, con i numeri',
     diagram: {
-      label: `Schema: su ogni Mac il Finder raggiunge una VM Linux via SMB su un collegamento privato; la VM manda i dati dei file al bucket S3 e le modifiche all’albero dei file a un Valkey centrale, che tiene aggiornata una replica nella VM; l’app ${name} parla con il control plane.`,
+      label: `Schema: su ogni Mac il Finder mostra il disco di ${name}, servito su un collegamento privato da ${name} sullo stesso Mac, che tiene la cache e una copia dell’elenco dei file; i file vanno nel tuo bucket S3, le modifiche all’elenco a un server per il gruppo, e l’app accede tramite il control plane.`,
       mac: 'Ogni Mac',
       finder: 'Finder',
       app: `${name}.app`,
-      vm: 'VM Linux',
-      vmSub: 'JuiceFS · cache · replica',
-      vmSubLong: 'JuiceFS · cache · replica dell’albero dei file',
-      smb: 'SMB, link privato',
-      controlPlane: 'Control plane',
-      controlPlaneSub: 'accessi, un permesso per Mac',
-      meta: 'Valkey',
-      metaSub: 'l’albero dei file, centrale',
-      s3: 'Bucket S3',
-      s3Sub: 'blocchi da 1 MB',
-      edgeData: 'dati',
-      edgeMeta: 'albero dei file',
-      edgeCtl: 'controllo',
+      vm: name,
+      vmSub: 'cache · copia dell’elenco',
+      vmSubLong: 'la cache e una copia dell’elenco dei file',
+      smb: 'link privato',
+      controlPlane: 'Accesso',
+      controlPlaneSub: 'un permesso per Mac',
+      meta: 'Elenco dei file',
+      metaSub: 'un server per il gruppo',
+      s3: 'Il tuo bucket',
+      s3Sub: 'i file',
+      edgeData: 'file',
+      edgeMeta: 'modifiche',
+      edgeCtl: 'accesso',
     },
-    measuredTitle: 'Numeri misurati',
-    measuredLead: 'Da misure documentate nel repository. Per avere una scala: una clip da telefono a 60 Mbps ha bisogno di 7,5 MB/s.',
-    measures: [
-      {
-        title: 'OVH a Milano, 170 Mbps',
-        setup: 'Fibra di casa · blocchi da 4 MB · Mac via SMB',
-        rows: [
-          { label: 'Leggere una clip da 434 MB non in cache', value: '12,1 MB/s' },
-          { label: 'Saltare a un punto in cache', value: '0-3 ms' },
-          { label: 'Saltare a un punto non in cache', value: '0,9 s', note: 'in media' },
-          { label: 'Rendere disponibile quella clip', value: '30 s' },
-          { label: 'Copiare 2,7 GB sul disco', value: '113 s', note: 'il limite della linea' },
-        ],
-      },
-      {
-        title: 'Una linea da 100 Mbps, blocchi da 1 MB',
-        setup: '25 ms da S3 · lettura anticipata da 4 MB · Mac via SMB',
-        rows: [
-          { label: 'Leggere una clip non in cache', value: '11,6 MB/s', note: 'il 93% della linea' },
-          { label: 'Saltare a un punto non in cache', value: '0,38 s', note: 'in media' },
-          { label: 'Prima lettura dopo un salto, scorrendo la clip', value: '0,40 s', note: 'in media' },
-          { label: 'La stessa lettura a freddo su una linea da 1 Gbps', value: '103 MB/s' },
-        ],
-      },
-      {
-        title: 'L’albero dei file a 15 ms',
-        setup: 'Valkey · dal Finder via SMB',
-        rows: [
-          { label: 'Elencare 300 file, albero in rete', value: '75-117 s' },
-          { label: 'Lo stesso, con la replica sul Mac', value: '0,20-0,30 s' },
-          { label: 'Un file nuovo che compare su un altro Mac', value: '0,00-0,01 s' },
-          { label: 'Creare 100 file piccoli', value: '13,7-17 s' },
-        ],
-      },
-    ],
-    measuredMore: 'Come è stato misurato ogni numero',
-    costTitle: 'Il tuo bucket, nessun prezzo a persona',
-    costLead: 'Va bene qualsiasi fornitore S3: su OVH a Milano circa 8 $ al TB al mese, con traffico in uscita gratuito in Europa. In proprio si aggiungono 20-30 € fissi al mese per il server dei metadati. Una persona in più non costa niente.',
-    costCaption: 'Costo mensile stimato',
-    costHead: ['Dati attivi', 'SpaceFS Teams, 3 persone', 'SpaceFS Teams, 10 persone', `${name}, qualsiasi gruppo`, `Backup del bucket di ${name}`],
-    costRows: [
-      ['3 TB', '90 $', '300 $', 'circa 40-55 €', 'circa 20 €'],
-      ['5 TB', '114-138 $', '300 $', 'circa 55-70 €', 'circa 35 €'],
-      ['10 TB', '174-258 $', '300 $', 'circa 95-110 €', 'circa 70 €'],
-    ],
-    costNote: 'Stime da prezzi pubblici. Il backup è una copia del bucket su Backblaze B2, che un disco in proprio richiede; i prezzi commerciali non dicono se ne includono uno.',
-    costHiddenTitle: 'Quello che la tabella non dice',
-    costHidden: 'Il tuo tempo: tenere in salute Valkey e i suoi backup, aiutare un Mac che non monta, portare le patch di JuiceFS sulle nuove versioni. Per un gruppo piccolo è quello il prezzo vero; conviene con più persone, più TB, o dati che devono restare sulla tua infrastruttura.',
-    compareTitle: 'Accanto a LucidLink e SpaceFS',
-    compareLead: `Entrambi portano i file in streaming dall’object storage con una cache locale, e LucidLink replica l’albero dei file su ogni client, come fa ${name}. Entrambi hanno un prezzo a persona.`,
-    competitors: [
-      {
-        name: 'LucidLink',
-        facts: [
-          'Lo standard del settore.',
-          'A persona al mese: 7 $ con 100 GB, 27 $ con 400 GB.',
-          'Il proprio bucket con Enterprise, circa 45 € al TB spazio compreso.',
-          'Permessi per persona e per cartella.',
-        ],
-      },
-      {
-        name: 'SpaceFS Teams',
-        facts: [
-          'La stessa architettura, app e assistenza incluse.',
-          '30 $ a persona al mese, 1 TB a persona, in comune.',
-          'Beta privata; macOS 26.4 o successivo su Apple Silicon.',
-          'Permessi per persona e per cartella.',
-        ],
-      },
-      {
-        name,
-        facts: [
-          'Open source, su qualsiasi bucket S3.',
-          'Nessun prezzo a persona: lo spazio più un server dei metadati a costo fisso.',
-          'macOS 13 o successivo su Apple Silicon, senza diritti di amministratore.',
-          'Permessi tutto o niente.',
-        ],
-      },
-    ],
-    compareNote: 'Prezzi e funzioni come li pubblica ogni fornitore.',
-    elsewhereTitle: 'Scegli altro se',
-    elsewhere: [
-      'il gruppo lavora in un solo ufficio: un NAS su 10 GbE è più veloce e più semplice;',
-      'servono permessi per persona o per cartella: LucidLink e SpaceFS li hanno;',
-      `monti su Windows o Linux: ${name} è per macOS.`,
-    ],
+    costTitle: 'Il tuo spazio, nessun prezzo a persona',
+    costLead: 'Va bene qualsiasi spazio compatibile con S3. Un gruppo paga lo spazio e un piccolo server, qualunque sia il numero di persone che usano il disco.',
+    costReadout: '3 TB per un gruppo di qualsiasi dimensione: circa 40-55 € al mese',
+    costCompare: `LucidLink e SpaceFS fanno lo stesso lavoro, con un prezzo a persona e permessi per cartella. ${name} non ha né l’uno né gli altri.`,
+    costHidden: 'Quello che costa davvero è il tempo per gestirlo, che conviene con più persone, più dati, o dati che devono restare sulla tua infrastruttura.',
+    costMore: 'Costi e alternative, nel dettaglio',
     openTitle: 'Open source, in proprio o in hosting',
     openSource: {
       title: 'Open source',
-      text: 'L’app e il comando sono MIT. Il control plane è AGPL-3.0: chi ne offre una copia modificata come servizio condivide le modifiche. Si basa su JuiceFS, Lima e Samba.',
+      text: 'L’app e il comando sono MIT. Il control plane è AGPL-3.0: chi ne offre una copia modificata come servizio condivide le modifiche.',
       readout: 'MIT · AGPL-3.0',
       more: 'Licenze',
     },
     hosting: {
       title: 'In proprio o in hosting',
-      text: 'Un solo codice, due modi di usarlo. In proprio: il tuo bucket, il tuo Valkey, il control plane in Docker Compose. In hosting: gestito per te, un’istanza di Valkey per organizzazione. Solo S3 standard e il protocollo di Redis, quindi nessun legame con un fornitore.',
-      readout: 'S3 · Valkey',
+      text: 'Fallo girare sui tuoi server con Docker Compose, o usalo in hosting. In entrambi i casi funziona con qualsiasi spazio S3, quindi non sei legato a un fornitore.',
+      readout: 'Docker Compose · qualsiasi S3',
       more: 'Self-hosting',
     },
     installTitle: 'Installazione',
-    installText: 'Un cask di Homebrew. Al primo avvio l’app ti fa accedere dal browser, crea la VM e monta il disco.',
+    installText: 'Un cask di Homebrew. Al primo avvio l’app ti fa accedere dal browser e monta il disco.',
     installCopy: 'Copia',
     installCopied: 'Copiato',
     installRequirements: [
@@ -498,6 +358,7 @@ export const landing: Record<Lang, LandingStrings> = {
     links: {
       docs: 'Introduzione',
       how: 'Come funziona',
+      costs: 'Costi e alternative',
       selfHosting: 'Self-hosting',
       licenses: 'Licenze',
       github: 'GitHub',
