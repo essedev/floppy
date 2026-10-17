@@ -57,7 +57,7 @@ function RiskBox({ status }: { status: KeyStatus }) {
   const w = status.window
   if (!w) {
     return (
-      <div className="notice mb-4 grid max-w-[760px] gap-2 px-[18px] py-4">
+      <div className="notice mb-4 grid gap-2 px-[18px] py-4">
         <State led="ok">{t.key.closedState}</State>
         <p className="max-w-[66ch] text-sm text-ink-2">
           {status.rotatedAt ? fmt(t.key.closedBody, { tail: status.accessKeyTail, date: f.relative(status.rotatedAt) }) : fmt(t.key.closedNever, { tail: status.accessKeyTail })}
@@ -66,7 +66,7 @@ function RiskBox({ status }: { status: KeyStatus }) {
     )
   }
   return (
-    <div className="notice mb-4 grid max-w-[760px] gap-2.5 px-[18px] py-4">
+    <div className="notice mb-4 grid gap-2.5 px-[18px] py-4">
       <div className="flex flex-wrap items-baseline justify-between gap-x-[18px] gap-y-1">
         <State led="dl">{t.key.openState}</State>
         <span className="num text-[15px] text-ink" role="timer">
@@ -114,8 +114,8 @@ function Steps({ status }: { status: KeyStatus }) {
 
   return (
     <>
-      {flash && <Notice className="mb-3.5 max-w-[760px]" state={<State led="ok">{t.key.closedState}</State>} text={flash} />}
-      <ol className="m-0 grid max-w-[760px] list-none gap-2.5 p-0">
+      {flash && <Notice className="mb-3.5" state={<State led="ok">{t.key.closedState}</State>} text={flash} />}
+      <ol className="m-0 grid list-none gap-2.5 p-0">
         <Step n={1} look={look(1)} title={t.key.step1Title} body={rich(t.key.step1Body, { bucket: <b className="num font-normal text-ink">{bucket}</b> })} />
         <Step n={2} look={look(2)} title={t.key.step2Title} body={t.key.step2Body}>
           {stage === 2 && (
@@ -205,7 +205,7 @@ export function KeyPage() {
   return (
     <>
       <PageHeader title={t.key.title} lead={t.key.lead} />
-      <QueryView query={key} loading={<div className="notice max-w-[760px] px-[18px] py-4"><SkeletonLines /></div>}>
+      <QueryView query={key} loading={<div className="notice px-[18px] py-4"><SkeletonLines /></div>}>
         {(status) => (
           <>
             <RiskBox status={status} />

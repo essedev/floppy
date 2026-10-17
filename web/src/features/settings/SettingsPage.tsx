@@ -110,7 +110,7 @@ function SettingsForm({ settings }: { settings: Settings }) {
 
   return (
     <form
-      className="grid max-w-[720px] gap-[30px]"
+      className="grid gap-[30px]"
       noValidate
       onSubmit={(e) => {
         e.preventDefault()
@@ -120,7 +120,7 @@ function SettingsForm({ settings }: { settings: Settings }) {
       <Section title={t.settings.orgTitle}>{text('organizationName', t.settings.orgName)}</Section>
 
       <Section title={t.settings.mailTitle} lead={t.settings.mailLead}>
-        <div className="grid gap-3.5 sm:grid-cols-2">
+        <div className="grid gap-3.5 sm:grid-cols-2 xl:grid-cols-3">
           {text('host', t.settings.host, { mono: true })}
           <Field label={t.settings.port} error={tried && !portOk ? t.settings.portRange : null}>
             {(id, describedBy) => <Input id={id} mono inputMode="numeric" value={form.port} invalid={tried && !portOk} aria-describedby={describedBy} onChange={(e) => set('port')(e.target.value)} />}
@@ -146,7 +146,7 @@ function SettingsForm({ settings }: { settings: Settings }) {
 
       <Section title={t.settings.storageTitle} lead={t.settings.storageLead}>
         {settings.storageLocked && <SlotNote className="text-[13.5px] text-ink-2">{t.settings.storageLocked}</SlotNote>}
-        <div className="grid gap-3.5 sm:grid-cols-2">
+        <div className="grid gap-3.5 sm:grid-cols-2 xl:grid-cols-3">
           {text('endpoint', t.settings.endpoint, { mono: true, disabled: settings.storageLocked })}
           {text('region', t.settings.region, { mono: true, disabled: settings.storageLocked })}
         </div>
@@ -201,7 +201,7 @@ export function SettingsPage() {
   return (
     <>
       <PageHeader title={t.settings.title} lead={session.organization.name} />
-      <QueryView query={settings} loading={<div className="max-w-[720px]"><SkeletonLines lines={6} /></div>}>
+      <QueryView query={settings} loading={<SkeletonLines lines={6} />}>
         {(data) => <SettingsForm settings={data} />}
       </QueryView>
     </>
