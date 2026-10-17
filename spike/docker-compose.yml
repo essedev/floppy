@@ -1,6 +1,9 @@
 # Local S3 for the spike: Garage, plus Toxiproxy in front of it to simulate
 # the latency and bandwidth of a real link to OVH. PostgreSQL stands in for the
 # shared metadata database, also behind Toxiproxy (meta-bench.sh, meta-access.sh).
+# The "replica" profile adds the architecture under test: a central Valkey behind
+# the simulated link, and two clients (drive, drive-b) each with a local Valkey
+# replica in its own network namespace, as it will run inside each Mac's VM.
 services:
   garage:
     image: dxflrs/garage:v2.1.0
@@ -26,6 +29,35 @@ services:
       interval: 2s
       retries: 30
 
+  valkey:
+    image: valkey/valkey:8.1.4
+    profiles: [replica]
+    # Durable like production: every write on disk before the answer
+    command: >-
+      valkey-server --requirepass ${VALKEY_PASSWORD:-} --appendonly yes
+      --appendfsync always --repl-backlog-size 256mb
+    volumes:
+      - valkey-data:/data
+
+  valkey-a:
+    image: valkey/valkey:8.1.4
+    profiles: [replica]
+    network_mode: "service:drive"
+    # Replicates as the Mac's own user, so revoking the Mac also cuts its replica
+    command: >-
+      valkey-server --port 6380 --replicaof toxiproxy 4505
+      --masteruser ${VALKEY_MASTERUSER_A:-default} --masterauth ${VALKEY_PASSWORD:-}a
+      --requirepass ${VALKEY_PASSWORD:-} --replica-read-only yes --save "" --appendonly no
+
+  valkey-b:
+    image: valkey/valkey:8.1.4
+    profiles: [replica]
+    network_mode: "service:drive-b"
+    command: >-
+      valkey-server --port 6380 --replicaof toxiproxy 4505
+      --masteruser ${VALKEY_MASTERUSER_B:-default} --masterauth ${VALKEY_PASSWORD:-}b
+      --requirepass ${VALKEY_PASSWORD:-} --replica-read-only yes --save "" --appendonly no
+
   toxiproxy:
     image: ghcr.io/shopify/toxiproxy:2.12.0
     ports:
@@ -33,13 +65,21 @@ services:
       - "127.0.0.1:4502:8474" # Toxiproxy API
 
   drive:
-    build: ./drive
+    build:
+      context: ./drive
+      args:
+        JUICEFS_SOURCE: ${JUICEFS_SOURCE:-upstream}
+      additional_contexts:
+        replica: ./juicefs-replica/dist
     privileged: true # FUSE inside the container
     devices:
       - /dev/fuse
     environment:
       META_URL: ${META_URL:-sqlite3:///state/meta.db}
       VOLUME_NAME: ${VOLUME_NAME:-spike}
+      # Production keeps 7 days: an open file deleted elsewhere keeps its blocks
+      TRASH_DAYS: ${TRASH_DAYS:-0}
+      SMB_DOS_ATTRIBUTES: ${SMB_DOS_ATTRIBUTES:-yes}
       BUCKET_URL: http://toxiproxy:4501/fluix
       # Read only by the first `juicefs format`, which stores them in the metadata
       ACCESS_KEY: ${ACCESS_KEY:-}
@@ -61,8 +101,47 @@ services:
     depends_on:
       - toxiproxy
 
+  drive-b:
+    profiles: [replica]
+    build:
+      context: ./drive
+      args:
+        JUICEFS_SOURCE: ${JUICEFS_SOURCE:-upstream}
+      additional_contexts:
+        replica: ./juicefs-replica/dist
+    privileged: true # FUSE inside the container
+    devices:
+      - /dev/fuse
+    environment:
+      META_URL: ${META_URL_B:-sqlite3:///state/meta.db}
+      VOLUME_NAME: ${VOLUME_NAME:-spike}
+      # Production keeps 7 days: an open file deleted elsewhere keeps its blocks
+      TRASH_DAYS: ${TRASH_DAYS:-0}
+      SMB_DOS_ATTRIBUTES: ${SMB_DOS_ATTRIBUTES:-yes}
+      BUCKET_URL: http://toxiproxy:4501/fluix
+      # Read only by the first `juicefs format`, which stores them in the metadata
+      ACCESS_KEY: ${ACCESS_KEY:-}
+      SECRET_KEY: ${SECRET_KEY:-}
+      # Extra mount flags, e.g. longer metadata caches: --attr-cache 10 --entry-cache 10
+      MOUNT_OPTS: ${MOUNT_OPTS:-}
+      SMB_PASSWORD: ${SMB_PASSWORD:?run setup.sh first}
+      # Simulated link, in Mbps for the whole mount (0 = unlimited). Toxiproxy
+      # only adds latency: its bandwidth limit is per connection, and JuiceFS
+      # opens many in parallel.
+      DOWNLOAD_LIMIT_MBPS: ${DOWNLOAD_LIMIT_MBPS:-100}
+      UPLOAD_LIMIT_MBPS: ${UPLOAD_LIMIT_MBPS:-300}
+      PREFETCH: ${PREFETCH:-8}
+    volumes:
+      - ${HOME}/.fluix-spike-b:/state
+      - drive-b-cache:/cache
+    ports:
+      - "127.0.0.1:4506:445" # SMB of the second client
+    depends_on:
+      - toxiproxy
 volumes:
   drive-cache:
+  drive-b-cache:
+  valkey-data:
   garage-meta:
   garage-data:
   pg-data:

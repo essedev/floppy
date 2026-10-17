@@ -1,0 +1,2470 @@
+From 477f0550fb93b7693d6ed0eeee80510a74f27510 Mon Sep 17 00:00:00 2001
+From: Simone Salerno <doppiaesse@proton.me>
+Date: Sat, 17 Oct 2026 12:26:13 +0200
+Subject: [PATCH] meta/redis: serve reads from a local read replica on
+ read-write mounts
+
+Upstream JuiceFS reads from Redis replicas only on read-only mounts, through
+Sentinel or Cluster and `route-read=replica`. With the metadata on a master
+across a WAN (10-30 ms), every lookup, getattr, getxattr and readdir costs a
+round trip, and an SMB server in front of the mount issues thousands of them
+per folder listing, and every write costs WATCH, the reads, MULTI/EXEC and
+UNWATCH. This patch lets a read-write mount read from a replica of the
+master, usually on the same machine, keeping read-your-writes, and commits
+transactions in one round trip.
+
+Configuration, in the metadata URL of a single Redis/Valkey master:
+
+  redis://:PASSWORD@master:6379/1?read-replica=redis://:PASSWORD@127.0.0.1:6380/1&max-lag=2s&master-timeout=10s
+
+- read-replica: URL of a replica of that master. Without a password it uses
+  the master's (also META_PASSWORD); without a database it uses the master's,
+  and a different database is an error. Reserved characters in its password
+  must be percent-encoded twice, or the password left out.
+- max-lag (default 2s): the oldest data the replica may serve while the
+  master is reachable.
+- master-timeout (default 10s): how long the master may stay silent (not a
+  byte on any connection) before the client goes offline. A command waits
+  for the master up to twice that (go-redis ContextTimeoutEnabled plus a
+  deadline in a hook, retries included) and then fails with the usual error.
+- Errors: Sentinel or Cluster masters, client-cache together with
+  read-replica, max-lag or master-timeout <= 0. Without read-replica nothing
+  changes except that a session cleanup also deletes its (missing) ryw<sid>
+  key, and doRemoveXattr sends its HDEL in MULTI/EXEC (it used a plain
+  pipeline under WATCH, which made the WATCH useless and hid the write from
+  the read-your-writes hook).
+
+Routing. Reads outside transactions go to the replica when it can serve them:
+
+- doLookup (HGET entry + GET inode; the Lua lookup script stays on the master
+  path because scripts are loaded on the master only), doGetAttr,
+  doReadlink with noatime, doReaddir and redisDirHandler.List (HSCAN),
+  fillAttr (MGET), doRead (LRANGE of chunk slices, also used by compaction,
+  which re-checks the slices inside its transaction), GetXattr, ListXattr,
+  doGetFacl (the inode; ACL rules are immutable and cached), getCounter for
+  usedSpace and totalInodes (statfs and the background refresh).
+
+Everything else stays on the master: every write and every read inside
+txn() (WATCH/MULTI/EXEC), readlink when atime must be updated, Resolve (Lua),
+doLoad, sessions, other counters, flock/plock state (coordination between
+clients), doGetParents, dir stats and quotas (they feed write accounting and
+quota enforcement), doList, cleanup, gc, fsck, dump and load.
+
+Read-your-writes, with no extra round trip on the write path: a go-redis hook
+on the master client adds HINCRBY ryw<sid> <field> 1 as the first command of
+every MULTI/EXEC, and the client keeps the highest value returned (an atomic
+max, so concurrent writers are covered). The field is random for each client
+and each Reset: a sid is reused after a volume is reset or formatted again,
+and a stale replica must never hold our counter from that earlier life. A
+read goes to the replica only if the replica's field is at least that value;
+the highest value seen on the replica is remembered, so the HGET on the
+replica happens only right after a write. If the replica is behind, the read
+polls it for at most one master round trip, then goes to the master. The
+session's own transaction is tracked, so the writes made before it (format,
+load) are ordered before any read from the replica. The key is deleted with
+the session.
+Plain writes outside MULTI/EXEC (counters, slice refs, dir stats, gc) are not
+tracked; none of their keys is read from the replica, except usedSpace and
+totalInodes, which are also updated inside transactions.
+
+Freshness and health: every min(500ms, max-lag/4) a probe (its own
+connection to the master, no retries) reads INFO replication on the master,
+and a check loop reads it on the replica. The probe keeps (time,
+master_repl_offset) samples, dated at half the probe's round trip since a
+read from the master would not be fresher; the replica holds every write
+committed before the newest sample its offset has reached. Modes:
+
+- replica: link up, same replication id as the master, lag <= max-lag.
+- master: the replica is down, not a replica, its link is down, its
+  replication id differs, or its lag exceeds max-lag; reads go to the
+  master. Also when the master answers with an error (ACL, ...).
+- offline: the master is unreachable while the replica answers with the
+  master's last replication id. Unreachable means either a dial error that
+  proves it at once (connection refused, no route, network unreachable,
+  name not found), or master-timeout without a single byte from the master
+  on any connection (tracked by a DialHook) while the probe keeps asking.
+  Timeouts alone never switch a command to offline: a slow master (a
+  saturated uplink) only makes writes slow. Going offline closes the
+  connections to the master, so the commands waiting for it fail with EROFS
+  at once; while offline every command to the master fails with EROFS
+  without being sent, and reads go to the replica however stale, since
+  nothing fresher is reachable. The first answer to the probe ends it. A
+  replica restarted empty, or promoted, has another replication id and is
+  never served. CLIENT SETINFO is disabled on these connections: on a slow
+  link each new connection cost two more round trips.
+
+Every mode change is logged ("Read replica <addr>: mode A -> B (reason)"),
+and two gauges are exported, also in the mount's .stats file:
+juicefs_meta_replica_mode (-1 not checked yet, 0 master, 1 replica,
+2 offline) and juicefs_meta_replica_lag_seconds (an upper bound, at the
+granularity of the check interval; -1 until known).
+
+Optimistic transactions (redis_optimistic.go): when the replica is usable,
+the first attempt of txn() runs the transaction function unchanged on a
+redis.Tx with a hook: WATCH/UNWATCH become no-ops, reads are served by the
+replica and recorded, and MULTI/EXEC becomes one EVALSHA of a generic
+script that compares each recorded read with the master's current value
+and only then applies the writes with pcall (per-command errors, like
+EXEC), plus the read-your-writes HINCRBY. A changed value is a conflict (TxFailedErr) and
+txn() retries with WATCH on the master. Commands that cannot be checked or
+replayed (SCAN, HSCAN, a write outside MULTI/EXEC such as the trash counter
+or a new ACL rule, unhandled reply types, a command with more than 4000
+arguments, beyond what unpack() takes in the server's Lua) abort before anything is sent and
+the transaction runs with WATCH. A transaction that ends without writes
+(EEXIST, ENOENT, no-op) still checks its reads in one EVALSHA, so its result
+is the master's. Validating the read set at commit is serializable, and
+stricter than WATCH, which does not cover reads of unwatched keys. One
+generic script instead of hand-written Lua for mknod, setattr, setxattr and
+write: the Go transaction functions (permissions, ACL, setgid, trash, quota
+checks, SkipDirMtime, changelog) stay the only implementation, and every
+transaction benefits. Integer replies of writes go through Lua numbers,
+exact up to 2^53.
+
+Round trips to the master per operation (counted at a TCP proxy, 50 ops
+each), without -> with read-replica: create 5 -> 1, mkdir 5 -> 1, setattr
+(times or mode) 4 -> 1, truncate 4 -> 1, setxattr 3 -> 1, removexattr
+3 -> 1, write (slice commit) 4 -> 1, unlink 6 -> 1.
+
+ACL: the client's user needs INFO on both servers, HGET on ryw* on the
+replica, HINCRBY/DEL on ryw* and EVALSHA/EVAL on the master (the commands inside the script are checked
+against the same user).
+
+Tests (pkg/meta/redis_replica_test.go) run only when JFS_TEST_REPLICA_MASTER
+and JFS_TEST_REPLICA point to a master and its replica: read-your-writes over
+1,000 rounds with fast, slow and WAN-like links, concurrent writers, link
+down, lag above max-lag, refused master (offline at once), blackholed master
+(offline after master-timeout, no EROFS before), slow master (1.2 s +/- 0.6 s
+for 30 s: no EROFS), optimistic conflicts and fallbacks, round trips
+per operation, option errors, and the whole meta test suite with and
+without read-replica.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ pkg/meta/redis.go              | 103 +++-
+ pkg/meta/redis_optimistic.go   | 389 +++++++++++++
+ pkg/meta/redis_replica.go      | 626 +++++++++++++++++++++
+ pkg/meta/redis_replica_test.go | 974 +++++++++++++++++++++++++++++++++
+ 4 files changed, 2072 insertions(+), 20 deletions(-)
+ create mode 100644 pkg/meta/redis_optimistic.go
+ create mode 100644 pkg/meta/redis_replica.go
+ create mode 100644 pkg/meta/redis_replica_test.go
+
+diff --git a/pkg/meta/redis.go b/pkg/meta/redis.go
+index de7c0ff..d958541 100644
+--- a/pkg/meta/redis.go
++++ b/pkg/meta/redis.go
+@@ -49,6 +49,7 @@ import (
+ 	aclAPI "github.com/juicedata/juicefs/pkg/acl"
+ 	"github.com/juicedata/juicefs/pkg/utils"
+ 	"github.com/pkg/errors"
++	"github.com/prometheus/client_golang/prometheus"
+ 	"github.com/redis/go-redis/v9"
+ 	"github.com/redis/go-redis/v9/maintnotifications"
+ 	"golang.org/x/sync/errgroup"
+@@ -95,6 +96,7 @@ type redisMeta struct {
+ 	shaLookup  string // The SHA returned by Redis for the loaded `scriptLookup`
+ 	shaResolve string // The SHA returned by Redis for the loaded `scriptResolve`
+ 	cache      *redisCache
++	replica    *redisReplica
+ }
+ 
+ var _ Meta = (*redisMeta)(nil)
+@@ -133,6 +135,9 @@ func newRedisMeta(driver, addr string, conf *Config) (Meta, error) {
+ 	// Default TTL to prevent reading stale cache for a long time when the connection fails.
+ 	clientCacheExpiry := query.duration("client-cache-expire", "client_cache_expire", time.Minute)
+ 	clientCachePreload := query.getInt("client-cache-preload", "client_cache_preload", 0) // may cause conflict
++	readReplica := query.pop("read-replica")
++	maxLag := query.duration("max-lag", "max_lag", time.Second*2)
++	masterTimeout := query.duration("master-timeout", "master_timeout", time.Second*10)
+ 	u.RawQuery = values.Encode()
+ 
+ 	hosts := u.Host
+@@ -185,6 +190,10 @@ func newRedisMeta(driver, addr string, conf *Config) (Meta, error) {
+ 	opt.ReadTimeout = readTimeout
+ 	opt.WriteTimeout = writeTimeout
+ 	opt.MaintNotificationsConfig = &maintnotifications.Config{Mode: maintnotifications.ModeDisabled}
++	if readReplica != "" {
++		opt.ContextTimeoutEnabled = true // the read replica bounds every command to the master
++		opt.DisableIdentity = true       // CLIENT SETINFO costs round trips on every new connection
++	}
+ 	var prefix string
+ 	var rdb redis.UniversalClient
+ 
+@@ -236,6 +245,9 @@ func newRedisMeta(driver, addr string, conf *Config) (Meta, error) {
+ 			if err != nil && strings.Contains(err.Error(), "cluster mode") || err == nil && strings.Contains(info, "cluster_state:") {
+ 				logger.Infof("redis %s is in cluster mode", hosts)
+ 				c.Close()
++			} else if readReplica != "" {
++				c.Close() // a new client, so that every connection goes through the replica's DialHook
++				rdb = redis.NewClient(opt)
+ 			} else {
+ 				rdb = c
+ 			}
+@@ -283,6 +295,14 @@ func newRedisMeta(driver, addr string, conf *Config) (Meta, error) {
+ 		rdb:      rdb,
+ 		prefix:   prefix,
+ 	}
++	if readReplica != "" {
++		if clientCache {
++			return nil, fmt.Errorf("read-replica cannot be used with client-cache")
++		}
++		if m.replica, err = newRedisReplica(m, readReplica, opt, maxLag, masterTimeout); err != nil {
++			return nil, err
++		}
++	}
+ 	if clientCache {
+ 		m.cache = newRedisCache(prefix, clientCacheSize, clientCacheExpiry, clientCachePreload)
+ 		if err = m.cache.init(m.rdb); err != nil {
+@@ -301,9 +321,22 @@ func (m *redisMeta) Shutdown() error {
+ 		m.cache.close()
+ 		m.cache = nil
+ 	}
++	if m.replica != nil {
++		if err := m.replica.close(); err != nil {
++			logger.Warnf("close read replica: %s", err)
++		}
++	}
+ 	return m.rdb.Close()
+ }
+ 
++func (m *redisMeta) InitMetrics(reg prometheus.Registerer) {
++	m.baseMeta.InitMetrics(reg)
++	if reg != nil && m.replica != nil {
++		reg.MustRegister(m.replica.modeG)
++		reg.MustRegister(m.replica.lagG)
++	}
++}
++
+ // Override NewSession to initialize client-side cache after session is created
+ func (m *redisMeta) NewSession(record bool) error {
+ 	// First, create the session normally
+@@ -425,12 +458,18 @@ func (m *redisMeta) cacheACLs(ctx Context) error {
+ }
+ 
+ func (m *redisMeta) Reset() error {
++	var err error
+ 	if m.prefix != "" {
+-		return m.scan(Background(), "*", func(keys []string) error {
++		err = m.scan(Background(), "*", func(keys []string) error {
+ 			return m.rdb.Del(Background(), keys...).Err()
+ 		})
++	} else {
++		err = m.rdb.FlushDB(Background()).Err()
++	}
++	if err == nil && m.replica != nil {
++		err = m.replica.afterReset(Background())
+ 	}
+-	return m.rdb.FlushDB(Background()).Err()
++	return err
+ }
+ 
+ func (m *redisMeta) doLoad() ([]byte, error) {
+@@ -443,6 +482,10 @@ func (m *redisMeta) doLoad() ([]byte, error) {
+ 
+ func (m *redisMeta) doNewSession(sinfo []byte, update bool) error {
+ 	ctx := Background()
++	if m.replica != nil {
++		// before the transaction, which then tracks every write made so far (format, load)
++		m.replica.setSession(m.sid)
++	}
+ 	ssid := strconv.FormatUint(m.sid, 10)
+ 	expire := m.expireTime()
+ 	err := m.txn(ctx, func(tx *redis.Tx) error {
+@@ -474,7 +517,11 @@ func (m *redisMeta) doNewSession(sinfo []byte, update bool) error {
+ }
+ 
+ func (m *redisMeta) getCounter(name string) (int64, error) {
+-	v, err := m.rdb.Get(Background(), m.counterKey(name)).Int64()
++	rdb := redis.Cmdable(m.rdb)
++	if name == usedSpace || name == totalInodes {
++		rdb = m.rd(Background())
++	}
++	v, err := rdb.Get(Background(), m.counterKey(name)).Int64()
+ 	if err == redis.Nil {
+ 		err = nil
+ 	}
+@@ -991,7 +1038,9 @@ func (m *redisMeta) doLookup(ctx Context, parent Ino, name string, inode *Ino, a
+ 			return !exists || oldEntry.term < entryTerm
+ 		})
+ 	}
+-	if len(m.shaLookup) > 0 && attr != nil && !m.conf.CaseInsensi && m.prefix == "" {
++	rdb := m.rd(ctx)
++	// scripts are loaded on the master only
++	if rdb == m.rdb && len(m.shaLookup) > 0 && attr != nil && !m.conf.CaseInsensi && m.prefix == "" {
+ 		var res interface{}
+ 		var returnedIno int64
+ 		var returnedAttr string
+@@ -1007,12 +1056,12 @@ func (m *redisMeta) doLookup(ctx Context, parent Ino, name string, inode *Ino, a
+ 	}
+ 	if foundIno == 0 || len(encodedAttr) == 0 {
+ 		var buf []byte
+-		buf, err = m.rdb.HGet(ctx, entryKey, name).Bytes()
++		buf, err = rdb.HGet(ctx, entryKey, name).Bytes()
+ 		if err != nil {
+ 			return errno(err)
+ 		}
+ 		foundType, foundIno = m.parseEntry(buf)
+-		encodedAttr, err = m.rdb.Get(ctx, m.inodeKey(foundIno)).Bytes()
++		encodedAttr, err = rdb.Get(ctx, m.inodeKey(foundIno)).Bytes()
+ 	}
+ 
+ 	if err == nil {
+@@ -1065,7 +1114,7 @@ func (m *redisMeta) Resolve(ctx Context, parent Ino, path string, inode *Ino, at
+ }
+ 
+ func (m *redisMeta) doGetAttr(ctx Context, inode Ino, attr *Attr) syscall.Errno {
+-	a, err := m.rdb.Get(ctx, m.inodeKey(inode)).Bytes()
++	a, err := m.rd(ctx).Get(ctx, m.inodeKey(inode)).Bytes()
+ 	if err == nil {
+ 		m.parseAttr(a, attr)
+ 	}
+@@ -1141,7 +1190,7 @@ func replaceErrno(txf func(tx *redis.Tx) error) func(tx *redis.Tx) error {
+ }
+ 
+ func (m *redisMeta) txn(ctx Context, txf func(tx *redis.Tx) error, keys ...string) error {
+-	if m.conf.ReadOnly {
++	if m.conf.ReadOnly || m.replica != nil && m.replica.mode.Load() == replicaModeOffline {
+ 		return syscall.EROFS
+ 	}
+ 	for _, k := range keys {
+@@ -1173,7 +1222,15 @@ func (m *redisMeta) txn(ctx Context, txf func(tx *redis.Tx) error, keys ...strin
+ 			logger.Warnf("Transaction %s interrupted after %s, tried %d, keys: %v", method.name(ctx), time.Since(start), i+1, keys)
+ 			return syscall.EINTR
+ 		}
+-		err := m.rdb.Watch(ctx, replaceErrno(txf), keys...)
++		var err error
++		if i == 0 && m.replica != nil && m.replica.usable(ctx) {
++			var fallback bool
++			if fallback, err = m.optimistic(ctx, replaceErrno(txf)); fallback {
++				continue
++			}
++		} else {
++			err = m.rdb.Watch(ctx, replaceErrno(txf), keys...)
++		}
+ 		if eno, ok := err.(errNo); ok {
+ 			if eno == 0 {
+ 				err = nil
+@@ -1409,7 +1466,7 @@ func (m *redisMeta) doSetAttr(ctx Context, inode Ino, set uint16, sugidclearmode
+ 
+ func (m *redisMeta) doReadlink(ctx Context, inode Ino, noatime bool) (atime int64, target []byte, err error) {
+ 	if noatime {
+-		target, err = m.rdb.Get(ctx, m.symKey(inode)).Bytes()
++		target, err = m.rd(ctx).Get(ctx, m.symKey(inode)).Bytes()
+ 		if err == redis.Nil {
+ 			err = nil
+ 		}
+@@ -2828,7 +2885,7 @@ func (m *redisMeta) fillAttr(ctx Context, es []*Entry) error {
+ 	for i, e := range es {
+ 		keys[i] = m.inodeKey(e.Inode)
+ 	}
+-	rs, err := m.rdb.MGet(ctx, keys...).Result()
++	rs, err := m.rd(ctx).MGet(ctx, keys...).Result()
+ 	if err != nil {
+ 		return err
+ 	}
+@@ -2845,7 +2902,7 @@ func (m *redisMeta) fillAttr(ctx Context, es []*Entry) error {
+ 
+ func (m *redisMeta) doReaddir(ctx Context, inode Ino, plus uint8, entries *[]*Entry, limit int) syscall.Errno {
+ 	var stop = errors.New("stop")
+-	err := m.hscan(ctx, m.entryKey(inode), func(keys []string) error {
++	err := m.hscanOn(ctx, m.rd(ctx), m.entryKey(inode), func(keys []string) error {
+ 		newEntries := make([]Entry, len(keys)/2)
+ 		newAttrs := make([]Attr, len(keys)/2)
+ 		for i := 0; i < len(keys); i += 2 {
+@@ -2972,6 +3029,7 @@ func (m *redisMeta) doCleanStaleSession(sid uint64) error {
+ 			_, err := tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
+ 				pipe.HDel(ctx, m.sessionInfos(), ssid)
+ 				removed = pipe.ZRem(ctx, m.allSessions(), ssid)
++				pipe.Del(ctx, m.rywKey(sid))
+ 				m.genLog(ctx, pipe, time.Now(), "CLEANSESSION(%d)", sid)
+ 				return nil
+ 			})
+@@ -3082,7 +3140,7 @@ func (m *redisMeta) doDeleteSustainedInode(sid uint64, inode Ino) error {
+ }
+ 
+ func (m *redisMeta) doRead(ctx Context, inode Ino, indx uint32) ([]*slice, syscall.Errno) {
+-	vals, err := m.rdb.LRange(ctx, m.chunkKey(inode, indx), 0, -1).Result()
++	vals, err := m.rd(ctx).LRange(ctx, m.chunkKey(inode, indx), 0, -1).Result()
+ 	if err != nil {
+ 		return nil, errno(err)
+ 	}
+@@ -3963,9 +4021,13 @@ func (m *redisMeta) scan(ctx context.Context, pattern string, f func([]string) e
+ }
+ 
+ func (m *redisMeta) hscan(ctx context.Context, key string, f func([]string) error) error {
++	return m.hscanOn(ctx, m.rdb, key, f)
++}
++
++func (m *redisMeta) hscanOn(ctx context.Context, rdb redis.Cmdable, key string, f func([]string) error) error {
+ 	var cursor uint64
+ 	for {
+-		keys, c, err := m.rdb.HScan(ctx, key, cursor, "*", 10000).Result()
++		keys, c, err := rdb.HScan(ctx, key, cursor, "*", 10000).Result()
+ 		if err != nil {
+ 			logger.Warnf("HSCAN %s: %s", key, err)
+ 			return err
+@@ -4262,7 +4324,7 @@ func (m *redisMeta) GetXattr(ctx Context, inode Ino, name string, vbuff *[]byte)
+ 	defer m.timeit("GetXattr", time.Now())
+ 	inode = m.checkRoot(inode)
+ 	var err error
+-	*vbuff, err = m.rdb.HGet(ctx, m.xattrKey(inode), name).Bytes()
++	*vbuff, err = m.rd(ctx).HGet(ctx, m.xattrKey(inode), name).Bytes()
+ 	if err == redis.Nil {
+ 		err = ENOATTR
+ 	}
+@@ -4272,7 +4334,8 @@ func (m *redisMeta) GetXattr(ctx Context, inode Ino, name string, vbuff *[]byte)
+ func (m *redisMeta) ListXattr(ctx Context, inode Ino, names *[]byte) syscall.Errno {
+ 	defer m.timeit("ListXattr", time.Now())
+ 	inode = m.checkRoot(inode)
+-	vals, err := m.rdb.HKeys(ctx, m.xattrKey(inode)).Result()
++	rdb := m.rd(ctx)
++	vals, err := rdb.HKeys(ctx, m.xattrKey(inode)).Result()
+ 	if err != nil {
+ 		return errno(err)
+ 	}
+@@ -4282,7 +4345,7 @@ func (m *redisMeta) ListXattr(ctx Context, inode Ino, names *[]byte) syscall.Err
+ 		*names = append(*names, 0)
+ 	}
+ 
+-	val, err := m.rdb.Get(ctx, m.inodeKey(inode)).Bytes()
++	val, err := rdb.Get(ctx, m.inodeKey(inode)).Bytes()
+ 	if err != nil {
+ 		return errno(err)
+ 	}
+@@ -4325,7 +4388,7 @@ func (m *redisMeta) doSetXattr(ctx Context, inode Ino, name string, value []byte
+ func (m *redisMeta) doRemoveXattr(ctx Context, inode Ino, name string) syscall.Errno {
+ 	var n int64
+ 	err := m.txn(ctx, func(tx *redis.Tx) error {
+-		cmd, err := tx.Pipelined(ctx, func(pipe redis.Pipeliner) error {
++		cmd, err := tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
+ 			pipe.HDel(ctx, m.xattrKey(inode), name)
+ 			m.genLog(ctx, pipe, time.Now(), "REMOVEXATTR(%d,%s)", inode, logEncode2(name))
+ 			return nil
+@@ -5904,7 +5967,7 @@ func (m *redisMeta) doSetFacl(ctx Context, ino Ino, aclType uint8, rule *aclAPI.
+ 
+ func (m *redisMeta) doGetFacl(ctx Context, ino Ino, aclType uint8, aclId uint32, rule *aclAPI.Rule) syscall.Errno {
+ 	if aclId == aclAPI.None {
+-		val, err := m.rdb.Get(ctx, m.inodeKey(ino)).Bytes()
++		val, err := m.rd(ctx).Get(ctx, m.inodeKey(ino)).Bytes()
+ 		if err != nil {
+ 			return errno(err)
+ 		}
+@@ -6186,7 +6249,7 @@ func (s *redisDirHandler) List(ctx Context, offset int) ([]*Entry, syscall.Errno
+ 	defer s.Unlock()
+ 	if s.entries == nil {
+ 		var entries []*Entry
+-		err := s.en.hscan(ctx, s.en.entryKey(s.inode), func(keys []string) error {
++		err := s.en.hscanOn(ctx, s.en.rd(ctx), s.en.entryKey(s.inode), func(keys []string) error {
+ 			newEntries := make([]Entry, len(keys)/2)
+ 			newAttrs := make([]Attr, len(keys)/2)
+ 			for i := 0; i < len(keys); i += 2 {
+diff --git a/pkg/meta/redis_optimistic.go b/pkg/meta/redis_optimistic.go
+new file mode 100644
+index 0000000..fd17834
+--- /dev/null
++++ b/pkg/meta/redis_optimistic.go
+@@ -0,0 +1,389 @@
++//go:build !noredis
++// +build !noredis
++
++/*
++ * JuiceFS, Copyright 2026 Juicedata, Inc.
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *     http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++package meta
++
++import (
++	"context"
++	"errors"
++	"fmt"
++	"strconv"
++
++	"github.com/redis/go-redis/v9"
++)
++
++/*
++	Optimistic transactions, used with a read replica.
++
++	A transaction on the master costs WATCH, one round trip per read, MULTI/EXEC and UNWATCH. When
++	the replica is fresh, the first attempt of txn() runs the same transaction function on a
++	redis.Tx whose commands are intercepted: reads are served by the replica and recorded, and
++	MULTI/EXEC becomes one EVALSHA of scriptCommit on the master, which checks that every recorded
++	read still returns the same value and only then applies the writes. One round trip, and the
++	transaction functions stay the only implementation of each operation.
++
++	A failed check is a conflict (redis.TxFailedErr): txn() runs the transaction again with WATCH
++	on the master. Anything that cannot be checked or replayed (SCAN, a write outside MULTI/EXEC,
++	a reply type not handled here) aborts the attempt before anything is sent, and txn() runs it
++	with WATCH too. A transaction that ends without writes still checks its reads, so that its
++	result (EEXIST, ENOENT, ...) is the master's.
++
++	Checking the values read instead of watching keys is serializable too: the transaction
++	commits only if everything it read is unchanged at commit time. Integer replies of the writes
++	go through Lua numbers, exact up to 2^53.
++*/
++
++var errOptimisticAbort = errors.New("optimistic transaction aborted")
++
++// maxScriptArgs bounds the arguments of one command in scriptCommit: unpack() in the server's
++// Lua fails beyond about 8000 values (LUAI_MAXCSTACK).
++const maxScriptArgs = 4000
++
++// scriptCommit checks reads and applies writes. ARGV: number of reads, then for each read its
++// kind, number of arguments, the command and the expected reply; number of writes, then for each
++// write its number of arguments and the command. Returns {0, index of the changed read} or
++// {1, type, value, ...} with the reply of each write (s: string, i: integer, n: nil, e: error).
++const scriptCommit = `
++local i = 0
++local function arg() i = i + 1 return ARGV[i] end
++local function command()
++  local n, cmd = tonumber(arg()), {}
++  for j = 1, n do cmd[j] = arg() end
++  return cmd
++end
++local function value()
++  if arg() == 'n' then return false end
++  return arg()
++end
++for r = 1, tonumber(arg()) do
++  local kind, cmd = arg(), command()
++  local ok = true
++  if kind == 'v' then
++    ok = redis.call(unpack(cmd)) == value()
++  elseif kind == 'i' then
++    ok = redis.call(unpack(cmd)) == tonumber(arg())
++  elseif kind == 'a' then
++    local got, n = redis.call(unpack(cmd)), tonumber(arg())
++    ok = #got == n
++    for j = 1, n do
++      if got[j] ~= value() then ok = false end
++    end
++  else -- 'h' (HGETALL) and 'k' (HKEYS): compare as sets, the order may differ on the replica
++    local key, n = cmd[2], tonumber(arg())
++    ok = redis.call('HLEN', key) == n
++    for j = 1, n do
++      if kind == 'h' then
++        local f, v = arg(), arg()
++        if ok and redis.call('HGET', key, f) ~= v then ok = false end
++      elseif ok and redis.call('HEXISTS', key, arg()) == 0 then
++        ok = false
++      end
++    end
++  end
++  if not ok then return {0, r} end
++end
++local res = {1}
++for w = 1, tonumber(arg()) do
++  local rep = redis.pcall(unpack(command()))
++  if type(rep) == 'table' and rep.err then
++    res[#res + 1] = 'e'; res[#res + 1] = rep.err
++  elseif type(rep) == 'table' and rep.ok then
++    res[#res + 1] = 's'; res[#res + 1] = rep.ok
++  elseif type(rep) == 'number' then
++    res[#res + 1] = 'i'; res[#res + 1] = rep
++  elseif rep == false then
++    res[#res + 1] = 'n'; res[#res + 1] = ''
++  else
++    res[#res + 1] = 's'; res[#res + 1] = rep
++  end
++end
++return res
++`
++
++var commitScript = redis.NewScript(scriptCommit)
++
++// optimisticTx is the hook installed on the redis.Tx of an optimistic attempt.
++type optimisticTx struct {
++	m     *redisMeta
++	reads []redis.Cmder // served by the replica since the last commit
++	abort error         // why the transaction must run again with WATCH
++}
++
++// optimistic runs txf once optimistically. It returns fallback when txf must run again with WATCH.
++func (m *redisMeta) optimistic(ctx Context, txf func(tx *redis.Tx) error) (fallback bool, err error) {
++	o := &optimisticTx{m: m}
++	err = m.rdb.Watch(ctx, func(tx *redis.Tx) error {
++		tx.AddHook(o)
++		err := txf(tx)
++		if o.abort == nil && len(o.reads) > 0 && !errors.Is(err, redis.TxFailedErr) {
++			// no commit after these reads: the result must still be the master's
++			if e := o.commit(ctx, nil); e != nil {
++				return e
++			}
++		}
++		return err
++	}) // no keys: nothing is watched, no command reaches the master but EVALSHA
++	if o.abort != nil {
++		logger.Debugf("Optimistic transaction aborted: %s", o.abort)
++		m.replica.fallbacks.Add(1)
++		return true, nil
++	}
++	if errors.Is(err, redis.TxFailedErr) {
++		m.replica.conflicts.Add(1)
++	}
++	return false, err
++}
++
++func (o *optimisticTx) fail(cmd redis.Cmder, reason error) error {
++	if o.abort == nil {
++		o.abort = fmt.Errorf("%s: %w", cmd.Name(), reason)
++	}
++	cmd.SetErr(errOptimisticAbort)
++	return errOptimisticAbort
++}
++
++func (o *optimisticTx) DialHook(next redis.DialHook) redis.DialHook { return nil }
++
++func (o *optimisticTx) ProcessHook(next redis.ProcessHook) redis.ProcessHook {
++	return func(ctx context.Context, cmd redis.Cmder) error {
++		switch cmd.Name() {
++		case "watch", "unwatch":
++			cmd.(*redis.StatusCmd).SetVal("OK")
++			return nil
++		}
++		if o.abort != nil {
++			return o.fail(cmd, o.abort)
++		}
++		if readKind(cmd) == 0 {
++			return o.fail(cmd, errors.New("cannot be checked"))
++		}
++		err := o.m.replica.cli.Process(ctx, cmd)
++		if err != nil && err != redis.Nil {
++			return o.fail(cmd, err)
++		}
++		o.reads = append(o.reads, cmd)
++		return err
++	}
++}
++
++func (o *optimisticTx) ProcessPipelineHook(next redis.ProcessPipelineHook) redis.ProcessPipelineHook {
++	return func(ctx context.Context, cmds []redis.Cmder) error {
++		n := len(cmds)
++		multi := n >= 2 && cmds[0].Name() == "multi" && cmds[n-1].Name() == "exec"
++		if o.abort != nil {
++			for _, cmd := range cmds {
++				_ = o.fail(cmd, o.abort)
++			}
++			return errOptimisticAbort
++		}
++		if multi {
++			cmds[0].(*redis.StatusCmd).SetVal("OK")
++			return o.commit(ctx, cmds[1:n-1])
++		}
++		for _, cmd := range cmds {
++			if readKind(cmd) == 0 {
++				return o.commit(ctx, cmds) // writes in a plain pipeline: committed atomically here
++			}
++		}
++		pipe := o.m.replica.cli.Pipeline()
++		for _, cmd := range cmds {
++			_ = pipe.Process(ctx, cmd)
++		}
++		_, err := pipe.Exec(ctx)
++		for _, cmd := range cmds {
++			if e := cmd.Err(); e != nil && e != redis.Nil {
++				return o.fail(cmd, e)
++			}
++		}
++		o.reads = append(o.reads, cmds...)
++		return err
++	}
++}
++
++// readKind is how scriptCommit checks the reply of a read, 0 when it cannot.
++func readKind(cmd redis.Cmder) byte {
++	switch cmd.Name() {
++	case "get", "hget":
++		return 'v'
++	case "exists", "hexists", "hlen":
++		return 'i'
++	case "mget", "hmget", "lrange":
++		return 'a'
++	case "hgetall":
++		return 'h'
++	case "hkeys":
++		return 'k'
++	}
++	return 0
++}
++
++func appendCommand(args []interface{}, cmd redis.Cmder) []interface{} {
++	args = append(args, len(cmd.Args()))
++	return append(args, cmd.Args()...)
++}
++
++func appendValue(args []interface{}, v interface{}) []interface{} {
++	if v == nil {
++		return append(args, "n")
++	}
++	return append(args, "s", v)
++}
++
++// encodeRead appends a read and the reply the replica gave to it.
++func encodeRead(args []interface{}, cmd redis.Cmder) ([]interface{}, error) {
++	kind := readKind(cmd)
++	args = appendCommand(append(args, string(kind)), cmd)
++	switch c := cmd.(type) {
++	case *redis.StringCmd:
++		if c.Err() == redis.Nil {
++			return appendValue(args, nil), nil
++		}
++		return appendValue(args, c.Val()), nil
++	case *redis.IntCmd:
++		return append(args, c.Val()), nil
++	case *redis.BoolCmd:
++		if c.Val() {
++			return append(args, 1), nil
++		}
++		return append(args, 0), nil
++	case *redis.SliceCmd:
++		args = append(args, len(c.Val()))
++		for _, v := range c.Val() {
++			args = appendValue(args, v)
++		}
++		return args, nil
++	case *redis.StringSliceCmd:
++		args = append(args, len(c.Val()))
++		for _, v := range c.Val() {
++			if kind == 'k' {
++				args = append(args, v)
++			} else {
++				args = appendValue(args, v)
++			}
++		}
++		return args, nil
++	case *redis.MapStringStringCmd:
++		args = append(args, len(c.Val()))
++		for k, v := range c.Val() {
++			args = append(args, k, v)
++		}
++		return args, nil
++	}
++	return nil, fmt.Errorf("reply %T", cmd)
++}
++
++// commit sends the reads since the last commit and the writes in one EVALSHA.
++func (o *optimisticTx) commit(ctx context.Context, writes []redis.Cmder) error {
++	r := o.m.replica
++	k := r.ryw()
++	var incr *redis.IntCmd
++	if len(writes) > 0 && k.key != "" {
++		tracked := false
++		for _, w := range writes {
++			if k.is(w) {
++				tracked = true
++			}
++		}
++		if !tracked { // a plain pipeline: the ryw hook only sees MULTI/EXEC
++			incr = k.incr(ctx)
++			writes = append(writes, incr)
++		}
++	}
++	for _, w := range writes {
++		switch w.(type) {
++		case *redis.StatusCmd, *redis.IntCmd, *redis.BoolCmd, *redis.StringCmd:
++		default:
++			return o.fail(w, fmt.Errorf("reply %T", w))
++		}
++		if len(w.Args()) > maxScriptArgs {
++			return o.fail(w, fmt.Errorf("%d arguments", len(w.Args())))
++		}
++	}
++	for _, cmd := range o.reads {
++		if len(cmd.Args()) > maxScriptArgs {
++			return o.fail(cmd, fmt.Errorf("%d arguments", len(cmd.Args())))
++		}
++	}
++	args := []interface{}{len(o.reads)}
++	for _, cmd := range o.reads {
++		var err error
++		if args, err = encodeRead(args, cmd); err != nil {
++			return o.fail(cmd, err)
++		}
++	}
++	args = append(args, len(writes))
++	for _, w := range writes {
++		args = appendCommand(args, w)
++	}
++	res, err := commitScript.Run(ctx, o.m.rdb, nil, args...).Slice()
++	if err == nil && (len(res) == 0 || len(res) != 1+2*len(writes) && res[0] != int64(0)) {
++		err = fmt.Errorf("unexpected reply of scriptCommit: %v", res)
++	}
++	if err == nil && res[0] == int64(0) {
++		err = redis.TxFailedErr
++	}
++	if err != nil {
++		for _, w := range writes {
++			w.SetErr(err)
++		}
++		return err
++	}
++	o.reads = o.reads[:0]
++	var first error
++	for i, w := range writes {
++		typ, val := res[1+2*i], res[2+2*i]
++		switch typ {
++		case "e":
++			w.SetErr(errors.New(fmt.Sprint(val)))
++		case "n":
++			w.SetErr(redis.Nil)
++		default:
++			setReply(w, val)
++		}
++		if first == nil && w.Err() != nil {
++			first = w.Err()
++		}
++	}
++	if incr != nil && incr.Err() == nil {
++		maxInt64(&r.required, incr.Val())
++	}
++	return first
++}
++
++func setReply(cmd redis.Cmder, val interface{}) {
++	var s string
++	var n int64
++	switch v := val.(type) {
++	case int64:
++		n, s = v, strconv.FormatInt(v, 10)
++	case string:
++		s = v
++		n, _ = strconv.ParseInt(v, 10, 64)
++	}
++	switch c := cmd.(type) {
++	case *redis.StatusCmd:
++		c.SetVal(s)
++	case *redis.IntCmd:
++		c.SetVal(n)
++	case *redis.BoolCmd:
++		c.SetVal(n != 0 || s == "OK")
++	case *redis.StringCmd:
++		c.SetVal(s)
++	}
++}
+diff --git a/pkg/meta/redis_replica.go b/pkg/meta/redis_replica.go
+new file mode 100644
+index 0000000..3f66404
+--- /dev/null
++++ b/pkg/meta/redis_replica.go
+@@ -0,0 +1,626 @@
++//go:build !noredis
++// +build !noredis
++
++/*
++ * JuiceFS, Copyright 2026 Juicedata, Inc.
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *     http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++package meta
++
++import (
++	"context"
++	"errors"
++	"fmt"
++	"math/rand"
++	"net"
++	"net/url"
++	"strconv"
++	"strings"
++	"sync"
++	"sync/atomic"
++	"syscall"
++	"time"
++
++	"github.com/prometheus/client_golang/prometheus"
++	"github.com/redis/go-redis/v9"
++)
++
++/*
++	Read replica: a Redis replica, usually on the client's machine, that serves the reads made
++	outside transactions, while writes and the reads inside transactions stay on the master.
++
++	  redis://:pass@master:6379/1?read-replica=redis://127.0.0.1:6380&max-lag=2s&master-timeout=10s
++
++	The replica URL takes the master's database and password when it has none.
++
++	Read-your-writes: every MULTI/EXEC sent to the master also runs HINCRBY ryw$sid <random field>
++	in the same round trip, and the client remembers the highest value returned. A read goes to the
++	replica only once the replica holds that value (remembered too, so it costs an HGET on the
++	replica only right after a write); otherwise it waits up to one master round trip and then goes
++	to the master. Writes made before the session (format) are ordered before the session's own
++	transaction, which is tracked.
++	Transactions read from the replica too and commit in one round trip (redis_optimistic.go).
++
++	Freshness: every min(500ms, max-lag/4) a probe reads master_repl_offset on the master and the
++	check loop reads it on the replica. A sample is dated at half the probe's round trip, since a
++	read from the master would not be fresher; the replica holds every write committed before the
++	newest sample it has reached. When that is older than max-lag, or the replication link is
++	down, reads go to the master.
++
++	Offline, when the master is unreachable while the replica answers with the master's replication
++	id (a replica restarted empty or promoted is never served):
++	- at once when connecting to the master is refused, has no route, or its name does not resolve;
++	- after master-timeout (default 10s) without a single byte from the master on any connection,
++	  while the probe asks every 500ms. A slow master is not an outage: timeouts alone never make a
++	  command go offline, and a saturated uplink only makes writes slow.
++	Going offline closes the connections to the master, so the commands waiting for it fail with
++	EROFS at once; from then on every command to the master fails with EROFS without being sent,
++	reads go to the replica however stale, and the first answer to the probe ends it. Otherwise a
++	command waits for the master up to twice master-timeout and fails with the usual error.
++
++	The mode is logged on every change and exported as the gauges meta_replica_mode (-1 not checked
++	yet, 0 master, 1 replica, 2 offline) and meta_replica_lag_seconds.
++*/
++
++const (
++	replicaModeUnknown int32 = iota - 1 // before the first check, reads go to the master
++	replicaModeMaster                   // reads go to the master
++	replicaModeReplica                  // reads go to the replica, it is fresh
++	replicaModeOffline                  // the master is unreachable, reads go to the stale replica
++)
++
++var replicaModeNames = []string{"master", "replica", "offline"}
++
++func replicaModeName(mode int32) string {
++	if mode == replicaModeUnknown {
++		return "start"
++	}
++	return replicaModeNames[mode]
++}
++
++type replicaSample struct {
++	at     int64 // unix nanos, when the master answered (half its round trip)
++	offset int64
++}
++
++type redisReplica struct {
++	m        *redisMeta
++	cli      *redis.Client
++	probe    *redis.Client // to the master, without retries, for the probe loop only
++	addr     string
++	maxLag   time.Duration
++	timeout  time.Duration // the silence of the master that means offline
++	interval time.Duration
++
++	key        atomic.Value // rywKey, the read-your-writes counter of the session
++	required   atomic.Int64 // highest read-your-writes value returned by the master
++	reached    atomic.Int64 // highest read-your-writes value seen on the replica
++	freshAt    atomic.Int64 // unix nanos: the replica holds every write committed before it
++	rtt        atomic.Int64 // last round trip of the probe, in nanos
++	lastAnswer atomic.Int64 // unix nanos of the last answer of the master, to any command
++	mode       atomic.Int32
++	modeMu     sync.Mutex
++	offline    atomic.Pointer[offlineSignal]
++	conns      sync.Map // *masterConn: the open connections to the master
++
++	servable  atomic.Bool  // the replica answered the last check with the master's replication id
++	conflicts atomic.Int64 // optimistic transactions that ran again with WATCH after a conflict
++	fallbacks atomic.Int64 // optimistic transactions that could not run optimistically
++
++	mu        sync.Mutex // guards the master state below, written by the probe loop
++	samples   []replicaSample
++	replid    string // replication id of the master
++	masterErr error  // result of the last probe
++
++	modeG prometheus.Gauge
++	lagG  prometheus.Gauge
++	done  chan struct{} // closed to stop the loops
++	wg    sync.WaitGroup
++	once  sync.Once
++}
++
++// offlineSignal is cancelled when the client goes offline, to stop commands waiting for the master.
++type offlineSignal struct {
++	ctx    context.Context
++	cancel context.CancelFunc
++	since  atomic.Int64 // unix nanos, when offline started
++}
++
++func newOfflineSignal() *offlineSignal {
++	ctx, cancel := context.WithCancel(context.Background())
++	return &offlineSignal{ctx: ctx, cancel: cancel}
++}
++
++func newRedisReplica(m *redisMeta, uri string, master *redis.Options, maxLag, masterTimeout time.Duration) (*redisReplica, error) {
++	if _, ok := m.rdb.(*redis.Client); !ok {
++		return nil, fmt.Errorf("read-replica needs a single Redis master, not Sentinel or Cluster")
++	}
++	if maxLag <= 0 || masterTimeout <= 0 {
++		return nil, fmt.Errorf("max-lag (%s) and master-timeout (%s) must be positive", maxLag, masterTimeout)
++	}
++	opt, err := redis.ParseURL(uri)
++	if err != nil {
++		return nil, fmt.Errorf("redis parse read-replica: %s", err)
++	}
++	if u, err := url.Parse(uri); err == nil && u.Scheme != "unix" && strings.Trim(u.Path, "/") == "" {
++		opt.DB = master.DB // no database in the URL: use the master's
++	}
++	if opt.DB != master.DB {
++		return nil, fmt.Errorf("read-replica uses database %d but the master uses %d", opt.DB, master.DB)
++	}
++	if opt.Password == "" {
++		opt.Username, opt.Password = master.Username, master.Password
++	}
++	opt.MaxRetries = master.MaxRetries
++	opt.MinRetryBackoff = master.MinRetryBackoff
++	opt.MaxRetryBackoff = master.MaxRetryBackoff
++	opt.ReadTimeout = master.ReadTimeout
++	opt.WriteTimeout = master.WriteTimeout
++	opt.MaintNotificationsConfig = master.MaintNotificationsConfig
++
++	interval := maxLag / 4
++	if interval > 500*time.Millisecond {
++		interval = 500 * time.Millisecond
++	}
++	r := &redisReplica{
++		m:   m,
++		cli: redis.NewClient(opt),
++		probe: redis.NewClient(&redis.Options{
++			Network: master.Network, Addr: master.Addr, Dialer: master.Dialer, TLSConfig: master.TLSConfig,
++			Username: master.Username, Password: master.Password, DB: master.DB,
++			MaxRetries: -1, DialerRetries: 1, PoolSize: 1, ContextTimeoutEnabled: true, DisableIdentity: true,
++			DialTimeout: masterTimeout, ReadTimeout: masterTimeout, WriteTimeout: masterTimeout,
++			MaintNotificationsConfig: master.MaintNotificationsConfig,
++		}),
++		addr:     opt.Addr,
++		maxLag:   maxLag,
++		timeout:  masterTimeout,
++		interval: interval,
++		modeG: prometheus.NewGauge(prometheus.GaugeOpts{
++			Name: "meta_replica_mode",
++			Help: "Where reads outside transactions go: -1 not checked yet, 0 master, 1 replica, 2 offline (stale replica, master unreachable).",
++		}),
++		lagG: prometheus.NewGauge(prometheus.GaugeOpts{
++			Name: "meta_replica_lag_seconds",
++			Help: "How far the read replica may be behind the master, in seconds (-1 until known).",
++		}),
++		done: make(chan struct{}),
++	}
++	r.key.Store(rywKey{})
++	r.mode.Store(replicaModeUnknown)
++	r.modeG.Set(float64(replicaModeUnknown))
++	r.lagG.Set(-1)
++	r.lastAnswer.Store(time.Now().UnixNano())
++	r.offline.Store(newOfflineSignal())
++	m.rdb.AddHook(r)
++	r.probe.AddHook(probeHook{r})
++	logger.Infof("Read replica %s with max lag %s, checked every %s, master timeout %s", r.addr, maxLag, interval, masterTimeout)
++	r.wg.Add(2)
++	go r.loop(r.probeMaster)
++	go r.loop(r.check)
++	return r, nil
++}
++
++func (m *redisMeta) rywKey(sid uint64) string {
++	return m.prefix + "ryw" + strconv.FormatUint(sid, 10)
++}
++
++// rd returns the client for a read outside a transaction: the replica when it can serve it.
++func (m *redisMeta) rd(ctx context.Context) redis.Cmdable {
++	if m.replica != nil && m.replica.usable(ctx) {
++		return m.replica.cli
++	}
++	return m.rdb
++}
++
++// rywKey is the read-your-writes counter: a field of the hash ryw$sid, named at random for each
++// client and reset, so that a stale replica never holds it from an earlier use of the same sid.
++type rywKey struct{ key, field string }
++
++func (r *redisReplica) ryw() rywKey { return r.key.Load().(rywKey) }
++
++func (k rywKey) incr(ctx context.Context) *redis.IntCmd {
++	return redis.NewIntCmd(ctx, "hincrby", k.key, k.field, 1)
++}
++
++func (k rywKey) is(cmd redis.Cmder) bool {
++	a := cmd.Args()
++	return cmd.Name() == "hincrby" && len(a) == 4 && a[1] == k.key && a[2] == k.field
++}
++
++func (r *redisReplica) setSession(sid uint64) {
++	r.key.Store(rywKey{r.m.rywKey(sid), fmt.Sprintf("%016x", rand.Uint64())})
++}
++
++// afterReset restarts read-your-writes: the reset deleted the key, and a write in MULTI/EXEC
++// orders the reads after it.
++func (r *redisReplica) afterReset(ctx context.Context) error {
++	r.required.Store(0)
++	r.reached.Store(0)
++	k := r.ryw()
++	if k.key == "" {
++		return nil
++	}
++	r.key.Store(rywKey{k.key, fmt.Sprintf("%016x", rand.Uint64())})
++	_, err := r.m.rdb.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
++		pipe.Ping(ctx)
++		return nil
++	})
++	return err
++}
++
++func maxInt64(v *atomic.Int64, n int64) {
++	for {
++		old := v.Load()
++		if n <= old || v.CompareAndSwap(old, n) {
++			return
++		}
++	}
++}
++
++func (r *redisReplica) usable(ctx context.Context) bool {
++	k := r.ryw()
++	if k.key == "" && !r.m.conf.ReadOnly {
++		return false // no session yet: writes are not tracked
++	}
++	switch r.mode.Load() {
++	case replicaModeOffline:
++		return true
++	case replicaModeUnknown, replicaModeMaster:
++		return false
++	}
++	if time.Since(time.Unix(0, r.freshAt.Load())) > r.maxLag {
++		return false // the check loop is late, do not trust the last sample
++	}
++	need := r.required.Load()
++	if r.reached.Load() >= need {
++		return true
++	}
++	// Wait for our last write to reach the replica, at most as long as reading from the master.
++	wait := time.Duration(r.rtt.Load())
++	if wait > r.maxLag {
++		wait = r.maxLag
++	}
++	deadline := time.Now().Add(wait)
++	for {
++		v, err := r.cli.HGet(ctx, k.key, k.field).Int64()
++		if err != nil && err != redis.Nil {
++			logger.Debugf("Read replica %s: hget %s %s: %s", r.addr, k.key, k.field, err)
++			return false
++		}
++		maxInt64(&r.reached, v)
++		if v >= need {
++			return true
++		}
++		if time.Now().After(deadline) {
++			return false
++		}
++		time.Sleep(200 * time.Microsecond)
++	}
++}
++
++// masterConn is a connection to the master: every byte it reads is an answer of the master.
++type masterConn struct {
++	net.Conn
++	r *redisReplica
++}
++
++func (c *masterConn) Read(b []byte) (int, error) {
++	n, err := c.Conn.Read(b)
++	if n > 0 {
++		c.r.lastAnswer.Store(time.Now().UnixNano())
++	}
++	return n, err
++}
++
++func (c *masterConn) Close() error {
++	c.r.conns.Delete(c)
++	return c.Conn.Close()
++}
++
++// DialHook tracks the connections to the master, to know when it last answered and to close them
++// when going offline.
++func (r *redisReplica) DialHook(next redis.DialHook) redis.DialHook {
++	return func(ctx context.Context, network, addr string) (net.Conn, error) {
++		conn, err := next(ctx, network, addr)
++		if err != nil {
++			return conn, err
++		}
++		c := &masterConn{conn, r}
++		r.conns.Store(c, struct{}{})
++		return c, nil
++	}
++}
++
++// probeHook tracks the probe's connections, without the rest of the master's hooks.
++type probeHook struct{ r *redisReplica }
++
++func (h probeHook) DialHook(next redis.DialHook) redis.DialHook { return h.r.DialHook(next) }
++
++func (h probeHook) ProcessHook(next redis.ProcessHook) redis.ProcessHook { return nil }
++
++func (h probeHook) ProcessPipelineHook(next redis.ProcessPipelineHook) redis.ProcessPipelineHook {
++	return nil
++}
++
++// guard bounds a command to the master by twice the master timeout (going offline stops it
++// sooner), stops it when the client goes offline, and fails it at once while offline.
++func (r *redisReplica) guard(ctx context.Context) (context.Context, func(), error) {
++	sig := r.offline.Load()
++	if r.mode.Load() == replicaModeOffline {
++		return nil, nil, syscall.EROFS
++	}
++	ctx, cancel := context.WithTimeout(ctx, 2*r.timeout)
++	stop := context.AfterFunc(sig.ctx, cancel)
++	return ctx, func() { stop(); cancel() }, nil
++}
++
++// answered tells a reply of the master, even an error, from no reply.
++func answered(err error) bool {
++	var rerr redis.Error
++	return err == nil || err == redis.Nil || err == redis.TxFailedErr || errors.As(err, &rerr)
++}
++
++// after makes a command stopped by going offline fail with EROFS.
++func (r *redisReplica) after(err error) error {
++	if !answered(err) && r.mode.Load() == replicaModeOffline {
++		return syscall.EROFS
++	}
++	return err
++}
++
++// refused tells the errors that prove the master unreachable at once: the connection is refused,
++// there is no route, or the name does not resolve. A timeout proves nothing: the master may be slow.
++func refused(err error) bool {
++	var dnsErr *net.DNSError
++	if errors.As(err, &dnsErr) {
++		return dnsErr.IsNotFound
++	}
++	var opErr *net.OpError
++	if !errors.As(err, &opErr) || opErr.Op != "dial" {
++		return false
++	}
++	return errors.Is(err, syscall.ECONNREFUSED) || errors.Is(err, syscall.ENETUNREACH) ||
++		errors.Is(err, syscall.EHOSTUNREACH) || errors.Is(err, syscall.ECONNRESET)
++}
++
++func (r *redisReplica) ProcessHook(next redis.ProcessHook) redis.ProcessHook {
++	return func(ctx context.Context, cmd redis.Cmder) error {
++		ctx, done, err := r.guard(ctx)
++		if err != nil {
++			cmd.SetErr(err)
++			return err
++		}
++		defer done()
++		if err = r.after(next(ctx, cmd)); err == syscall.EROFS {
++			cmd.SetErr(err)
++		}
++		return err
++	}
++}
++
++// ProcessPipelineHook adds HINCRBY ryw$sid to every MULTI/EXEC sent to the master, in the same round trip.
++func (r *redisReplica) ProcessPipelineHook(next redis.ProcessPipelineHook) redis.ProcessPipelineHook {
++	return func(ctx context.Context, cmds []redis.Cmder) error {
++		ctx, done, err := r.guard(ctx)
++		if err == nil {
++			defer done()
++			err = r.after(r.pipeline(ctx, next, cmds))
++		}
++		if err == syscall.EROFS {
++			for _, cmd := range cmds {
++				cmd.SetErr(err)
++			}
++		}
++		return err
++	}
++}
++
++func (r *redisReplica) pipeline(ctx context.Context, next redis.ProcessPipelineHook, cmds []redis.Cmder) error {
++	k := r.ryw()
++	n := len(cmds)
++	if k.key == "" || n < 2 || cmds[0].Name() != "multi" || cmds[n-1].Name() != "exec" {
++		return next(ctx, cmds)
++	}
++	// first in the transaction, so that a session cleanup in the same transaction deletes it
++	incr := k.incr(ctx)
++	wrapped := make([]redis.Cmder, 0, n+1)
++	wrapped = append(wrapped, cmds[0], incr)
++	wrapped = append(wrapped, cmds[1:]...)
++	err := next(ctx, wrapped)
++	if v, e := incr.Result(); e == nil {
++		maxInt64(&r.required, v)
++	}
++	return err
++}
++
++func parseReplicationInfo(info string) map[string]string {
++	fields := make(map[string]string)
++	for _, line := range strings.Split(info, "\n") {
++		if k, v, ok := strings.Cut(strings.TrimSpace(line), ":"); ok {
++			fields[k] = v
++		}
++	}
++	return fields
++}
++
++func (r *redisReplica) loop(f func()) {
++	defer r.wg.Done()
++	ticker := time.NewTicker(r.interval)
++	defer ticker.Stop()
++	for {
++		f()
++		select {
++		case <-r.done:
++			return
++		case <-ticker.C:
++		}
++	}
++}
++
++const maxReplicaSamples = 64
++
++// probeMaster samples master_repl_offset on the master. It runs apart from check, because a
++// probe may wait for the master timeout.
++func (r *redisReplica) probeMaster() {
++	start := time.Now()
++	ctx, cancel := context.WithTimeout(context.Background(), r.timeout)
++	info, err := r.probe.Info(ctx, "replication").Result()
++	cancel()
++	mf := parseReplicationInfo(info)
++	offset, perr := strconv.ParseInt(mf["master_repl_offset"], 10, 64)
++	if err == nil && perr != nil {
++		err = fmt.Errorf("bad master_repl_offset %q", mf["master_repl_offset"])
++	}
++	r.mu.Lock()
++	r.masterErr = err
++	if err == nil {
++		rtt := time.Since(start)
++		r.rtt.Store(int64(rtt))
++		if r.replid != mf["master_replid"] {
++			r.replid, r.samples = mf["master_replid"], r.samples[:0]
++		}
++		if len(r.samples) == maxReplicaSamples {
++			r.samples = r.samples[1:] // dropping a sample only makes the lag look larger
++		}
++		// the master answered at about half the round trip: a read from it would not be fresher
++		r.samples = append(r.samples, replicaSample{start.Add(rtt / 2).UnixNano(), offset})
++	}
++	r.mu.Unlock()
++	if refused(err) && r.servable.Load() {
++		r.setMode(replicaModeOffline, fmt.Sprintf("master unreachable: %s", err))
++	}
++}
++
++// check samples the replica and picks the mode.
++func (r *redisReplica) check() {
++	ctx, cancel := context.WithTimeout(context.Background(), r.interval)
++	info, replicaDown := r.cli.Info(ctx, "replication").Result()
++	cancel()
++	rf := parseReplicationInfo(info)
++
++	r.mu.Lock()
++	replid, masterErr := r.replid, r.masterErr
++	replicaOffset, err := strconv.ParseInt(rf["master_repl_offset"], 10, 64)
++	var replicaErr error
++	switch {
++	case replicaDown != nil:
++		replicaErr = replicaDown
++	case rf["role"] != "slave":
++		replicaErr = fmt.Errorf("role is %s", rf["role"])
++	case rf["master_link_status"] != "up":
++		replicaErr = fmt.Errorf("replication link is %s", rf["master_link_status"])
++	case rf["master_replid"] != replid:
++		replicaErr = fmt.Errorf("replication id %q differs from the master's %q", rf["master_replid"], replid)
++	case err != nil:
++		replicaErr = fmt.Errorf("bad master_repl_offset %q", rf["master_repl_offset"])
++	}
++	if replicaErr == nil {
++		// the newest master sample reached by the replica tells how fresh it is
++		var i int
++		for i < len(r.samples) && r.samples[i].offset <= replicaOffset {
++			r.freshAt.Store(r.samples[i].at)
++			i++
++		}
++		r.samples = r.samples[i:]
++	}
++	r.mu.Unlock()
++	servable := replicaDown == nil && replid != "" && rf["master_replid"] == replid
++	r.servable.Store(servable)
++	lag := r.updateLag()
++	silence := time.Since(time.Unix(0, r.lastAnswer.Load()))
++
++	if r.mode.Load() == replicaModeOffline {
++		switch {
++		case !servable:
++			r.setMode(replicaModeMaster, fmt.Sprintf("replica unreachable (%v) or not a copy of the master (replication id %q, not %q)",
++				replicaDown, rf["master_replid"], replid))
++			return
++		case r.lastAnswer.Load() <= r.offline.Load().since.Load():
++			return // still no answer from the master
++		}
++	}
++	var rerr redis.Error
++	switch {
++	case masterErr != nil && errors.As(masterErr, &rerr):
++		// the master answers, but not as expected (ACL, configuration): not an outage
++		r.setMode(replicaModeMaster, fmt.Sprintf("master: %s", masterErr))
++	case refused(masterErr) || silence >= r.timeout:
++		if servable {
++			r.setMode(replicaModeOffline, fmt.Sprintf("master unreachable for %s: %v", silence.Truncate(time.Millisecond), masterErr))
++		} else {
++			r.setMode(replicaModeMaster, fmt.Sprintf("master unreachable: %v; replica unreachable (%v) or not a copy of the master", masterErr, replicaDown))
++		}
++	case replicaErr != nil:
++		r.setMode(replicaModeMaster, fmt.Sprintf("replica: %s", replicaErr))
++	case lag < 0:
++		r.setMode(replicaModeMaster, "replica freshness not known yet")
++	case lag > r.maxLag:
++		r.setMode(replicaModeMaster, fmt.Sprintf("replica lag %s exceeds %s", lag.Truncate(time.Millisecond), r.maxLag))
++	default:
++		r.setMode(replicaModeReplica, fmt.Sprintf("lag %s", lag.Truncate(time.Millisecond)))
++	}
++}
++
++// updateLag returns how far the replica may be behind the master, -1 when not known yet.
++func (r *redisReplica) updateLag() time.Duration {
++	at := r.freshAt.Load()
++	if at == 0 {
++		return -1
++	}
++	lag := time.Since(time.Unix(0, at))
++	r.lagG.Set(lag.Seconds())
++	return lag
++}
++
++func (r *redisReplica) setMode(mode int32, reason string) {
++	r.modeMu.Lock() // the probe and check loops both change it
++	defer r.modeMu.Unlock()
++	old := r.mode.Swap(mode)
++	if old == mode {
++		return
++	}
++	if mode == replicaModeOffline {
++		sig := r.offline.Load()
++		sig.since.Store(time.Now().UnixNano())
++		sig.cancel() // commands still waiting for the master fail with EROFS
++		r.conns.Range(func(c, _ any) bool {
++			_ = c.(*masterConn).Close() // and so do those blocked reading a reply
++			return true
++		})
++	} else if old == replicaModeOffline {
++		r.offline.Store(newOfflineSignal())
++	}
++	r.modeG.Set(float64(mode))
++	if mode == replicaModeReplica {
++		logger.Infof("Read replica %s: mode %s -> %s (%s)", r.addr, replicaModeName(old), replicaModeName(mode), reason)
++	} else {
++		logger.Warnf("Read replica %s: mode %s -> %s (%s)", r.addr, replicaModeName(old), replicaModeName(mode), reason)
++	}
++}
++
++// stop stops the loops.
++func (r *redisReplica) stop() {
++	r.once.Do(func() { close(r.done) })
++	r.wg.Wait()
++}
++
++func (r *redisReplica) close() error {
++	r.stop() // the loops use the clients
++	if err := r.probe.Close(); err != nil {
++		logger.Warnf("close probe of the master: %s", err)
++	}
++	return r.cli.Close()
++}
+diff --git a/pkg/meta/redis_replica_test.go b/pkg/meta/redis_replica_test.go
+new file mode 100644
+index 0000000..575c40c
+--- /dev/null
++++ b/pkg/meta/redis_replica_test.go
+@@ -0,0 +1,974 @@
++//go:build !noredis
++// +build !noredis
++
++/*
++ * JuiceFS, Copyright 2026 Juicedata, Inc.
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *     http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++package meta
++
++import (
++	"context"
++	"fmt"
++	"math/rand"
++	"net"
++	"os"
++	"strconv"
++	"strings"
++	"sync"
++	"sync/atomic"
++	"syscall"
++	"testing"
++	"time"
++
++	"github.com/prometheus/client_golang/prometheus"
++	"github.com/redis/go-redis/v9"
++)
++
++// The tests need a master and a replica of it:
++//
++//	JFS_TEST_REPLICA_MASTER=valkey-master:6379 JFS_TEST_REPLICA=valkey-replica:6379 \
++//	JFS_TEST_REPLICA_SELF=<address of this host as seen by the replica> META_PASSWORD=...
++
++type replicaEnv struct {
++	master, replica, self, password string
++	mcli, rcli                      *redis.Client
++}
++
++func newReplicaEnv(t *testing.T) *replicaEnv {
++	e := &replicaEnv{
++		master:   os.Getenv("JFS_TEST_REPLICA_MASTER"),
++		replica:  os.Getenv("JFS_TEST_REPLICA"),
++		self:     os.Getenv("JFS_TEST_REPLICA_SELF"),
++		password: os.Getenv("META_PASSWORD"),
++	}
++	if e.master == "" || e.replica == "" {
++		t.Skip("JFS_TEST_REPLICA_MASTER and JFS_TEST_REPLICA are not set")
++	}
++	e.mcli = redis.NewClient(&redis.Options{Addr: e.master, Password: e.password})
++	e.rcli = redis.NewClient(&redis.Options{Addr: e.replica, Password: e.password})
++	t.Cleanup(func() {
++		e.follow(t, e.master)
++		_ = e.mcli.Close()
++		_ = e.rcli.Close()
++	})
++	e.follow(t, e.master)
++	return e
++}
++
++// follow points the replica at addr and waits for the link to be up.
++func (e *replicaEnv) follow(t *testing.T, addr string) {
++	ctx := context.Background()
++	host, port, _ := net.SplitHostPort(addr)
++	if err := e.rcli.Do(ctx, "REPLICAOF", host, port).Err(); err != nil {
++		t.Fatalf("replicaof %s: %s", addr, err)
++	}
++	for i := 0; i < 200; i++ {
++		info, err := e.rcli.Info(ctx, "replication").Result()
++		if err == nil && strings.Contains(info, "master_link_status:up") {
++			return
++		}
++		time.Sleep(50 * time.Millisecond)
++	}
++	t.Fatalf("replica did not connect to %s", addr)
++}
++
++// replicaCalls is how many times the replica ran the given commands.
++func (e *replicaEnv) replicaCalls(t *testing.T, cmds ...string) int64 {
++	info, err := e.rcli.Info(context.Background(), "commandstats").Result()
++	if err != nil {
++		t.Fatalf("info commandstats: %s", err)
++	}
++	var total int64
++	for _, line := range strings.Split(info, "\n") {
++		for _, cmd := range cmds {
++			if v, ok := strings.CutPrefix(line, "cmdstat_"+cmd+":calls="); ok {
++				n, _ := strconv.ParseInt(v[:strings.IndexByte(v, ',')], 10, 64)
++				total += n
++			}
++		}
++	}
++	return total
++}
++
++func (e *replicaEnv) newMeta(t *testing.T, master, query string) *redisMeta {
++	conf := testConfig()
++	m, err := newRedisMeta("redis", master+"/3?"+query, conf)
++	if err != nil {
++		t.Fatalf("create meta: %s", err)
++	}
++	rm := m.(*redisMeta)
++	t.Cleanup(func() {
++		_ = m.CloseSession()
++		_ = m.Shutdown()
++	})
++	return rm
++}
++
++func (e *replicaEnv) format(t *testing.T, m *redisMeta) {
++	if err := m.Reset(); err != nil {
++		t.Fatalf("reset: %s", err)
++	}
++	if err := m.Init(testFormat(), true); err != nil {
++		t.Fatalf("init: %s", err)
++	}
++	if err := m.NewSession(true); err != nil {
++		t.Fatalf("new session: %s", err)
++	}
++}
++
++func waitMode(t *testing.T, m *redisMeta, mode int32, timeout time.Duration) time.Duration {
++	start := time.Now()
++	for time.Since(start) < timeout {
++		if m.replica.mode.Load() == mode {
++			return time.Since(start)
++		}
++		time.Sleep(10 * time.Millisecond)
++	}
++	t.Fatalf("mode is %s after %s, expected %s", replicaModeName(m.replica.mode.Load()), timeout, replicaModeName(mode))
++	return 0
++}
++
++// tcpProxy forwards to target, delays every byte by delay, can be cut or drop everything
++// (blackhole), and counts the requests: the chunks sent by the client, one per round trip.
++type tcpProxy struct {
++	target    string
++	ln        net.Listener
++	delay     atomic.Int64 // both directions
++	slow      atomic.Int64 // replies only, plus or minus jitter
++	jitter    atomic.Int64
++	blackhole atomic.Bool
++	requests  atomic.Int64
++	mu        sync.Mutex
++	conns     map[net.Conn]struct{}
++}
++
++func newTCPProxy(t *testing.T, target string) *tcpProxy {
++	p := &tcpProxy{target: target, conns: make(map[net.Conn]struct{})}
++	ln, err := net.Listen("tcp", ":0")
++	if err != nil {
++		t.Fatalf("listen: %s", err)
++	}
++	p.ln = ln
++	go p.serve(ln)
++	t.Cleanup(p.cut)
++	return p
++}
++
++func (p *tcpProxy) port() string {
++	_, port, _ := net.SplitHostPort(p.ln.Addr().String())
++	return port
++}
++
++func (p *tcpProxy) serve(ln net.Listener) {
++	for {
++		c, err := ln.Accept()
++		if err != nil {
++			return
++		}
++		u, err := net.Dial("tcp", p.target)
++		if err != nil {
++			_ = c.Close()
++			continue
++		}
++		p.mu.Lock()
++		p.conns[c], p.conns[u] = struct{}{}, struct{}{}
++		p.mu.Unlock()
++		go p.pipe(c, u, false)
++		go p.pipe(u, c, true)
++	}
++}
++
++type proxyChunk struct {
++	at   time.Time
++	data []byte
++}
++
++func (p *tcpProxy) pipe(dst, src net.Conn, request bool) {
++	ch := make(chan proxyChunk, 1024)
++	go func() {
++		defer close(ch)
++		for {
++			buf := make([]byte, 64<<10)
++			n, err := src.Read(buf)
++			if n > 0 {
++				ch <- proxyChunk{time.Now(), buf[:n]}
++			}
++			if err != nil {
++				return
++			}
++		}
++	}()
++	for c := range ch {
++		if p.blackhole.Load() {
++			continue
++		}
++		d := time.Duration(p.delay.Load())
++		if request {
++			p.requests.Add(1)
++		} else if slow := p.slow.Load(); slow > 0 {
++			d += time.Duration(slow)
++			if j := p.jitter.Load(); j > 0 {
++				d += time.Duration(rand.Int63n(2*j) - j)
++			}
++		}
++		time.Sleep(time.Until(c.at.Add(d)))
++		if _, err := dst.Write(c.data); err != nil {
++			break
++		}
++	}
++	_ = dst.Close()
++	_ = src.Close()
++}
++
++func (p *tcpProxy) cut() {
++	_ = p.ln.Close()
++	p.closeConns()
++}
++
++// closeConns drops the connections, which a blackhole leaves out of sync.
++func (p *tcpProxy) closeConns() {
++	p.mu.Lock()
++	for c := range p.conns {
++		_ = c.Close()
++	}
++	p.conns = make(map[net.Conn]struct{})
++	p.mu.Unlock()
++}
++
++func (p *tcpProxy) restore(t *testing.T) {
++	ln, err := net.Listen("tcp", p.ln.Addr().String())
++	if err != nil {
++		t.Fatalf("listen again: %s", err)
++	}
++	p.ln = ln
++	go p.serve(ln)
++}
++
++func replicaQuery(e *replicaEnv, maxLag string) string {
++	return "max-lag=" + maxLag + "&read-replica=redis://" + e.replica
++}
++
++// (a) and (c): every read issued after a write returned sees that write.
++func TestRedisReplicaReadYourWrites(t *testing.T) {
++	e := newReplicaEnv(t)
++	for _, c := range []struct {
++		name                  string
++		clientDelay, rplDelay time.Duration
++	}{
++		{"local", 0, 0},
++		{"slow-replication", 0, 5 * time.Millisecond},
++		{"wan", 10 * time.Millisecond, 10 * time.Millisecond},
++	} {
++		t.Run(c.name, func(t *testing.T) {
++			if c.rplDelay > 0 {
++				if e.self == "" {
++					t.Skip("JFS_TEST_REPLICA_SELF is not set")
++				}
++				rp := newTCPProxy(t, e.master)
++				rp.delay.Store(int64(c.rplDelay / 2))
++				e.follow(t, net.JoinHostPort(e.self, rp.port()))
++				defer e.follow(t, e.master)
++			}
++			cp := newTCPProxy(t, e.master)
++			cp.delay.Store(int64(c.clientDelay / 2))
++			m := e.newMeta(t, "127.0.0.1:"+cp.port(), replicaQuery(e, "2s"))
++			e.format(t, m)
++			waitMode(t, m, replicaModeReplica, 5*time.Second)
++			ctx := Background()
++
++			var dir Ino
++			var attr Attr
++			if st := m.Mkdir(ctx, RootInode, "d", 0755, 0, 0, &dir, &attr); st != 0 {
++				t.Fatalf("mkdir: %s", st)
++			}
++			before := e.replicaCalls(t, "hget")
++			const n = 1000
++			var stale int
++			start := time.Now()
++			for i := 0; i < n; i++ {
++				name := fmt.Sprintf("f%d", i)
++				var ino Ino
++				if st := m.Create(ctx, dir, name, 0644, 0, 0, &ino, &attr); st != 0 {
++					t.Fatalf("create %s: %s", name, st)
++				}
++				var found Ino
++				if st := m.en.doLookup(ctx, dir, name, &found, &attr); st != 0 || found != ino {
++					stale++
++				}
++				val := []byte(strconv.Itoa(i))
++				if st := m.SetXattr(ctx, ino, "user.v", val, 0); st != 0 {
++					t.Fatalf("setxattr: %s", st)
++				}
++				var got []byte
++				if st := m.GetXattr(ctx, ino, "user.v", &got); st != 0 || string(got) != string(val) {
++					stale++
++				}
++				if st := m.Unlink(ctx, dir, name); st != 0 {
++					t.Fatalf("unlink: %s", st)
++				}
++				if st := m.en.doLookup(ctx, dir, name, &found, &attr); st != syscall.ENOENT {
++					stale++
++				}
++			}
++			served := e.replicaCalls(t, "hget") - before
++			t.Logf("%s: %d write/read rounds in %s, %d stale reads, %d HGET on the replica (%d reads, plus the transactions' own)",
++				c.name, n, time.Since(start).Truncate(time.Millisecond), stale, served, 3*n)
++			if stale > 0 {
++				t.Fatalf("%d stale reads", stale)
++			}
++		})
++	}
++}
++
++func TestRedisReplicaConcurrentWriters(t *testing.T) {
++	e := newReplicaEnv(t)
++	cp := newTCPProxy(t, e.master)
++	cp.delay.Store(int64(5 * time.Millisecond))
++	m := e.newMeta(t, "127.0.0.1:"+cp.port(), replicaQuery(e, "2s"))
++	e.format(t, m)
++	waitMode(t, m, replicaModeReplica, 5*time.Second)
++	ctx := Background()
++
++	const writers, rounds = 16, 100
++	var stale atomic.Int64
++	var wg sync.WaitGroup
++	handoff := make(chan [2]uint64, writers)
++	for w := 0; w < writers; w++ {
++		var ino Ino
++		var attr Attr
++		if st := m.Create(ctx, RootInode, fmt.Sprintf("w%d", w), 0644, 0, 0, &ino, &attr); st != 0 {
++			t.Fatalf("create: %s", st)
++		}
++		wg.Add(1)
++		go func(ino Ino) {
++			defer wg.Done()
++			for i := 1; i <= rounds; i++ {
++				val := []byte(strconv.Itoa(i))
++				if st := m.SetXattr(ctx, ino, "user.v", val, 0); st != 0 {
++					t.Errorf("setxattr: %s", st)
++					return
++				}
++				var got []byte
++				if st := m.GetXattr(ctx, ino, "user.v", &got); st != 0 || string(got) != string(val) {
++					stale.Add(1)
++				}
++				handoff <- [2]uint64{uint64(ino), uint64(i)} // another goroutine reads it after the write returned
++			}
++		}(ino)
++	}
++	var readers sync.WaitGroup
++	readers.Add(1)
++	go func() {
++		defer readers.Done()
++		for h := range handoff {
++			var got []byte
++			if st := m.GetXattr(ctx, Ino(h[0]), "user.v", &got); st != 0 {
++				stale.Add(1)
++			} else if v, _ := strconv.ParseUint(string(got), 10, 64); v < h[1] {
++				stale.Add(1)
++			}
++		}
++	}()
++	wg.Wait()
++	close(handoff)
++	readers.Wait()
++	t.Logf("%d writers x %d rounds: %d stale reads, required %d", writers, rounds, stale.Load(), m.replica.required.Load())
++	if stale.Load() > 0 {
++		t.Fatalf("%d stale reads", stale.Load())
++	}
++}
++
++// (b): the replica stops following the master, reads move to the master, and come back.
++func TestRedisReplicaLinkDown(t *testing.T) {
++	e := newReplicaEnv(t)
++	m := e.newMeta(t, e.master, replicaQuery(e, "1s"))
++	e.format(t, m)
++	reg := prometheus.NewRegistry()
++	m.InitMetrics(reg)
++	waitMode(t, m, replicaModeReplica, 5*time.Second)
++	ctx := Background()
++	var ino Ino
++	var attr Attr
++	if st := m.Create(ctx, RootInode, "f", 0644, 0, 0, &ino, &attr); st != 0 {
++		t.Fatalf("create: %s", st)
++	}
++
++	if err := e.rcli.Do(context.Background(), "REPLICAOF", "NO", "ONE").Err(); err != nil {
++		t.Fatalf("replicaof no one: %s", err)
++	}
++	t.Logf("link cut: master mode after %s", waitMode(t, m, replicaModeMaster, 2*time.Second))
++	before := e.replicaCalls(t, "get", "hget")
++	for i := 0; i < 100; i++ {
++		val := []byte(strconv.Itoa(i))
++		if st := m.SetXattr(ctx, ino, "user.v", val, 0); st != 0 {
++			t.Fatalf("setxattr: %s", st)
++		}
++		var got []byte
++		if st := m.GetXattr(ctx, ino, "user.v", &got); st != 0 || string(got) != string(val) {
++			t.Fatalf("stale read with the link down: %q != %q (%s)", got, val, st)
++		}
++	}
++	if n := e.replicaCalls(t, "get", "hget") - before; n > 0 {
++		t.Fatalf("%d reads went to the replica with the link down", n)
++	}
++	if v := gaugeValue(t, reg, "meta_replica_mode"); v != float64(replicaModeMaster) {
++		t.Fatalf("meta_replica_mode = %v, expected master", v)
++	}
++
++	e.follow(t, e.master)
++	t.Logf("link back: replica mode after %s", waitMode(t, m, replicaModeReplica, 5*time.Second))
++	var got []byte
++	if st := m.GetXattr(ctx, ino, "user.v", &got); st != 0 || string(got) != "99" {
++		t.Fatalf("read after reconnect: %q (%s)", got, st)
++	}
++	if v := gaugeValue(t, reg, "meta_replica_mode"); v != float64(replicaModeReplica) {
++		t.Fatalf("meta_replica_mode = %v, expected replica", v)
++	}
++}
++
++// (b): replication slower than max-lag sends reads to the master.
++func TestRedisReplicaLag(t *testing.T) {
++	e := newReplicaEnv(t)
++	if e.self == "" {
++		t.Skip("JFS_TEST_REPLICA_SELF is not set")
++	}
++	rp := newTCPProxy(t, e.master)
++	e.follow(t, net.JoinHostPort(e.self, rp.port()))
++	defer e.follow(t, e.master)
++	m := e.newMeta(t, e.master, replicaQuery(e, "1s"))
++	e.format(t, m)
++	waitMode(t, m, replicaModeReplica, 5*time.Second)
++	ctx := Background()
++	var ino Ino
++	var attr Attr
++	if st := m.Create(ctx, RootInode, "f", 0644, 0, 0, &ino, &attr); st != 0 {
++		t.Fatalf("create: %s", st)
++	}
++	rp.delay.Store(int64(3 * time.Second))
++	stop := make(chan struct{})
++	go func() { // keep the master busy so that offsets move
++		for i := 0; ; i++ {
++			select {
++			case <-stop:
++				return
++			default:
++			}
++			_ = m.SetXattr(ctx, ino, "user.v", []byte(strconv.Itoa(i)), 0)
++			time.Sleep(20 * time.Millisecond)
++		}
++	}()
++	t.Logf("lag 3s: master mode after %s", waitMode(t, m, replicaModeMaster, 5*time.Second))
++	rp.delay.Store(0)
++	close(stop)
++	t.Logf("lag gone: replica mode after %s", waitMode(t, m, replicaModeReplica, 10*time.Second))
++}
++
++// (b, offline): the master is unreachable, reads go to the stale replica and writes fail.
++func TestRedisReplicaMasterDown(t *testing.T) {
++	e := newReplicaEnv(t)
++	cp := newTCPProxy(t, e.master)
++	m := e.newMeta(t, "127.0.0.1:"+cp.port(), replicaQuery(e, "1s"))
++	e.format(t, m)
++	reg := prometheus.NewRegistry()
++	m.InitMetrics(reg)
++	waitMode(t, m, replicaModeReplica, 5*time.Second)
++	ctx := Background()
++	var dir, ino Ino
++	var attr Attr
++	if st := m.Mkdir(ctx, RootInode, "d", 0755, 0, 0, &dir, &attr); st != 0 {
++		t.Fatalf("mkdir: %s", st)
++	}
++	if st := m.Create(ctx, dir, "f", 0644, 0, 0, &ino, &attr); st != 0 {
++		t.Fatalf("create: %s", st)
++	}
++	if st := m.SetXattr(ctx, ino, "user.v", []byte("before"), 0); st != 0 {
++		t.Fatalf("setxattr: %s", st)
++	}
++
++	cp.cut()
++	if err := e.rcli.Do(context.Background(), "REPLICAOF", "127.0.0.1", "1").Err(); err != nil { // its link is down too
++		t.Fatalf("replicaof: %s", err)
++	}
++	if d := waitMode(t, m, replicaModeOffline, 3*time.Second); d > 1500*time.Millisecond {
++		t.Fatalf("refused connection: offline after %s, expected within 1.5s", d)
++	} else {
++		t.Logf("refused connection: offline after %s", d)
++	}
++	var found Ino
++	if st := m.Lookup(ctx, dir, "f", &found, &attr, false); st != 0 || found != ino {
++		t.Fatalf("lookup offline: %s", st)
++	}
++	var got []byte
++	if st := m.GetXattr(ctx, ino, "user.v", &got); st != 0 || string(got) != "before" {
++		t.Fatalf("getxattr offline: %q (%s)", got, st)
++	}
++	var entries []*Entry
++	if st := m.Readdir(ctx, dir, 1, &entries); st != 0 || len(entries) != 3 {
++		t.Fatalf("readdir offline: %d entries (%s)", len(entries), st)
++	}
++	start := time.Now()
++	if st := m.SetXattr(ctx, ino, "user.v", []byte("offline"), 0); st != syscall.EROFS {
++		t.Fatalf("setxattr offline: %s, expected EROFS", st)
++	}
++	t.Logf("write offline fails with EROFS after %s", time.Since(start))
++	if v := gaugeValue(t, reg, "meta_replica_mode"); v != float64(replicaModeOffline) {
++		t.Fatalf("meta_replica_mode = %v, expected offline", v)
++	}
++
++	// a replica that is no longer a copy of this master is not served, even offline
++	if err := e.rcli.Do(context.Background(), "REPLICAOF", "NO", "ONE").Err(); err != nil {
++		t.Fatalf("replicaof no one: %s", err)
++	}
++	t.Logf("replica promoted while offline: master mode after %s", waitMode(t, m, replicaModeMaster, 2*time.Second))
++
++	cp.restore(t)
++	e.follow(t, e.master)
++	t.Logf("master back: replica mode after %s", waitMode(t, m, replicaModeReplica, 10*time.Second))
++	if st := m.SetXattr(ctx, ino, "user.v", []byte("after"), 0); st != 0 {
++		t.Fatalf("setxattr after: %s", st)
++	}
++	if st := m.GetXattr(ctx, ino, "user.v", &got); st != 0 || string(got) != "after" {
++		t.Fatalf("getxattr after: %q (%s)", got, st)
++	}
++}
++
++// The whole meta test suite, with reads on the replica, also when replication takes 5 ms.
++func TestRedisReplicaMetaSuite(t *testing.T) {
++	e := newReplicaEnv(t)
++	reads := []string{"get", "mget", "hget", "hkeys", "hscan", "lrange"}
++	for _, delay := range []time.Duration{0, 5 * time.Millisecond} {
++		t.Run(fmt.Sprintf("replication-%s", delay), func(t *testing.T) {
++			if delay > 0 {
++				if e.self == "" {
++					t.Skip("JFS_TEST_REPLICA_SELF is not set")
++				}
++				rp := newTCPProxy(t, e.master)
++				rp.delay.Store(int64(delay))
++				e.follow(t, net.JoinHostPort(e.self, rp.port()))
++				defer e.follow(t, e.master)
++			}
++			m := e.newMeta(t, e.master, replicaQuery(e, "2s"))
++			before := e.replicaCalls(t, reads...)
++			testMeta(t, m)
++			served := e.replicaCalls(t, reads...) - before
++			t.Logf("meta suite: %d read commands served by the replica, %d writes tracked, optimistic transactions: %d conflicts, %d fallbacks",
++				served, m.replica.required.Load(), m.replica.conflicts.Load(), m.replica.fallbacks.Load())
++			if served == 0 {
++				t.Fatalf("the replica served no reads")
++			}
++		})
++	}
++}
++
++// (d): without read-replica nothing changes: no hook, no replica, no extra keys.
++func TestRedisReplicaUnset(t *testing.T) {
++	e := newReplicaEnv(t)
++	m := e.newMeta(t, e.master, "")
++	if m.replica != nil {
++		t.Fatalf("replica is set without read-replica")
++	}
++	testMeta(t, m)
++	keys, err := e.mcli.Keys(context.Background(), "ryw*").Result()
++	if err != nil || len(keys) > 0 {
++		t.Fatalf("ryw keys without read-replica: %v (%v)", keys, err)
++	}
++}
++
++func TestRedisReplicaOptions(t *testing.T) {
++	e := newReplicaEnv(t)
++	conf := testConfig()
++	for _, q := range []string{
++		"read-replica=redis://" + e.replica + "/4",
++		"client-cache=true&read-replica=redis://" + e.replica,
++		"max-lag=0s&read-replica=redis://" + e.replica,
++		"master-timeout=0s&read-replica=redis://" + e.replica,
++	} {
++		if m, err := newRedisMeta("redis", e.master+"/3?"+q, conf); err == nil {
++			_ = m.Shutdown()
++			t.Fatalf("%s: expected an error", q)
++		}
++	}
++}
++
++func gaugeValue(t *testing.T, reg *prometheus.Registry, name string) float64 {
++	mfs, err := reg.Gather()
++	if err != nil {
++		t.Fatalf("gather: %s", err)
++	}
++	for _, mf := range mfs {
++		if mf.GetName() == name && len(mf.GetMetric()) == 1 {
++			return mf.GetMetric()[0].GetGauge().GetValue()
++		}
++	}
++	t.Fatalf("no gauge %s", name)
++	return 0
++}
++
++// A blackholed master (no answer, nothing refused): offline after master-timeout of silence, no
++// EROFS before it, then every write fails at once with EROFS.
++func TestRedisReplicaOfflineWrites(t *testing.T) {
++	e := newReplicaEnv(t)
++	cp := newTCPProxy(t, e.master)
++	m := e.newMeta(t, "127.0.0.1:"+cp.port(), replicaQuery(e, "2s")+"&master-timeout=3s")
++	e.format(t, m)
++	waitMode(t, m, replicaModeReplica, 5*time.Second)
++	ctx := Background()
++	var dir, ino Ino
++	var attr Attr
++	if st := m.Mkdir(ctx, RootInode, "d", 0755, 0, 0, &dir, &attr); st != 0 {
++		t.Fatalf("mkdir: %s", st)
++	}
++	if st := m.Create(ctx, dir, "f", 0644, 0, 0, &ino, &attr); st != 0 {
++		t.Fatalf("create: %s", st)
++	}
++
++	cut := time.Now()
++	cp.blackhole.Store(true)
++	type result struct {
++		st         syscall.Errno
++		start, end time.Time
++	}
++	results := make(chan result, 1000)
++	stop := make(chan struct{})
++	var wg sync.WaitGroup
++	for w := 0; w < 4; w++ { // writers busy from the cut on
++		wg.Add(1)
++		go func() {
++			defer wg.Done()
++			for {
++				select {
++				case <-stop:
++					return
++				default:
++				}
++				start := time.Now()
++				st := m.SetXattr(ctx, ino, "user.v", []byte("x"), 0)
++				results <- result{st, start, time.Now()}
++				if st != 0 {
++					time.Sleep(10 * time.Millisecond) // EROFS is immediate: do not fill results
++				}
++			}
++		}()
++	}
++	waitMode(t, m, replicaModeOffline, 6*time.Second)
++	offlineAt := time.Unix(0, m.replica.offline.Load().since.Load())
++	time.Sleep(200 * time.Millisecond)
++	close(stop)
++	wg.Wait()
++	close(results)
++	var early, erofs, other int
++	var slowest time.Duration
++	for r := range results {
++		switch {
++		case r.st == syscall.EROFS && r.end.Before(offlineAt):
++			early++
++		case r.st == syscall.EROFS:
++			erofs++
++			if r.start.After(offlineAt) && r.end.Sub(r.start) > slowest {
++				slowest = r.end.Sub(r.start)
++			}
++		default:
++			other++
++		}
++	}
++	t.Logf("blackhole: offline %s after the cut; %d EROFS before it, %d after (slowest started offline: %s), %d other results",
++		offlineAt.Sub(cut).Truncate(time.Millisecond), early, erofs, slowest, other)
++	if d := offlineAt.Sub(cut); d < 2500*time.Millisecond || d > 4500*time.Millisecond {
++		t.Fatalf("offline %s after the cut, expected about master-timeout (3s)", d)
++	}
++	if early > 0 || erofs == 0 || slowest > 50*time.Millisecond {
++		t.Fatalf("%d EROFS before offline, %d after, slowest %s", early, erofs, slowest)
++	}
++	var got Ino
++	for _, st := range []syscall.Errno{
++		m.Create(ctx, dir, "g", 0644, 0, 0, &got, &attr),
++		m.Mkdir(ctx, dir, "e", 0755, 0, 0, &got, &attr),
++		m.SetAttr(ctx, ino, SetAttrMode, 0, &Attr{Mode: 0600}),
++		m.Write(ctx, ino, 0, 0, Slice{Id: 1, Size: 10, Len: 10}, time.Now()),
++	} {
++		if st != syscall.EROFS {
++			t.Fatalf("write offline: %s, expected EROFS", st)
++		}
++	}
++	var found Ino
++	if st := m.Lookup(ctx, dir, "f", &found, &attr, false); st != 0 || found != ino {
++		t.Fatalf("lookup offline: %s", st)
++	}
++
++	cp.blackhole.Store(false)
++	cp.closeConns()
++	t.Logf("master back: replica mode after %s", waitMode(t, m, replicaModeReplica, 10*time.Second))
++	if st := m.SetXattr(ctx, ino, "user.v", []byte("after"), 0); st != 0 {
++		t.Fatalf("setxattr after: %s", st)
++	}
++	var v []byte
++	if st := m.GetXattr(ctx, ino, "user.v", &v); st != 0 || string(v) != "after" {
++		t.Fatalf("getxattr after: %q (%s)", v, st)
++	}
++}
++
++// A slow master (replies delayed 1.2s +/- 0.6s, as with a saturated uplink) is not an outage:
++// writes keep succeeding, slowly, and never fail with EROFS.
++func TestRedisReplicaSlowMaster(t *testing.T) {
++	e := newReplicaEnv(t)
++	cp := newTCPProxy(t, e.master)
++	m := e.newMeta(t, "127.0.0.1:"+cp.port(), replicaQuery(e, "2s")) // default master-timeout
++	e.format(t, m)
++	waitMode(t, m, replicaModeReplica, 5*time.Second)
++	ctx := Background()
++	var ino Ino
++	var attr Attr
++	if st := m.Create(ctx, RootInode, "f", 0644, 0, 0, &ino, &attr); st != 0 {
++		t.Fatalf("create: %s", st)
++	}
++	cp.slow.Store(int64(1200 * time.Millisecond))
++	cp.jitter.Store(int64(600 * time.Millisecond))
++	defer cp.slow.Store(0)
++
++	var writes, failed, erofs atomic.Int64
++	var slowest atomic.Int64
++	var offline atomic.Bool
++	stop := make(chan struct{})
++	var wg sync.WaitGroup
++	for w := 0; w < 4; w++ {
++		wg.Add(1)
++		go func(w int) {
++			defer wg.Done()
++			for i := 0; ; i++ {
++				select {
++				case <-stop:
++					return
++				default:
++				}
++				start := time.Now()
++				var st syscall.Errno
++				if i%2 == 0 {
++					st = m.SetXattr(ctx, ino, fmt.Sprintf("user.w%d", w), []byte(strconv.Itoa(i)), 0)
++				} else {
++					var f Ino
++					st = m.Create(ctx, RootInode, fmt.Sprintf("w%d-%d", w, i), 0644, 0, 0, &f, &attr)
++				}
++				maxInt64(&slowest, int64(time.Since(start)))
++				switch st {
++				case 0:
++					writes.Add(1)
++				case syscall.EROFS:
++					erofs.Add(1)
++				default:
++					failed.Add(1)
++					t.Logf("write failed: %s", st)
++				}
++			}
++		}(w)
++	}
++	deadline := time.Now().Add(30 * time.Second)
++	for time.Now().Before(deadline) {
++		if m.replica.mode.Load() == replicaModeOffline {
++			offline.Store(true)
++		}
++		time.Sleep(10 * time.Millisecond)
++	}
++	close(stop)
++	wg.Wait()
++	t.Logf("slow master for 30s: %d writes OK, %d failed, %d EROFS, slowest %s, offline seen: %t",
++		writes.Load(), failed.Load(), erofs.Load(), time.Duration(slowest.Load()).Truncate(time.Millisecond), offline.Load())
++	if erofs.Load() > 0 || failed.Load() > 0 || offline.Load() || writes.Load() == 0 {
++		t.Fatalf("a slow master was taken for a missing one")
++	}
++}
++
++// Round trips to the master per operation, with and without the read replica.
++func TestRedisReplicaRoundTrips(t *testing.T) {
++	e := newReplicaEnv(t)
++	ops := []string{"create", "mkdir", "setattr-times", "setattr-mode", "truncate", "setxattr", "removexattr", "write", "unlink"}
++	measure := func(query string) map[string]float64 {
++		cp := newTCPProxy(t, e.master)
++		m := e.newMeta(t, "127.0.0.1:"+cp.port(), query)
++		e.format(t, m)
++		if m.replica != nil {
++			waitMode(t, m, replicaModeReplica, 5*time.Second)
++			m.replica.stop() // no INFO in the counts
++		}
++		ctx := Background()
++		var dir Ino
++		var attr Attr
++		if st := m.Mkdir(ctx, RootInode, "d", 0755, 0, 0, &dir, &attr); st != 0 {
++			t.Fatalf("mkdir: %s", st)
++		}
++		const n = 50
++		inos := make([]Ino, n)
++		var sliceID uint64
++		if st := m.NewSlice(ctx, &sliceID); st != 0 {
++			t.Fatalf("new slice: %s", st)
++		}
++		res := make(map[string]float64)
++		for _, op := range ops {
++			before := cp.requests.Load()
++			for i := 0; i < n; i++ {
++				var st syscall.Errno
++				name := fmt.Sprintf("f%d", i)
++				switch op {
++				case "create":
++					st = m.Create(ctx, dir, name, 0644, 0, 0, &inos[i], &attr)
++				case "mkdir":
++					var sub Ino
++					st = m.Mkdir(ctx, dir, "s"+name, 0755, 0, 0, &sub, &attr)
++				case "setattr-times":
++					st = m.SetAttr(ctx, inos[i], SetAttrAtime|SetAttrMtime, 0, &Attr{Atime: 1, Mtime: 2})
++				case "setattr-mode":
++					st = m.SetAttr(ctx, inos[i], SetAttrMode, 0, &Attr{Mode: 0600})
++				case "truncate":
++					st = m.Truncate(ctx, inos[i], 0, 1<<20, &attr, false)
++				case "setxattr":
++					st = m.SetXattr(ctx, inos[i], "com.apple.provenance", []byte("v"), 0)
++				case "removexattr":
++					st = m.RemoveXattr(ctx, inos[i], "com.apple.provenance")
++				case "write":
++					st = m.Write(ctx, inos[i], 0, 0, Slice{Id: sliceID, Size: 4096, Len: 4096}, time.Now())
++				case "unlink":
++					st = m.Unlink(ctx, dir, name)
++				}
++				if st != 0 {
++					t.Fatalf("%s %d: %s", op, i, st)
++				}
++			}
++			res[op] = float64(cp.requests.Load()-before) / n
++		}
++		if m.replica != nil {
++			t.Logf("optimistic: %d conflicts, %d fallbacks", m.replica.conflicts.Load(), m.replica.fallbacks.Load())
++		}
++		return res
++	}
++	upstream := measure("")
++	replica := measure(replicaQuery(e, "1h"))
++	for _, op := range ops {
++		t.Logf("%-14s round trips to the master: %.2f without replica, %.2f with", op, upstream[op], replica[op])
++	}
++	for _, op := range ops {
++		if replica[op] > 1.1 {
++			t.Errorf("%s takes %.2f round trips with the replica", op, replica[op])
++		}
++	}
++}
++
++// Optimistic transactions: a conflict and the commands that cannot run optimistically fall back to WATCH.
++func TestRedisReplicaOptimistic(t *testing.T) {
++	e := newReplicaEnv(t)
++	m := e.newMeta(t, e.master, replicaQuery(e, "2s"))
++	e.format(t, m)
++	waitMode(t, m, replicaModeReplica, 5*time.Second)
++	ctx := Background()
++	k, k2 := m.prefix+"test-k", m.prefix+"test-k2"
++	mcli := redis.NewClient(&redis.Options{Addr: e.master, Password: e.password, DB: 3}) // the database of newMeta
++	defer mcli.Close()
++	if err := m.txn(ctx, func(tx *redis.Tx) error {
++		_, err := tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
++			pipe.Set(ctx, k, "1", 0)
++			return nil
++		})
++		return err
++	}, k); err != nil {
++		t.Fatalf("set: %s", err)
++	}
++
++	// a concurrent write between the read and the commit
++	var attempts int
++	err := m.txn(ctx, func(tx *redis.Tx) error {
++		attempts++
++		v, err := tx.Get(ctx, k).Result()
++		if err != nil {
++			return err
++		}
++		if attempts == 1 {
++			if err := mcli.Set(context.Background(), k, "2", 0).Err(); err != nil {
++				return err
++			}
++		}
++		_, err = tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
++			pipe.Set(ctx, k2, "seen "+v, 0)
++			return nil
++		})
++		return err
++	}, k)
++	if got := mcli.Get(context.Background(), k2).Val(); err != nil || got != "seen 2" || attempts != 2 {
++		t.Fatalf("conflict: %v, k2 = %q after %d attempts", err, got, attempts)
++	}
++	if m.replica.conflicts.Load() != 1 {
++		t.Fatalf("%d conflicts, expected 1", m.replica.conflicts.Load())
++	}
++
++	// a write outside MULTI/EXEC and a SCAN cannot be checked: run with WATCH, applied once
++	for i, txf := range []func(tx *redis.Tx) error{
++		func(tx *redis.Tx) error { return tx.Incr(ctx, k).Err() },
++		func(tx *redis.Tx) error {
++			if err := tx.Scan(ctx, 0, k, 10).Err(); err != nil {
++				return err
++			}
++			_, err := tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
++				pipe.Incr(ctx, k)
++				return nil
++			})
++			return err
++		},
++	} {
++		if err := m.txn(ctx, txf, k); err != nil {
++			t.Fatalf("fallback %d: %s", i, err)
++		}
++	}
++	if got := mcli.Get(context.Background(), k).Val(); got != "4" || m.replica.fallbacks.Load() != 2 {
++		t.Fatalf("k = %q, %d fallbacks: expected 4 and 2", got, m.replica.fallbacks.Load())
++	}
++
++	// a command too long for unpack() in Lua runs with WATCH too
++	fields := make([]string, 10000)
++	for i := range fields {
++		fields[i] = strconv.Itoa(i)
++	}
++	if err := m.txn(ctx, func(tx *redis.Tx) error {
++		_, err := tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
++			pipe.HDel(ctx, k2+"h", fields...)
++			return nil
++		})
++		return err
++	}, k2+"h"); err != nil || m.replica.fallbacks.Load() != 3 {
++		t.Fatalf("long command: %v, %d fallbacks, expected 3", err, m.replica.fallbacks.Load())
++	}
++
++	// a transaction without writes still checks its reads on the master: with replication slowed
++	// down, the replica still has the old value of k when the transaction reads it
++	if e.self == "" {
++		t.Skip("JFS_TEST_REPLICA_SELF is not set")
++	}
++	rp := newTCPProxy(t, e.master)
++	e.follow(t, net.JoinHostPort(e.self, rp.port()))
++	defer e.follow(t, e.master)
++	rp.delay.Store(int64(500 * time.Millisecond))
++	if err := mcli.Set(context.Background(), k, "5", 0).Err(); err != nil {
++		t.Fatalf("set: %s", err)
++	}
++	before := m.replica.conflicts.Load()
++	var seen string
++	if err := m.txn(ctx, func(tx *redis.Tx) error {
++		v, err := tx.Get(ctx, k).Result()
++		seen = v
++		return err
++	}, k); err != nil || seen != "5" {
++		t.Fatalf("read-only transaction: %v, %q", err, seen)
++	}
++	if n := m.replica.conflicts.Load() - before; n != 1 {
++		t.Fatalf("read-only transaction on a stale replica: %d conflicts, expected 1", n)
++	}
++}
+-- 
+2.55.0
+

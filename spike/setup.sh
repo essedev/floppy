@@ -18,6 +18,9 @@ fi
 if ! grep -q '^SMB_PASSWORD=' .env; then
   echo "SMB_PASSWORD=$(openssl rand -hex 12)" >> .env
 fi
+if ! grep -q '^VALKEY_PASSWORD=' .env; then
+  echo "VALKEY_PASSWORD=$(openssl rand -hex 16)" >> .env
+fi
 if ! grep -q '^PG_PASSWORD=' .env; then
   echo "PG_PASSWORD=$(openssl rand -hex 16)" >> .env
 fi
@@ -55,5 +58,11 @@ toxi create -l 0.0.0.0:4504 -u postgres:5432 pg
 toxi toxic add -t latency -a latency="$PG_LATENCY_MS" pg
 echo "PostgreSQL through the simulated link: toxiproxy:4504 (${PG_LATENCY_MS} ms)"
 
+toxi delete valkey >/dev/null 2>&1 || true
+toxi create -l 0.0.0.0:4505 -u valkey:6379 valkey
+toxi toxic add -t latency -a latency="$PG_LATENCY_MS" valkey
+echo "Valkey through the simulated link: toxiproxy:4505 (${PG_LATENCY_MS} ms; start it with --profile replica)"
+
+mkdir -p juicefs-replica/dist # build context of the drive image, filled by juicefs-replica/build.sh
 docker compose up -d --build drive
 echo "Mount from Finder: smb://drive@localhost:4503/Fluix (password: SMB_PASSWORD in spike/.env)"
