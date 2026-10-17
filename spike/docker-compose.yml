@@ -223,10 +223,86 @@ services:
       --masteruser ${PERDISK_USER:-default} --masterauth ${PERDISK_PASSWORD:-}
       --requirepass ${VALKEY_PASSWORD:-} --replica-read-only yes --save "" --appendonly no
 
+  # The "metatls" profile (DECISIONS #25): two disks' Valkey instances behind
+  # Traefik on one TLS port, routed by SNI (traefik-meta.yml, certificates from
+  # meta-tls.sh), and one client (drive-t) that resolves <disk>.meta.floppy.test
+  # to Traefik and holds a TLS replica of each. spike/metatls.py drives it.
+  traefik:
+    image: traefik:v3.7.15
+    profiles: [metatls]
+    # readTimeout 0: Traefik's default (60 s) also closes idle TCP connections,
+    # such as a JuiceFS pool connection or a quiet replication link.
+    command: >-
+      --entrypoints.meta.address=:6443
+      --entrypoints.meta.transport.respondingTimeouts.readTimeout=0
+      --providers.file.filename=/etc/traefik/meta.yml --log.level=INFO
+    volumes:
+      - ./traefik-meta.yml:/etc/traefik/meta.yml:ro
+      - ./meta-tls:/certs:ro
+    networks:
+      default:
+        ipv4_address: 10.250.45.240
+
+  valkey-m1: &meta-master
+    image: valkey/valkey:8.1.4
+    profiles: [metatls]
+    command: >-
+      valkey-server --requirepass ${VALKEY_PASSWORD:-} --appendonly yes
+      --appendfsync always --repl-diskless-sync-delay 0
+  valkey-m2: *meta-master
+
+  drive-t:
+    profiles: [metatls]
+    build:
+      context: ./drive
+      args:
+        JUICEFS_SOURCE: ${JUICEFS_SOURCE:-replica}
+      additional_contexts:
+        replica: ./juicefs-replica/dist
+    privileged: true # FUSE inside the container
+    devices:
+      - /dev/fuse
+    entrypoint: ["/perdisk-entrypoint.sh"]
+    environment:
+      SMB_PASSWORD: ${SMB_PASSWORD:?run setup.sh first}
+    extra_hosts:
+      - "disk1.meta.floppy.test:10.250.45.240"
+      - "disk2.meta.floppy.test:10.250.45.240"
+    volumes:
+      - ./drive/perdisk-entrypoint.sh:/perdisk-entrypoint.sh:ro
+      - ./meta-tls:/certs:ro
+      - drive-t-cache:/cache
+    ports:
+      - "127.0.0.1:4514:445" # SMB of the TLS client
+    depends_on:
+      - toxiproxy
+
+  # A replica that reaches its master through Traefik: TLS with the name as SNI.
+  # REPLICA_OF_1 and REPLICA_OF_2 ("<host> <port>") pick the path (metatls.py switches them).
+  valkey-t1: &meta-replica
+    image: valkey/valkey:8.1.4
+    profiles: [metatls]
+    network_mode: "service:drive-t"
+    volumes:
+      - ./meta-tls:/certs:ro
+    command: >-
+      valkey-server --port 6381 --replicaof ${REPLICA_OF_1:-disk1.meta.floppy.test 6443}
+      --tls-replication ${REPLICA_TLS:-yes} --tls-cert-file /certs/meta.crt --tls-key-file /certs/meta.key
+      --tls-ca-cert-file /certs/ca.crt --masterauth ${VALKEY_PASSWORD:-}
+      --requirepass ${VALKEY_PASSWORD:-} --replica-read-only yes --save "" --appendonly no
+  valkey-t2:
+    <<: *meta-replica
+    command: >-
+      valkey-server --port 6382 --replicaof ${REPLICA_OF_2:-disk2.meta.floppy.test 6443}
+      --tls-replication ${REPLICA_TLS:-yes} --tls-cert-file /certs/meta.crt --tls-key-file /certs/meta.key
+      --tls-ca-cert-file /certs/ca.crt --masterauth ${VALKEY_PASSWORD:-}
+      --requirepass ${VALKEY_PASSWORD:-} --replica-read-only yes --save "" --appendonly no
+
 volumes:
   drive-cache:
   drive-b-cache:
   drive-p-cache:
+  drive-t-cache:
   valkey-data:
   garage-meta:
   garage-data:

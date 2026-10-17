@@ -1,0 +1,31 @@
+# Traefik's dynamic configuration for the "metatls" profile: one TLS port for
+# every disk's Valkey, routed by the name in the TLS handshake (SNI). TLS ends
+# here and the hop to Valkey is plain on the private network, so Valkey holds
+# no certificate and the wildcard is renewed in one place (DECISIONS #25).
+tcp:
+  routers:
+    disk1:
+      entryPoints: [meta]
+      rule: "HostSNI(`disk1.meta.floppy.test`)"
+      service: disk1
+      tls: {}
+    disk2:
+      entryPoints: [meta]
+      rule: "HostSNI(`disk2.meta.floppy.test`)"
+      service: disk2
+      tls: {}
+  services:
+    disk1:
+      loadBalancer:
+        servers:
+          - address: "valkey-m1:6379"
+    disk2:
+      loadBalancer:
+        servers:
+          - address: "valkey-m2:6379"
+tls:
+  stores:
+    default:
+      defaultCertificate:
+        certFile: /certs/meta.crt
+        keyFile: /certs/meta.key
