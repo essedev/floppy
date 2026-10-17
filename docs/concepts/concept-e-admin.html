@@ -67,6 +67,12 @@
   incassato neutro, "Consigliata" come LED verde più lettura. Il segno sulla voce "Chiave
   dell'archivio" torna come LED in ghiera acceso arancione finché la finestra è aperta. Tolto
   l'alone dal puntino della i nel logo.
+  Giro 4: scelti frontale Grafite e icone Essenziale (marchio definitivo in concept-c-app, copiato
+  così com'è). I frontali dei dischi in Panoramica e Dischi sono Grafite: corpo scuro in entrambi i
+  temi, fessura riempita #d9d4c8, LED sull'asse della fessura con i colori del frontale scuro. Il
+  marchio nella barra laterale e nell'accesso è la fessura con il LED dell'icona della barra dei
+  menu, a colori, seguita da "fluix"; l'icona dell'app compare dove si parla di installare l'app
+  (invito, accesso). Vocabolario dei dettagli invariato.
 -->
 <style>
 @font-face { font-family: "Departure Mono"; src: url("https://cdn.jsdelivr.net/gh/rektdeckard/departure-mono@v1.500/public/assets/DepartureMono-Regular.woff2") format("woff2"); font-display: swap; }
@@ -308,8 +314,9 @@ body[data-chrome="off"] .board { grid-template-columns: minmax(0, 1fr); }
 
 /* Wordmark */
 .wm { display: inline-flex; align-items: center; gap: 9px; font: 800 21px/1 var(--f-head); letter-spacing: -0.035em; color: var(--ink); }
-.wm .i { position: relative; }
-.wm .i i { position: absolute; left: 50%; top: .26em; width: .16em; height: .16em; border-radius: 50%; transform: translateX(-50%); background: var(--brand); }
+.wm svg { width: 1.5em; height: 1em; flex-shrink: 0; }
+.appline { display: flex; align-items: center; gap: 12px; font-size: 14px; color: var(--ink-2); }
+.appline svg { width: 40px; height: 40px; flex-shrink: 0; }
 
 /* Decisions */
 .dec { display: grid; gap: 22px; }
@@ -376,10 +383,13 @@ const ICON = {
   out: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/>'
 };
 const ic = (n, s = 18) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON[n]}</svg>`;
-const driveMark = (h, led = "var(--led-dl)") => `<svg width="${h * 1.6}" height="${h}" viewBox="0 0 64 40" aria-hidden="true"><rect x="2" y="3" width="60" height="34" rx="9" fill="var(--ink)"/><rect x="10" y="13" width="34" height="6" rx="3" fill="var(--surface)"/><circle cx="51" cy="27" r="3.6" fill="${led}"/></svg>`;
-const wm = (size = 21) => `<span class="wm" style="font-size:${size}px">${driveMark(Math.round(size * 0.95))}<span>flu<span class="i">ı<i></i></span>x</span></span>`;
-// A small faceplate: the identity's drive, with its LED as the disk's state
-const face = (led) => `<svg width="96" height="58" viewBox="0 0 96 58" aria-hidden="true"><defs><linearGradient id="fg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--face-hi)"/><stop offset="1" stop-color="var(--face-lo)"/></linearGradient></defs><rect x=".5" y=".5" width="95" height="57" rx="10" fill="url(#fg)" stroke="var(--face-edge)"/><rect x="12" y="18" width="52" height="7" rx="3.5" fill="var(--slot)"/><circle cx="78" cy="21.5" r="6.5" fill="var(--slot)"/><circle cx="78" cy="21.5" r="3.8" fill="${led}"/>${led.includes("lens-off") ? "" : `<ellipse cx="78" cy="19.8" rx="1.8" ry="1" fill="#fff" opacity=".5"/>`}<path d="M12 42H84" stroke="var(--face-edge)"/></svg>`;
+// Brand mark: the menu bar icon's slot and LED, in color, then the wordmark (concept-c-app, final brand)
+const wm = (size = 21) => `<span class="wm" style="font-size:${size}px"><svg viewBox="0 0 24 16" aria-hidden="true"><rect x="2" y="6.5" width="13" height="3" rx="1.5" fill="var(--ink)"/><circle cx="19.75" cy="8" r="3.4" fill="var(--bezel)"/><circle cx="19.75" cy="8" r="2.25" fill="var(--brand)"/><ellipse cx="19.75" cy="7.05" rx="1.05" ry=".55" fill="#fff" opacity=".5"/></svg><span>fluix</span></span>`;
+// App icon, copied verbatim from the final brand
+const APPICON = '<svg width="128" height="128" viewBox="0 0 124 124" aria-hidden="true"><defs><linearGradient id="fx-sq" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3a3835"/><stop offset="1" stop-color="#1c1b19"/></linearGradient></defs><rect x="4" y="4" width="116" height="116" rx="27" fill="url(#fx-sq)"/><rect x="4.5" y="4.5" width="115" height="115" rx="26.5" fill="none" stroke="#fff" stroke-opacity=".08"/><rect x="16" y="51" width="68" height="22" rx="11" fill="#0b0b0a"/><rect x="20" y="55" width="42" height="14" rx="7" fill="#d9d4c8"/><circle cx="100" cy="62" r="12.5" fill="#0b0b0a"/><circle cx="100" cy="62" r="8.5" fill="#ff6a2e"/><ellipse cx="100" cy="58.2" rx="4" ry="2" fill="#fff" opacity=".5"/></svg>';
+// Grafite faceplate (concept-c-app, final brand) at disk-card size; LED colors of the dark faceplate
+const FACE_LED = { ok: "#3fdc6c", dl: "#ff6a2e", err: "#ff4b33", off: "#3a3834" };
+const face = (state = "ok", fill = 0.55) => `<svg width="96" height="58" viewBox="0 0 96 58" aria-hidden="true"><defs><linearGradient id="fx-fd" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3a3835"/><stop offset="1" stop-color="#1c1b19"/></linearGradient></defs><rect x=".5" y=".5" width="95" height="57" rx="10" fill="url(#fx-fd)" stroke="#0f0f0e"/><rect x="1.5" y="1.5" width="93" height="55" rx="9" fill="none" stroke="#fff" stroke-opacity=".08"/><rect x="11" y="24" width="54" height="10" rx="5" fill="#0b0b0a"/>${fill > 0 ? `<rect x="13.5" y="26.5" width="${(49 * fill).toFixed(1)}" height="5" rx="2.5" fill="#d9d4c8"/>` : ""}<circle cx="80" cy="29" r="8" fill="#0b0b0a"/><circle cx="80" cy="29" r="4.5" fill="${FACE_LED[state]}"/>${state === "off" ? "" : `<ellipse cx="80" cy="27" rx="2.1" ry="1.1" fill="#fff" opacity=".5"/>`}</svg>`;
 
 const PEOPLE = [
   { id: "giulia", n: "Giulia Ferri", e: "giulia@studio.example", role: "Admin", st: "ok", macs: 2, last: "adesso" },
@@ -429,7 +439,7 @@ function accesso() {
   if (s === "form") card = `${wm(24)}<div><h1>Accedi a Fluix</h1><p style="margin-top:6px">Ti mandiamo un link via email: niente password da ricordare.</p></div>
     <div class="field"><label for="em">Email</label><input id="em" class="input" value="giulia@studio.example"></div>
     <button class="btn btn-ink" data-go="accesso:inviato">${ic("mail", 17)}Mandami il link</button>
-    <div class="foot">Per entrare serve un invito di un admin del tuo studio.</div>`;
+    <div class="appline">${APPICON}<span>Per entrare serve l'app Fluix sul Mac e un invito di un admin del tuo studio.</span></div>`;
   else if (s === "inviato") card = `${wm(24)}<div><h1>Controlla la posta</h1><p style="margin-top:6px">Abbiamo mandato un link a <b style="color:var(--ink)">giulia@studio.example</b>. Vale 15 minuti e funziona una volta sola.</p></div>
     <div style="display:grid;gap:6px">${stx("dl", "In attesa del link", true)}<span style="font-size:14px;color:var(--ink-2)">Questa pagina si aggiorna da sola quando apri il link.</span></div>
     <div style="display:flex;gap:8px"><button class="btn btn-soft" data-go="accesso:form">Usa un'altra email</button><button class="btn btn-ghost">Rimanda il link</button></div>`;
@@ -442,10 +452,10 @@ function accesso() {
 function panoramica() {
   const rem = S.panoramica === "promemoria";
   const notice = rem ? `<div class="notice">${stx("dl", "Chiave da cambiare")}<p>Paolo Greco è stato rimosso il 14 ottobre e la chiave dell'archivio è ancora quella di prima.</p><span class="timer">da ${timer()}</span><button class="btn btn-ink btn-sm" data-jump="chiave">Cambia chiave</button></div>` : "";
-  const disk = (n, tb, files, last, macs) => `<div class="well disk">${face("var(--led-ok)")}<div><h4>${n}</h4><div style="font-size:13.5px;color:var(--ink-2);margin-top:2px">In linea, ultima scrittura ${last}</div><div class="nums"><div><b>${tb}</b>usati</div><div><b>${files}</b>file</div><div><b>${macs}</b>Mac</div></div></div></div>`;
+  const disk = (n, tb, files, last, macs, fill) => `<div class="well disk">${face("ok", fill)}<div><h4>${n}</h4><div style="font-size:13.5px;color:var(--ink-2);margin-top:2px">In linea, ultima scrittura ${last}</div><div class="nums"><div><b>${tb}</b>usati</div><div><b>${files}</b>file</div><div><b>${macs}</b>Mac</div></div></div></div>`;
   const online = MACS.filter((m) => !m.rev).map((m) => `<div><span class="led ${m.on ? "ok" : ""}"></span>${m.n}<em>${m.seen}</em></div>`).join("");
   const body = `${ph("Panoramica", "Studio Esempio")}${notice}
-    <div class="grid2" style="margin-bottom:14px">${disk("Progetti", "4,82 TB", "38.214", "3 min fa", 5)}${disk("Archivio 2025", "2,10 TB", "9.877", "6 giorni fa", 2)}</div>
+    <div class="grid2" style="margin-bottom:14px">${disk("Progetti", "4,82 TB", "38.214", "3 min fa", 5, 0.7)}${disk("Archivio 2025", "2,10 TB", "9.877", "6 giorni fa", 2, 0.3)}</div>
     <div class="well" style="margin-bottom:14px"><h3>Servizi, visti da qui</h3><div class="svcs">
         <div class="svc"><b>Database dei metadata</b>${stx("ok", "Risponde · 4 ms")}<span>Controllato 30 s fa</span></div>
         <div class="svc"><b>Archivio S3</b>${stx("ok", "Scrive")}<span>Scrittura di prova riuscita 2 min fa</span></div>
@@ -482,7 +492,7 @@ function persone() {
   let overlay = "";
   if (s === "invita") overlay = dlg("Invita una persona", `<div class="field"><label>Email</label><input class="input" value="chiara@studio.example"></div>
     <div class="field"><label>Ruolo</label><div class="choice"><button class="opt" aria-pressed="true"><b>Membro</b><span>Usa il disco e gestisce i suoi Mac</span></button><button class="opt" aria-pressed="false"><b>Admin</b><span>Gestisce persone, Mac, dischi e chiave</span></button></div></div>
-    <p>Riceve un'email con un link per installare Fluix e accedere. L'invito vale 7 giorni.</p>`, `<button class="btn btn-ghost" data-go="persone:tabella">Annulla</button><button class="btn btn-ink" data-go="persone:tabella">Manda invito</button>`);
+    <div class="appline">${APPICON}<span>Riceve un'email con il link per installare l'app Fluix e accedere. L'invito vale 7 giorni.</span></div>`, `<button class="btn btn-ghost" data-go="persone:tabella">Annulla</button><button class="btn btn-ink" data-go="persone:tabella">Manda invito</button>`);
   if (s === "rimuovi") overlay = dlg("Rimuovere Marco Bassi?", `<ul class="mk"><li><span class="fessura"></span><span>Perde l'accesso subito: cancelliamo l'accesso al database del suo Mac, <b style="color:var(--ink)">MacBook Air di Marco</b>, e lì il disco smette di rispondere.</span></li>
     <li><span class="fessura"></span><span>Al prossimo contatto l'app sul suo Mac si spegne e svuota la cache.</span></li>
     <li><span class="fessura"></span><span>La chiave dell'archivio resta valida finché non la cambi. Chi l'avesse copiata potrebbe ancora scaricare o cancellare pezzi di file dal bucket.</span></li></ul>`,
@@ -494,7 +504,7 @@ function persone() {
 function mac() {
   const s = S.mac;
   if (s === "vuoto") {
-    const body = `${ph("Mac", "I Mac da cui si accede ai dischi")}<div class="empty">${face("var(--lens-off)")}<h3>Nessun Mac collegato</h3><p>Quando qualcuno accede dall'app Fluix sul suo Mac, il Mac compare qui con il suo ultimo contatto. Da qui lo puoi revocare.</p><button class="btn btn-ink" data-jump="persone">${ic("users", 17)}Invita persone</button></div>`;
+    const body = `${ph("Mac", "I Mac da cui si accede ai dischi")}<div class="empty">${face("off", 0)}<h3>Nessun Mac collegato</h3><p>Quando qualcuno accede dall'app Fluix sul suo Mac, il Mac compare qui con il suo ultimo contatto. Da qui lo puoi revocare.</p><button class="btn btn-ink" data-jump="persone">${ic("users", 17)}Invita persone</button></div>`;
     return frame("/mac", shell("mac", body));
   }
   const rows = MACS.map((m) => {
@@ -552,7 +562,7 @@ function dischi() {
       <tr class="sel"><td><b style="font-weight:600">Progetti</b></td><td>${stx("ok", "In linea")}</td><td class="r ro">4,82 TB</td><td class="r ro">38.214</td><td>3 min fa</td></tr>
       <tr><td><b style="font-weight:600">Archivio 2025</b></td><td>${stx("ok", "In linea")}</td><td class="r ro">2,10 TB</td><td class="r ro">9.877</td><td>6 giorni fa</td></tr>
     </tbody></table>
-    <div class="well"><h3>Progetti</h3><dl class="kv">
+    <div class="well"><div style="display:flex;align-items:center;gap:14px;margin-bottom:16px">${face("ok", 0.7)}<div><b style="font:700 18px var(--f-head);letter-spacing:-0.015em">Progetti</b><div style="margin-top:4px">${stx("ok", "In linea")}</div></div></div><dl class="kv">
       <dt>Nel bucket</dt><dd class="ro">studio-esempio-fluix/progetti</dd>
       <dt>Database</dt><dd class="ro">fluix_vol_progetti</dd>
       <dt>Blocchi</dt><dd class="ro">4 MB</dd>
