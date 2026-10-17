@@ -1,6 +1,7 @@
 # syntax=docker/dockerfile:1
-# The patched juicefs binary: JuiceFS v1.4.1 plus 0001-*.patch (reads from a
-# local Redis/Valkey replica). Built by build.sh for linux/arm64 and
+# The patched juicefs binary: JuiceFS v1.4.1 plus the patches here, applied in
+# order: 0001 reads metadata from a local Redis/Valkey replica, 0002 reads whole
+# blocks for sequential readers. Built by build.sh for linux/arm64 and
 # linux/amd64; the "out" stage holds only the binary.
 #
 # Cross-compiled on the build platform with Debian's cross gcc, because the
@@ -22,8 +23,8 @@ RUN set -eu; \
     fi
 RUN git clone --depth 1 --branch "$JUICEFS_VERSION" https://github.com/juicedata/juicefs.git /src
 WORKDIR /src
-COPY 0001-*.patch /tmp/patches/
-RUN git apply /tmp/patches/0001-*.patch
+COPY *.patch /tmp/patches/
+RUN for p in /tmp/patches/*.patch; do git apply "$p"; done
 RUN --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/go/pkg/mod \
     set -eu; \

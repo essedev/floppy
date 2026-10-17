@@ -1,0 +1,168 @@
+diff --git a/pkg/vfs/reader.go b/pkg/vfs/reader.go
+index bfee3ce..795ab89 100644
+--- a/pkg/vfs/reader.go
++++ b/pkg/vfs/reader.go
+@@ -315,14 +315,24 @@ func (f *fileReader) newSlice(block *frange) *sliceReader {
+ 	s.indx = uint32(block.off / meta.ChunkSize)
+ 	s.block = &frange{block.off, block.len} // random read
+ 	blockend := (block.off/f.r.blockSize + 1) * f.r.blockSize
++	if f.need(block) {
++		// Inside a sequential session the whole block is wanted soon: one
++		// slice per block. Readers that keep several requests in flight, like
++		// Samba and the kernel, send small pieces out of order; a slice per
++		// piece loads the same block once per piece, and the extra slices push
++		// cleanupRequests into cancelling downloads halfway.
++		s.block.off = block.off / f.r.blockSize * f.r.blockSize
++		s.block.len = blockend - s.block.off
++	}
+ 	if s.block.end() > f.length {
+ 		s.block.len = f.length - s.block.off
+ 	}
+ 	if s.block.end() > blockend {
+ 		s.block.len = blockend - s.block.off
+ 	}
+-	block.off = s.block.end()
+-	block.len -= s.block.len
++	consumed := min(s.block.end(), block.end()) - block.off
++	block.off += consumed
++	block.len -= consumed
+ 	s.page = chunk.NewOffPage(int(s.block.len))
+ 	s.cond = utils.NewCond(&f.Mutex)
+ 	s.prev = f.last
+@@ -576,9 +586,10 @@ func (f *fileReader) prepareRequests(ranges []uint64) []*req {
+ 		})
+ 		if !added {
+ 			for b.len > 0 {
++				off := b.off
+ 				s := f.newSlice(&b)
+ 				s.refs++
+-				reqs = append(reqs, &req{frange{0, s.block.len}, s})
++				reqs = append(reqs, &req{frange{off - s.block.off, b.off - off}, s})
+ 			}
+ 		}
+ 	}
+diff --git a/pkg/vfs/reader_wholeblock_test.go b/pkg/vfs/reader_wholeblock_test.go
+new file mode 100644
+index 0000000..9b6036b
+--- /dev/null
++++ b/pkg/vfs/reader_wholeblock_test.go
+@@ -0,0 +1,119 @@
++package vfs
++
++import (
++	"context"
++	"sync"
++	"testing"
++	"time"
++
++	"github.com/google/uuid"
++	"github.com/juicedata/juicefs/pkg/chunk"
++	"github.com/juicedata/juicefs/pkg/meta"
++	"github.com/juicedata/juicefs/pkg/object"
++)
++
++// recordingChunkReader records the range of every read that reaches the chunk store.
++type recordingChunkReader struct {
++	sync.Mutex
++	reads [][2]int
++}
++
++func (r *recordingChunkReader) ReadAt(ctx context.Context, p *chunk.Page, off int) (int, error) {
++	r.Lock()
++	r.reads = append(r.reads, [2]int{off, len(p.Data)})
++	r.Unlock()
++	time.Sleep(2 * time.Millisecond) // a download takes a while: pieces queue behind it
++	return len(p.Data), nil
++}
++
++type recordingChunkStore struct{ reader *recordingChunkReader }
++
++func (s *recordingChunkStore) NewReader(id uint64, length int) chunk.Reader   { return s.reader }
++func (s *recordingChunkStore) NewWriter(id uint64, tierID uint8) chunk.Writer { return nil }
++func (s *recordingChunkStore) Remove(id uint64, length int) error             { return nil }
++func (s *recordingChunkStore) FillCache(id uint64, length uint32) error       { return nil }
++func (s *recordingChunkStore) EvictCache(id uint64, length uint32) error      { return nil }
++func (s *recordingChunkStore) CheckCache(id uint64, length uint32, handler func(bool, string, int)) error {
++	return nil
++}
++func (s *recordingChunkStore) UsedMemory() int64                  { return 0 }
++func (s *recordingChunkStore) UpdateLimit(upload, download int64) {}
++func (s *recordingChunkStore) BlobStorage() object.ObjectStorage  { return nil }
++
++// A reader that sends small pieces out of order inside a sequential stream, as
++// Samba does for the macOS SMB client, must load whole blocks: a range load is
++// not cached and the stream downloads the block again moments later.
++func TestSequentialOutOfOrderPiecesLoadWholeBlocks(t *testing.T) {
++	const bs = 1 << 20
++	const blocks = 16
++	const lead = 6 // the client's own readahead runs this many blocks ahead of JuiceFS's
++	const piece = 128 << 10
++	store := &recordingChunkStore{reader: &recordingChunkReader{}}
++
++	metaConf := meta.DefaultConf()
++	metaConf.MountPoint = "/jfs"
++	m := meta.NewClient("memkv://", metaConf)
++	format := &meta.Format{Name: "test-" + uuid.New().String(), UUID: uuid.New().String(),
++		Storage: "mem", BlockSize: bs >> 10, Compression: "none", DirStats: true}
++	if err := m.Init(format, true); err != nil {
++		t.Fatalf("init meta: %v", err)
++	}
++	ctx := meta.Background()
++	var inode meta.Ino
++	var attr meta.Attr
++	if st := m.Create(ctx, meta.RootInode, "file", 0644, 0, 0, &inode, &attr); st != 0 {
++		t.Fatalf("create file: %s", st)
++	}
++	var sliceID uint64
++	if st := m.NewSlice(ctx, &sliceID); st != 0 {
++		t.Fatalf("new slice: %s", st)
++	}
++	if st := m.Write(ctx, inode, 0, 0, meta.Slice{Id: sliceID, Size: bs * blocks, Len: bs * blocks}, time.Now()); st != 0 {
++		t.Fatalf("write slice: %s", st)
++	}
++	conf := &Config{Meta: metaConf, Format: *format, FuseOpts: &FuseOptions{},
++		Chunk: &chunk.Config{BlockSize: bs, BufferSize: 64 << 20, Readahead: 4 << 20}}
++	dr := NewDataReader(conf, m, store).(*dataReader)
++	fr := dr.Open(Ino(inode), bs*blocks)
++	defer fr.Close(meta.Background())
++
++	// Two streams of pieces at once, as the macOS client sends them: the
++	// application's reads, and the client's own readahead some blocks further.
++	read := func(off int, wg *sync.WaitGroup) {
++		defer wg.Done()
++		b := make([]byte, piece)
++		if n, st := fr.Read(meta.Background(), uint64(off), b); st != 0 || n != piece {
++			t.Errorf("read at %d: %d bytes, %s", off, n, st)
++		}
++	}
++	for b := 0; b < blocks; b++ {
++		for k := 0; k < bs/piece; k++ {
++			var wg sync.WaitGroup
++			wg.Add(1)
++			go read(b*bs+k*piece, &wg)
++			if b+lead < blocks {
++				wg.Add(1)
++				go read((b+lead)*bs+(bs/piece-1-k)*piece, &wg) // ahead, and backwards in its block
++			}
++			wg.Wait()
++		}
++	}
++
++	// The first piece of each stream comes before the stream is recognised as
++	// sequential, and a stream can lose its session for a piece when the two
++	// streams compete for JuiceFS's two sessions. Without whole-block slices
++	// most pieces load a range (60 to 100 of the 128 here). Loading a whole
++	// block again later is the block cache's business and is not counted.
++	store.reader.Lock()
++	defer store.reader.Unlock()
++	partial := 0
++	for _, r := range store.reader.reads {
++		if r[0]%bs != 0 || r[1] != bs {
++			partial++
++		}
++	}
++	t.Logf("%d range loads out of %d pieces", partial, blocks*bs/piece)
++	if partial > 4 {
++		t.Errorf("%d range loads inside a sequential stream, want at most 4", partial)
++	}
++}

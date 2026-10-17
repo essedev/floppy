@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# Tests the read-replica patch against a real Valkey master and replica in
-# Docker: the Go integration tests in pkg/meta (TestRedisReplica*), then a
-# mount sanity check (format, mount with read-replica, create, list, remove).
+# Tests the patches: the Go integration tests of the read replica in pkg/meta
+# (TestRedisReplica*) against a real Valkey master and replica in Docker, the
+# pkg/vfs tests with the whole-block reads (0002), then a mount sanity check
+# (format, mount with read-replica, create, list, remove).
 #
-#   spike/juicefs-replica/test.sh            # v1.4.1 + 0001-*.patch, cloned once
+#   spike/juicefs-replica/test.sh            # v1.4.1 + the patches, cloned once
 #   JFS_SRC=/path/to/juicefs spike/juicefs-replica/test.sh   # an existing tree
 #   RUN='TestRedisReplicaMasterDown' spike/juicefs-replica/test.sh   # RUN=none: mount only
 #   VALKEY_IMAGE=valkey/valkey:8.1.1 spike/juicefs-replica/test.sh  # Debian 13 ships 8.1.1
@@ -23,6 +24,7 @@ RUN="${RUN:-TestRedisReplica}"
 work="${WORK:-${TMPDIR:-/tmp}/floppy-juicefs-replica}"
 master=floppy-jfs-master
 replica=floppy-jfs-replica
+plain=floppy-jfs-plain # pkg/vfs's tests expect a Redis without a password on 127.0.0.1
 
 src="${JFS_SRC:-}"
 if [ -z "$src" ]; then
@@ -32,11 +34,11 @@ if [ -z "$src" ]; then
   fi
   git -C "$src" checkout --quiet --force "$JUICEFS_VERSION"
   git -C "$src" clean --quiet -fdx
-  git -C "$src" apply "$here"/0001-*.patch
+  for p in "$here"/*.patch; do git -C "$src" apply "$p"; done
 fi
 
 cleanup() {
-  docker rm -f "$master" "$replica" floppy-jfs-test floppy-jfs-mount >/dev/null 2>&1 || true
+  docker rm -f "$master" "$replica" "$plain" floppy-jfs-test floppy-jfs-mount >/dev/null 2>&1 || true
   docker network rm "$NET" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
@@ -79,6 +81,20 @@ if [ "$RUN" != none ]; then
   grep -E '^(=== RUN|\s*--- |PASS|FAIL|ok|panic)|redis_replica_test.go:' "$work/go-test.log" || true
   if [ "$status" -ne 0 ]; then
     echo "go test failed ($status)" >&2
+    exit 1
+  fi
+fi
+
+if [ "$RUN" != none ]; then
+  echo "== go test ./pkg/vfs/ (full log: $work/go-test-vfs.log)"
+  docker run -d --name "$plain" --network "$NET" "$VALKEY_IMAGE" >/dev/null
+  status=0
+  docker run --rm --network "container:$plain" \
+    -v "$src:/src" -v floppy-jfs-gomod:/go/pkg/mod -v floppy-jfs-gobuild:/root/.cache/go-build -w /src \
+    "$GO_IMAGE" go test -count=1 ./pkg/vfs/ > "$work/go-test-vfs.log" 2>&1 || status=$?
+  grep -E '^(--- |FAIL|ok|panic)' "$work/go-test-vfs.log" || true
+  if [ "$status" -ne 0 ]; then
+    echo "go test ./pkg/vfs/ failed ($status)" >&2
     exit 1
   fi
 fi
