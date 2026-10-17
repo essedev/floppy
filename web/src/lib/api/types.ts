@@ -87,7 +87,7 @@ export interface Person {
   isMe: boolean
 }
 
-/** POST /people. */
+/** POST /people. Only admins invite. */
 export interface InviteRequest {
   email: string
   role: Role
@@ -142,14 +142,13 @@ export interface RevokeMacResponse {
 
 // Disks
 
-/** The cache options every Mac mounting the disk gets (docs/ARCHITECTURE.md, "Configuration"). */
+/**
+ * The cache option every Mac mounting the disk gets: only the expiry. There is no size cap
+ * per disk; each Mac computes its own from its free space (docs/ARCHITECTURE.md, "Configuration").
+ */
 export interface CachePolicy {
-  /** --cache-expire, in days. */
+  /** --cache-expire: days after which an unused block is freed. Default 30. */
   expireDays: number
-  /** --cache-large-write: uploaded blocks stay in the cache. */
-  keepUploadedBlocks: boolean
-  /** The ceiling of --cache-size; each Mac takes less if its disk is short. */
-  maxSizeGb: number
 }
 
 /** A disk: a JuiceFS volume, a prefix in the organization's bucket and a Valkey database. */
@@ -302,15 +301,11 @@ export interface Health {
 
 // Settings
 
-/** Who can send invites. */
-export type InvitePolicy = 'admins' | 'everyone'
-
 /** GET /settings. The SMTP password is write-only: only whether one is set comes back. */
 export interface Settings {
   organizationName: string
   mail: { host: string; port: number; username: string; sender: string; passwordSet: boolean }
   storage: { endpoint: string; region: string; bucket: string }
-  invitePolicy: InvitePolicy
 }
 
 /** PATCH /settings. Omitted fields stay as they are; an empty password keeps the old one. */
@@ -318,7 +313,6 @@ export interface UpdateSettingsRequest {
   organizationName?: string
   mail?: { host: string; port: number; username: string; sender: string; password?: string }
   storage?: { endpoint: string; region: string; bucket: string }
-  invitePolicy?: InvitePolicy
 }
 
 /** POST /settings/storage/probe: a test write with the organization's key, nothing changes. */

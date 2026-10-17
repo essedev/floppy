@@ -23,13 +23,23 @@ import { useHealth } from '@/features/settings/hooks'
 
 const linkClass = 'inline-flex h-10 items-center gap-2 rounded-[11px] bg-ink px-4 text-sm font-semibold text-surface no-underline hover:opacity-90'
 
-function DiskCard({ disk, share }: { disk: Disk; share: number }) {
+// The slot fills with the bytes the disk stores, on a log scale from 1 GB (empty) to
+// 100 TB (full): a disk has no capacity, and sizes span several orders of magnitude.
+const FILL_FROM = 1e9
+const FILL_TO = 100e12
+const usedFill = (bytes: number) =>
+  bytes <= 0 ? 0 : Math.max(0.06, Math.min(1, Math.log10(Math.max(bytes, FILL_FROM) / FILL_FROM) / Math.log10(FILL_TO / FILL_FROM)))
+
+function DiskCard({ disk }: { disk: Disk }) {
   const { t } = useI18n()
   const f = useFormat()
   const online = disk.status === 'online'
   return (
-    <Well className="grid grid-cols-[96px_minmax(0,1fr)] items-center gap-[18px] max-sm:grid-cols-1">
-      <Faceplate state={online ? 'ok' : 'err'} fill={share} label={fmt(t.overview.faceLabel, { name: disk.name, share: f.percent(share) })} />
+    <Well className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-[18px] max-sm:grid-cols-1">
+      <div className="grid justify-items-center gap-1.5 max-sm:justify-items-start">
+        <Faceplate state={online ? 'ok' : 'err'} fill={usedFill(disk.usedBytes)} label={fmt(t.overview.faceLabel, { name: disk.name, used: f.bytes(disk.usedBytes) })} />
+        <Readout className="whitespace-nowrap">{fmt(t.overview.usedReadout, { used: f.bytes(disk.usedBytes) })}</Readout>
+      </div>
       <div className="min-w-0">
         <h3 className="flex items-center gap-2.5 text-lg font-bold tracking-[-0.015em]">{disk.name}</h3>
         <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[13.5px] text-ink-2">
@@ -38,7 +48,6 @@ function DiskCard({ disk, share }: { disk: Disk; share: number }) {
         </div>
         <dl className="mt-2.5 flex flex-wrap gap-x-[22px] gap-y-2">
           {[
-            [f.bytes(disk.usedBytes), t.overview.used],
             [f.number(disk.fileCount), t.overview.files],
             [f.number(disk.mountedBy), t.overview.macs],
           ].map(([value, label]) => (
@@ -78,16 +87,13 @@ function Disks() {
         </Well>
       }
     >
-      {(list) => {
-        const total = list.reduce((sum, d) => sum + d.usedBytes, 0)
-        return (
-          <div className="mb-3.5 grid gap-3.5 md:grid-cols-2">
-            {list.map((d) => (
-              <DiskCard key={d.id} disk={d} share={total > 0 ? d.usedBytes / total : 0} />
-            ))}
-          </div>
-        )
-      }}
+      {(list) => (
+        <div className="mb-3.5 grid gap-3.5 md:grid-cols-2">
+          {list.map((d) => (
+            <DiskCard key={d.id} disk={d} />
+          ))}
+        </div>
+      )}
     </QueryView>
   )
 }

@@ -1,7 +1,7 @@
 /*
   Disks (concept-e-admin, "Dischi"): each disk is a JuiceFS volume with its own Valkey
   database, a prefix in the organization's bucket, 1 MB blocks (DECISIONS #15), a trash and
-  the cache options its Macs get. Names never change: CapCut keeps full paths.
+  the cache expiry its Macs get (each Mac sizes its own cache). Names never change: CapCut keeps full paths.
 */
 
 import { Plus } from 'lucide-react'
@@ -10,7 +10,7 @@ import { useSearchParams } from 'react-router'
 import { Button } from '@/components/Button'
 import { Notice, SlotNote, State, Well } from '@/components/detail'
 import { Dialog } from '@/components/Dialog'
-import { Checkbox, Field, Input } from '@/components/Field'
+import { Field, Input } from '@/components/Field'
 import { Faceplate } from '@/components/marks'
 import { useErrorText } from '@/components/error-text'
 import { EmptyState, PageHeader, QueryView, SkeletonRows } from '@/components/states'
@@ -105,16 +105,14 @@ function EditDialog({ disk, onClose, onSaved }: { disk: Disk; onClose(): void; o
   const errorText = useErrorText()
   const update = useUpdateDisk()
   const [expire, setExpire] = useState(String(disk.cache.expireDays))
-  const [max, setMax] = useState(String(disk.cache.maxSizeGb))
-  const [keep, setKeep] = useState(disk.cache.keepUploadedBlocks)
   const [trash, setTrash] = useState(String(disk.trashDays))
   const [tried, setTried] = useState(false)
-  const values = { expire: intIn(expire, 1, 365), max: intIn(max, 5, 2000), trash: intIn(trash, 0, 365) }
+  const values = { expire: intIn(expire, 1, 365), trash: intIn(trash, 0, 365) }
 
   const submit = () => {
     setTried(true)
-    if (values.expire === null || values.max === null || values.trash === null) return
-    const cache: CachePolicy = { expireDays: values.expire, maxSizeGb: values.max, keepUploadedBlocks: keep }
+    if (values.expire === null || values.trash === null) return
+    const cache: CachePolicy = { expireDays: values.expire }
     update.mutate({ id: disk.id, body: { cache, trashDays: values.trash } }, { onSuccess: onSaved })
   }
   const num = (label: string, value: string, set: (v: string) => void, ok: number | null, min: number, maxV: number) => (
@@ -141,8 +139,6 @@ function EditDialog({ disk, onClose, onSaved }: { disk: Disk; onClose(): void; o
       }
     >
       {num(t.disks.editExpire, expire, setExpire, values.expire, 1, 365)}
-      {num(t.disks.editMax, max, setMax, values.max, 5, 2000)}
-      <Checkbox label={<span className="text-ink">{t.disks.editKeep}</span>} hint={t.disks.editKeepHint} checked={keep} onChange={(e) => setKeep(e.target.checked)} />
       {num(t.disks.trashDays, trash, setTrash, values.trash, 0, 365)}
       <SlotNote className="text-[13px]">{t.disks.editNote}</SlotNote>
       {update.isError && <p className="text-[13px] text-bad-text" role="alert">{errorText(update.error)}</p>}
@@ -192,9 +188,8 @@ function DiskDetail({ disk, onEdit }: { disk: Disk; onEdit(): void }) {
       </div>
       <dl className="m-0 mt-2 grid grid-cols-[auto_minmax(0,1fr)] gap-x-[18px] gap-y-1.5 text-sm">
         <Row term={t.disks.expire}>{plural(t.disks.expireValue, disk.cache.expireDays, locale)}</Row>
-        <Row term={t.disks.keepUploaded}>{disk.cache.keepUploadedBlocks ? t.disks.keepYes : t.disks.keepNo}</Row>
-        <Row term={t.disks.maxSize}>{fmt(t.disks.maxValue, { n: disk.cache.maxSizeGb })}</Row>
       </dl>
+      <SlotNote className="mt-3 text-[13px] text-ink-2">{t.disks.capNote}</SlotNote>
       <SlotNote className="mt-4 text-[13px] text-ink-2">{t.disks.renameNote}</SlotNote>
     </Well>
   )

@@ -26,8 +26,6 @@ export interface Format {
   elapsed(ms: number): string
   /** "0:42". */
   countdown(ms: number): string
-  /** "38%". */
-  percent(share: number): string
 }
 
 const pad = (n: number) => String(n).padStart(2, '0')
@@ -42,7 +40,6 @@ export function useFormat(): Format {
     const num = new Intl.NumberFormat(locale)
     const dec = new Intl.NumberFormat(locale, { maximumFractionDigits: 2, minimumFractionDigits: 2 })
     const one = new Intl.NumberFormat(locale, { maximumFractionDigits: 1 })
-    const pct = new Intl.NumberFormat(locale, { style: 'percent', maximumFractionDigits: 0 })
     const startOfDay = (ms: number) => new Date(new Date(ms).toDateString()).getTime()
     // Intl puts a dot in Italian short months ("ott."); the UI writes them without.
     const short = (d: Date) => dayMonth.format(d).replace('.', '')
@@ -83,7 +80,6 @@ export function useFormat(): Format {
         const s = Math.ceil(Math.max(0, ms) / 1000)
         return `${Math.floor(s / 60)}:${pad(s % 60)}`
       },
-      percent: (share) => pct.format(share),
     }
   }, [t, locale])
 }

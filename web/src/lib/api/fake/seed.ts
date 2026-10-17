@@ -5,7 +5,7 @@
   are the real configuration (docs/ARCHITECTURE.md, DECISIONS #15).
 */
 
-import type { AuditEvent, CachePolicy, Disk, InvitePolicy, KeyWindowReason, Person, ReplicaMode } from '../types'
+import type { AuditEvent, CachePolicy, Disk, KeyWindowReason, Person, ReplicaMode } from '../types'
 
 /** A person as the fake stores it; macCount and isMe are computed on read. */
 export type PersonRow = Omit<Person, 'macCount' | 'isMe'>
@@ -54,7 +54,6 @@ export interface FakeDb {
   version: 1
   organizationId: string
   organizationName: string
-  invitePolicy: InvitePolicy
   mail: { host: string; port: number; username: string; sender: string; passwordSet: boolean }
   storage: { endpoint: string; region: string; bucket: string }
   people: PersonRow[]
@@ -80,7 +79,7 @@ const HOUR = 60 * MIN
 const DAY = 24 * HOUR
 
 /** The fake's default cache options, the real defaults of docs/ARCHITECTURE.md. */
-export const DEFAULT_CACHE: CachePolicy = { expireDays: 30, keepUploadedBlocks: true, maxSizeGb: 100 }
+export const DEFAULT_CACHE: CachePolicy = { expireDays: 30 }
 
 const BUCKET = 'studio-esempio-floppy'
 const REGION = 'eu-south-mil'
@@ -98,7 +97,6 @@ export function seed(scenario: Scenario, now = Date.now()): FakeDb {
     version: 1,
     organizationId: 'org-studio-esempio',
     organizationName: 'Studio Esempio',
-    invitePolicy: 'admins',
     mail: { host: 'smtp.studio.example', port: 587, username: 'floppy@studio.example', sender: 'Floppy · Studio Esempio', passwordSet: true },
     storage: { endpoint: ENDPOINT, region: REGION, bucket: BUCKET },
     people: [],

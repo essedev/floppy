@@ -2,8 +2,8 @@
   FAKE API. An in-memory stand-in for the control plane, used while the backend does not
   exist (VITE_API=fake, the default of `pnpm dev`). It implements the same `Api` interface as
   http.ts with realistic latency, seeded data (seed.ts) and the rules the backend must keep:
-  members see only their own Macs, removing a person revokes their Macs and opens the key
-  window, the last admin cannot be demoted, a sign-in answers the same for unknown addresses.
+  members see only their own Macs, only admins invite, removing a person revokes their Macs
+  and opens the key window (revoking a Mac does too), the last admin cannot be demoted, a sign-in answers the same for unknown addresses.
 
   State persists in localStorage so reloads keep it; `fakeControl` resets it, switches the
   scenario, makes every call fail like a network outage, and exposes the last email "sent".
@@ -18,7 +18,7 @@ import { ApiError, type Api } from '../client'
 import type { AuditEvent, AuditQuery, Disk, KeyStatus, Mac, Person, Rotation, Session, StepState } from '../types'
 import { DEFAULT_CACHE, LATEST_APP, seed, type FakeDb, type MacRow, type PersonRow, type Scenario } from './seed'
 
-const DB_KEY = 'floppy.fake.db.v1'
+const DB_KEY = 'floppy.fake.db.v2'
 const SESSION_KEY = 'floppy.fake.session'
 const FAILING_KEY = 'floppy.fake.failing'
 const OUTBOX_KEY = 'floppy.fake.outbox'
@@ -320,8 +320,7 @@ export const fakeApi: Api = {
     },
     async invite({ email, role }) {
       await latency()
-      const me = requireUser()
-      if (me.role !== 'admin' && db.invitePolicy !== 'everyone') throw new ApiError(403, 'forbidden', 'Admins only')
+      const me = requireAdmin()
       const address = email.trim().toLowerCase()
       if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(address)) throw new ApiError(422, 'validation', 'Invalid email')
       let person = db.people.find((p) => p.email === address)
@@ -431,7 +430,7 @@ export const fakeApi: Api = {
       const disk = db.disks.find((d) => d.id === id)
       if (!disk) throw new ApiError(404, 'not_found', 'No such disk')
       if (body.trashDays !== undefined) disk.trashDays = body.trashDays
-      if (body.cache) disk.cache = { ...body.cache }
+      if (body.cache) disk.cache = { expireDays: body.cache.expireDays }
       log({ actor: actorOf(me), action: 'disk_updated', category: 'disks', target: { kind: 'disk', id, label: disk.name }, detail: {} })
       save()
       return structuredClone(disk)
@@ -509,7 +508,7 @@ export const fakeApi: Api = {
     async get() {
       await latency()
       requireAdmin()
-      return { organizationName: db.organizationName, mail: { ...db.mail }, storage: { ...db.storage }, invitePolicy: db.invitePolicy }
+      return { organizationName: db.organizationName, mail: { ...db.mail }, storage: { ...db.storage } }
     },
     async update(body) {
       await latency(400, 800)
@@ -523,10 +522,9 @@ export const fakeApi: Api = {
         db.mail = { ...mail, passwordSet: db.mail.passwordSet || !!password }
       }
       if (body.storage) db.storage = { ...body.storage }
-      if (body.invitePolicy) db.invitePolicy = body.invitePolicy
       log({ actor: actorOf(me), action: 'settings_updated', category: 'settings', target: { kind: 'organization', id: db.organizationId, label: db.organizationName }, detail: {} })
       save()
-      return { organizationName: db.organizationName, mail: { ...db.mail }, storage: { ...db.storage }, invitePolicy: db.invitePolicy }
+      return { organizationName: db.organizationName, mail: { ...db.mail }, storage: { ...db.storage } }
     },
     async testMail() {
       await latency(600, 1100)

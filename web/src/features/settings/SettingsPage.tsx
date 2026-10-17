@@ -1,18 +1,18 @@
 /*
   Organization settings (concept-e-admin, "Impostazioni"): the name, the SMTP server for
-  sign-in links with a test email, the S3 storage with a test write that changes nothing, and
-  who can invite. One form, saved together; tests run on what is typed, before saving.
+  sign-in links with a test email, and the S3 storage with a test write that changes nothing.
+  Only admins invite: there is no setting for it. One form, saved together; tests run on what is typed, before saving.
 */
 
 import { Mail } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 import { Button } from '@/components/Button'
-import { Led, Readout, State } from '@/components/detail'
-import { Choice, Field, Input } from '@/components/Field'
+import { Readout, State } from '@/components/detail'
+import { Field, Input } from '@/components/Field'
 import { useErrorText } from '@/components/error-text'
 import { PageHeader, QueryView, SkeletonLines } from '@/components/states'
 import { fmt, rich, useI18n } from '@/i18n'
-import { isApiError, type InvitePolicy, type Settings } from '@/lib/api'
+import { isApiError, type Settings } from '@/lib/api'
 import { useFlash } from '@/lib/hooks'
 import { useCurrentSession } from '@/features/auth/hooks'
 import { useProbeStorage, useSaveSettings, useSettings, useTestMail } from './hooks'
@@ -27,7 +27,6 @@ interface Form {
   endpoint: string
   region: string
   bucket: string
-  invitePolicy: InvitePolicy
 }
 
 const toForm = (s: Settings): Form => ({
@@ -40,7 +39,6 @@ const toForm = (s: Settings): Form => ({
   endpoint: s.storage.endpoint,
   region: s.storage.region,
   bucket: s.storage.bucket,
-  invitePolicy: s.invitePolicy,
 })
 
 function Section({ title, lead, children }: { title: string; lead?: string; children: ReactNode }) {
@@ -80,7 +78,6 @@ function SettingsForm({ settings }: { settings: Settings }) {
         organizationName: form.organizationName.trim(),
         mail: { host: form.host.trim(), port, username: form.username.trim(), sender: form.sender.trim(), password: form.password || undefined },
         storage: { endpoint: form.endpoint.trim(), region: form.region.trim(), bucket: form.bucket.trim() },
-        invitePolicy: form.invitePolicy,
       },
       {
         onSuccess: (next) => {
@@ -174,27 +171,6 @@ function SettingsForm({ settings }: { settings: Settings }) {
         )}
       </Section>
 
-      <Section title={t.settings.invitesTitle}>
-        <Choice
-          label={t.settings.invitesTitle}
-          value={form.invitePolicy}
-          onChange={set('invitePolicy')}
-          options={[
-            {
-              value: 'admins',
-              title: t.settings.admins,
-              hint: t.settings.adminsHint,
-              aside: (
-                <span className="inline-flex items-center gap-[7px]">
-                  <Led state="ok" />
-                  <Readout>{t.common.recommended}</Readout>
-                </span>
-              ),
-            },
-            { value: 'everyone', title: t.settings.everyone, hint: t.settings.everyoneHint },
-          ]}
-        />
-      </Section>
 
       <div className="flex flex-wrap items-center gap-2">
         <Button type="submit" variant="ink" busy={save.isPending} disabled={!dirty}>
