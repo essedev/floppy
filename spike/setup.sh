@@ -35,6 +35,12 @@ if garage layout show | grep -q "No nodes currently have a role"; then
   garage layout apply --version 1
 fi
 
+# The key is checked against Garage too: a Garage recreated from empty volumes
+# no longer knows the key left in .env.
+key_id=$(grep '^ACCESS_KEY=' .env | cut -d= -f2 || true)
+if [ -n "$key_id" ] && ! garage key info "$key_id" >/dev/null 2>&1; then
+  sed -i '' '/^ACCESS_KEY=/d; /^SECRET_KEY=/d' .env
+fi
 if ! grep -q '^ACCESS_KEY=' .env; then
   key_out=$(garage key create floppy-spike)
   key_id=$(echo "$key_out" | awk '/Key ID/ {print $NF}')
@@ -45,8 +51,9 @@ fi
 # but not the bucket.
 if ! garage bucket info floppy >/dev/null 2>&1; then
   garage bucket create floppy
-  garage bucket allow --read --write --owner floppy --key "$(grep '^ACCESS_KEY=' .env | cut -d= -f2)"
 fi
+# Granted on every run: the key may be newer than the bucket, and granting twice is harmless.
+garage bucket allow --read --write --owner floppy --key "$(grep '^ACCESS_KEY=' .env | cut -d= -f2)" >/dev/null
 
 toxi delete s3 >/dev/null 2>&1 || true
 toxi create -l 0.0.0.0:4501 -u garage:3900 s3
