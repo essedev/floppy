@@ -15,14 +15,25 @@ description: Installare l’app con Homebrew, accedere e trovare il disco nel Fi
 brew install --cask %cask%
 ```
 
-L’app non chiede la password di amministratore e non installa estensioni del kernel.
+L’app non chiede la password di amministratore e non installa estensioni del kernel. Tutto quello che serve al disco (l’immagine della VM Linux, JuiceFS, i pacchetti) è dentro l’app, quindi non si scarica nient’altro.
+
+L’app non è notarizzata da Apple: il cask le toglie il flag di quarantena e macOS la apre senza avvisi. Usa il nome completo qui sopra: dice anche a Homebrew di fidarsi di questo solo cask del tap.
 
 ## Primo avvio
 
 1. Apri **%name%** dalla cartella Applicazioni. La sua icona compare nella barra dei menu.
-2. Scegli **Accedi**: si apre il browser, inserisci la tua email e clicca il link che ricevi. L’app non chiede mai una password.
-3. L’app crea la VM Linux su questo Mac e mostra l’avanzamento. Ci vuole circa un minuto e mezzo e non scarica niente: tutto quello che serve è nell’app.
-4. Il disco compare nel Finder come **%name%**, sotto Posizioni, in `%volume%`.
+2. Se il tuo gruppo ha un suo server di %name%, inserisci il suo indirizzo nella finestra di accesso.
+3. Scegli **Accedi**: si apre il browser, inserisci la tua email e clicca il link che ricevi. L’app non chiede mai una password.
+4. Scegli **Installa %name%**: l’app copia il motore del disco su questo Mac, crea la VM Linux e mostra l’avanzamento. Ci vuole circa un minuto e mezzo e non scarica niente.
+5. Il disco compare nel Finder come **%name%**, sotto Posizioni, in `%volume%`.
+
+## Aggiornamenti
+
+```sh
+brew upgrade --cask %cask%
+```
+
+Dopo l’aggiornamento riapri l’app. Quando la nuova versione porta un motore nuovo, il pannello lo dice e lo applica quando scegli **Aggiorna ora**: il disco si riavvia, quindi prima salva e chiudi i progetti aperti. I file, la cache e le impostazioni del disco restano come sono.
 
 ## Lavorare con il disco
 
@@ -36,4 +47,4 @@ L’app non chiede la password di amministratore e non installa estensioni del k
 brew uninstall --cask %cask%
 ```
 
-TODO: non è ancora deciso se disinstallare il cask rimuove anche la VM e la cache, o se lo fa l’app dalle impostazioni.
+Così si rimuove solo l’app. Il disco su questo Mac, con la sua VM e la cache in `~/.%slug%`, resta, e reinstallando l’app lo ritrovi com’era. Per rimuovere anche quello, d’accordo con l’amministratore del gruppo, c’è `~/.%slug%/bin/%slug% uninstall`, che chiede conferma.

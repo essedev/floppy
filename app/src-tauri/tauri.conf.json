@@ -52,7 +52,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["app", "dmg"],
+    "targets": ["app"],
     "category": "Utility",
     "copyright": "Simone Salerno, MIT License",
     "icon": [

@@ -16,12 +16,13 @@ export const brand = {
   slug,
   /** The disk's mount point on the Mac. */
   volume: `/Volumes/${name}`,
-  /** Homebrew cask. TODO: the tap is not published yet; the final form may be `<tap>/<cask>`. */
+  /** Homebrew cask (source in packaging/homebrew/Casks). */
   cask: slug,
-  /** Homebrew tap the cask lives in, as concept-d-onboarding draws it (DECISIONS #10). */
-  tap: 'essedev/tap',
-  /** What `brew install --cask` takes: the cask through its tap. */
-  caskRef: `essedev/tap/${slug}`,
+  /** Homebrew tap the cask lives in, the GitHub repo essedev/homebrew-floppy (DECISIONS #10). */
+  tap: `essedev/${slug}`,
+  /** What `brew install --cask` takes: the fully qualified name, which also
+   *  grants Homebrew's tap trust to this cask alone. */
+  caskRef: `essedev/${slug}/${slug}`,
   repo: 'https://github.com/essedev/fluix',
   domain,
   /** The hosted service's admin web (web/), where the header's sign-in link goes. A

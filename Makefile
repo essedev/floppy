@@ -1,5 +1,6 @@
 SCRIPTS := macos/bin/floppy macos/install.sh macos/vm/guest/guest-install.sh \
-	macos/vm/guest/floppy-mount scripts/package.sh scripts/build-engine.sh spike/setup.sh spike/bench.sh spike/data-bench.sh spike/meta-bench.sh spike/meta-access.sh spike/meta-tls.sh \
+	macos/vm/guest/floppy-mount scripts/package.sh scripts/build-engine.sh scripts/build-app.sh \
+	scripts/release-app.sh packaging/homebrew/render.sh spike/setup.sh spike/bench.sh spike/data-bench.sh spike/meta-bench.sh spike/meta-access.sh spike/meta-tls.sh \
 	spike/juicefs-replica/build.sh spike/juicefs-replica/test.sh \
 	spike/drive/entrypoint.sh spike/drive/perdisk-entrypoint.sh app/scripts/render-marks.sh server/docker/db-init.sh
 
@@ -17,6 +18,9 @@ app-check: ## The menu bar app: typecheck and build, frontend and Rust tests, cl
 	cd app && pnpm install --frozen-lockfile && pnpm build && pnpm test
 	cd app && cargo clippy --all-targets -- -D warnings && cargo test
 
+app: ## Floppy.app with the engine inside and the cask's DMG, in dist/app (needs Docker)
+	scripts/build-app.sh
+
 web-check: ## The admin web: typecheck, lint and build
 	cd web && pnpm install --frozen-lockfile && pnpm typecheck && pnpm lint && pnpm build
 
@@ -28,4 +32,4 @@ site-check: ## The site: Astro check and build
 
 check: lint app-check web-check server-check site-check ## The full quality pass
 
-.PHONY: help lint app-check web-check server-check site-check check
+.PHONY: help lint app-check app web-check server-check site-check check
