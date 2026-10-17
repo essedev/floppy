@@ -1,6 +1,10 @@
 # Database schema
 
-The control plane's data model, in PostgreSQL. **Status: built (phase 1)**: `server/`, models in `server/src/floppy_server/models.py`, migration `0001_initial`. The storage modes and the mail language are designed here for phase 2 and marked **(0002)**: they are not in the database yet, and [Migration 0002](#migration-0002) lists exactly what changes. The design started as the paper of ROADMAP 3, written from the team architecture ([architecture.html](architecture.html), sections 06 to 11), the concepts ([concept-d-onboarding](concepts/concept-d-onboarding.html), [concept-e-admin](concepts/concept-e-admin.html)) and the admin web's API contract (`web/src/lib/api/types.ts`, `http.ts`, and the rules the fake in `web/src/lib/api/fake/` keeps). Once the first migration exists, this file changes in the same commit as every migration.
+The control plane's data model, in PostgreSQL. **Status: built (phases 1 and 2)**: `server/`, models in `server/src/floppy_server/models.py`, migrations `0001_initial` and `0002`. What `0002` added is marked (0002) and listed in [Migration 0002](#migration-0002).
+
+**Being verified, and will change parts of this file**: per-disk permissions, which need one Valkey instance and one bucket per disk instead of one per organization. Today a Mac's replica copies the whole instance and a key reaches the whole bucket, so access is all or nothing (DECISIONS #19); if per-disk access lands, `volumes` takes over the bucket and the Valkey instance that `organizations` holds now, and Valkey users and keys become per disk.
+
+The design started as the paper of ROADMAP 3, written from the team architecture ([architecture.html](architecture.html), sections 06 to 11), the concepts ([concept-d-onboarding](concepts/concept-d-onboarding.html), [concept-e-admin](concepts/concept-e-admin.html)) and the admin web's API contract (`web/src/lib/api/types.ts`, `http.ts`, and the rules the fake in `web/src/lib/api/fake/` keeps). Once the first migration exists, this file changes in the same commit as every migration.
 
 The control plane is AGPL-3.0 (DECISIONS #3), FastAPI with SQLAlchemy 2.0 async and Alembic, and stays off the data path (DECISIONS #2): nothing in these tables is read when a Mac lists a folder or reads a clip.
 
@@ -56,12 +60,12 @@ Every row except `users` and `sign_in_requests` carries `organization_id uuid NO
 
 ## Storage modes
 
-**(0002)** Each organization stores its files in one of two modes, and within each mode keys have a scope (DECISIONS #22). The core always speaks plain S3; what changes is who creates the bucket and the keys, and how far one key reaches.
+(0002) Each organization stores its files in one of two modes, and within each mode keys have a scope (DECISIONS #22). The core always speaks plain S3; what changes is who creates the bucket and the keys, and how far one key reaches.
 
 | | Manual | Managed |
 |---|---|---|
 | Who creates the bucket and keys | The admin, in the provider's console | An optional provider adapter, through the provider's API |
-| Providers | Any S3 | OVH, AWS, MinIO, Garage to start (Garage is what the spike and development use) |
+| Providers | Any S3 | Garage is built (the spike and development use it); OVH, AWS and MinIO are designed and refused by the bootstrap until their adapters exist |
 | Key scopes (`storage_key_scope`) | `team`: one key, simple, rotated by hand when someone leaves. `person`: one key per person, created by the admin, limited to the bucket by a policy, pasted when inviting | `device`: one key per Mac, the default. `person` where per-Mac keys are too many for the provider's quotas. `team` where the provider cannot scope keys at all, rotated by the adapter |
 | What the metadata holds | `team`: the key. `person`: none | `device`, `person`: none. `team`: the key |
 | Where a Mac gets its key | `team`: the volume's format, through the replica. `person`: from the control plane at registration and at every change, into the Keychain | The same, by scope |
@@ -73,8 +77,8 @@ Every row except `users` and `sign_in_requests` carries `organization_id uuid NO
 **Keys outside the format depend on JuiceFS** (checked in the v1.4.1 source and, by the backend, against Garage):
 
 - `juicefs mount` cannot override a key stored in the format: `updateFormat` in `cmd/mount.go` overrides the bucket, the storage type, the storage class, the tag and the bandwidth limits, nothing else.
-- `juicefs config` and `juicefs format` on an existing volume change only the flags passed on the command line (`ctx.LocalFlagNames()` in `cmd/config.go` and `cmd/format.go`); `ACCESS_KEY` and `SECRET_KEY` from the environment count only for a new format, which then stores them. Rotating a team key from the control plane would therefore put the secret in argv, visible in `ps`: **patch 0003** (being written) makes `config` and `format` take the key from the environment.
-- When the format holds **no** access key, the `s3` storage builds its client from the AWS SDK's default chain (`config.LoadDefaultConfig` in `pkg/object/s3.go`): `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` in the mount's environment, or a shared credentials file. This is the path for `person` and `device` keys: the control plane formats with `--storage s3`, no `--access-key`, and its own key in `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` (never in `ACCESS_KEY`, which a new format would store); each Mac mounts with its key in the environment of `juicefs mount`, from a `0600` file in the VM that the app writes from the Keychain. If this does not hold against Garage and OVH, a patch (0003 or 0004) lets `juicefs mount` take the key from the environment. **Per-person and per-Mac keys ship only once one of the two is proven.**
+- `juicefs config` and `juicefs format` on an existing volume change only the flags passed on the command line (`ctx.LocalFlagNames()` in `cmd/config.go` and `cmd/format.go`); `ACCESS_KEY` and `SECRET_KEY` from the environment count only for a new format, which then stores them. Rotating a team key from the control plane would therefore put the secret in argv, visible in `ps`: patch 0003 (in `spike/juicefs-replica/`) makes `config` and `format` take the key from the environment.
+- When the format holds **no** access key, the `s3` storage builds its client from the AWS SDK's default chain (`config.LoadDefaultConfig` in `pkg/object/s3.go`): `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` in the mount's environment, or a shared credentials file. This is the path for `person` and `device` keys: the control plane formats with `--storage s3`, no `--access-key`, and its own key in `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` (never in `ACCESS_KEY`, which a new format would store); each Mac mounts with its key in the environment of `juicefs mount`, from a `0600` file in the VM that the app writes from the Keychain. A format with no key, made this way, is tested against Garage through the real JuiceFS (`server/tests/test_juicefs_s3.py`); a mount that reads its key from the environment is still to prove on the Mac's side, against Garage and OVH, and if it does not hold a patch 0004 makes `juicefs mount` take it. **Per-person and per-Mac keys reach the Macs only once that is proven.** Patch 0003 is built: `juicefs config` and `format` take the key from the environment, so a team rotation keeps it out of argv.
 
 Consequences: with `person` or `device` keys a replica, on a revoked Mac or anywhere, carries no S3 credential; the SDK reads the key once, so a new key means remounting that Mac's disks inside the VM, which the app does when no file is open; `juicefs gc`, `fsck` and `dump` run by the control plane use its own key the same way. MinIO is formatted with `--storage s3` too, since `--storage minio` reads `MINIO_ACCESS_KEY` instead.
 
@@ -137,11 +141,11 @@ A tenant: a team with its bucket and its Valkey instance.
 | `smtp_host`, `smtp_username`, `smtp_sender` | `text` | yes | | Null: the instance's SMTP from the environment |
 | `smtp_port` | `integer` | yes | | `CHECK (smtp_port BETWEEN 1 AND 65535)`; `CHECK ((smtp_host IS NULL) = (smtp_port IS NULL))` |
 | `smtp_password_enc` | `bytea` | yes | | Encrypted; write only through the API (`passwordSet` is `smtp_password_enc IS NOT NULL`) |
-| `mail_language` | `text` | | `'it'` | **(0002)** `CHECK IN ('it', 'en')`. The language of every mail sent for this organization: invitations, sign-in links and codes (web and app), the test mail. Set at creation from whoever creates it (the bootstrap's `FLOPPY_ORG_LANGUAGE`, the creator's choice in the hosted service), changed in Settings. A sign-in for an address in no organization uses the request's `Accept-Language` (Italian or English), falling back to the instance's default |
-| `storage_mode` | `text` | | `'manual'` | **(0002)** `CHECK IN ('manual', 'managed')`. See [Storage modes](#storage-modes) |
-| `storage_provider` | `text` | yes | | **(0002)** `CHECK IN ('ovh', 'aws', 'minio', 'garage')`; `CHECK ((storage_mode = 'managed') = (storage_provider IS NOT NULL))` |
-| `storage_key_scope` | `text` | | `'team'` | **(0002)** `CHECK IN ('team', 'person', 'device')`; `CHECK (storage_mode = 'managed' OR storage_key_scope IN ('team', 'person'))`. Chosen by the admin in manual mode, from what the adapter can do in managed mode, at creation; stored so it never changes under existing formats |
-| `storage_admin_credentials_enc` | `bytea` | yes | | **(0002)** Encrypted like the other secrets: the adapter's credentials as JSON (OVH application key, secret and consumer key with the project id; an AWS key allowed to manage IAM users and the bucket; a MinIO admin user; a Garage admin token and endpoint). Null in a managed organization means the instance's environment, as in the hosted service where the operator's account serves every organization. `CHECK (storage_mode = 'managed' OR storage_admin_credentials_enc IS NULL)` |
+| `mail_language` | `text` | | `'it'` | (0002) `CHECK IN ('it', 'en')`. The language of every mail sent for this organization: invitations, sign-in links and codes (web and app), the test mail. Set at creation (the bootstrap's `FLOPPY_BOOTSTRAP_MAIL_LANGUAGE`, the creator's choice in the hosted service), changed in Settings (`mailLanguage`). A sign-in for an address in no organization uses the request's `Accept-Language` (Italian or English), falling back to `FLOPPY_DEFAULT_MAIL_LANGUAGE` |
+| `storage_mode` | `text` | | `'manual'` | (0002) `CHECK IN ('manual', 'managed')`. See [Storage modes](#storage-modes) |
+| `storage_provider` | `text` | yes | | (0002) `CHECK IN ('ovh', 'aws', 'minio', 'garage')`; `CHECK ((storage_mode = 'managed') = (storage_provider IS NOT NULL))` |
+| `storage_key_scope` | `text` | | `'team'` | (0002) `CHECK IN ('team', 'person', 'device')`; `CHECK (storage_mode = 'managed' OR storage_key_scope IN ('team', 'person'))`. Chosen by the admin in manual mode, from what the adapter can do in managed mode, at creation; stored so it never changes under existing formats |
+| `storage_admin_credentials_enc` | `bytea` | yes | | (0002) Encrypted like the other secrets: the adapter's credentials as JSON (OVH application key, secret and consumer key with the project id; an AWS key allowed to manage IAM users and the bucket; a MinIO admin user; a Garage admin token and endpoint). Null in a managed organization means the instance's environment (`FLOPPY_GARAGE_ADMIN_URL` and `FLOPPY_GARAGE_ADMIN_TOKEN` for Garage), as in the hosted service where the operator's account serves every organization. `CHECK (storage_mode = 'managed' OR storage_admin_credentials_enc IS NULL)` |
 | `created_at`, `updated_at` | `timestamptz` | | `now()` | |
 | `deleted_at` | `timestamptz` | yes | | |
 
@@ -161,8 +165,8 @@ What the control plane last saw of the organization's services, for `GET /health
 | `metadata_checked_at` | `timestamptz` | yes | | |
 | `storage_state` | `text` | | `'ok'` | `CHECK IN ('ok', 'failing')` |
 | `storage_probed_at` | `timestamptz` | yes | | Last test write: settings probe, rotation probe or the periodic one |
-| `bucket_versioning` | `text` | | `'unknown'` | **(0002)** `CHECK IN ('enabled', 'suspended', 'off', 'unknown')`, read at every probe ([Storage modes](#storage-modes)) |
-| `bucket_old_versions_days` | `integer` | yes | | **(0002)** Days after which the lifecycle rule expires old versions; null when there is none or it could not be read |
+| `bucket_versioning` | `text` | | `'unknown'` | (0002) `CHECK IN ('enabled', 'suspended', 'off', 'unknown')`, read at every probe ([Storage modes](#storage-modes)) |
+| `bucket_old_versions_days` | `integer` | yes | | (0002) Days after which the lifecycle rule expires old versions; null when there is none or it could not be read |
 | `mail_state` | `text` | | `'unconfigured'` | `CHECK IN ('ok', 'unconfigured', 'failing')` |
 | `mail_sent_at` | `timestamptz` | yes | | Last mail accepted by the SMTP server |
 | `updated_at` | `timestamptz` | | `now()` | |
@@ -292,7 +296,7 @@ Indexes: `(membership_id) WHERE revoked_at IS NULL`, to revoke every session of 
 
 ### devices
 
-A Mac: the app's device token and the Mac's own Valkey user (DECISIONS #7). The API's `Mac`.
+A Mac: the app's device token and the Mac's own Valkey user (DECISIONS #7). The API calls it a device (`DeviceOut`, `/devices`), since `0002`; the prose here says Mac for the machine.
 
 | Column | Type | Null | Default | Notes |
 |---|---|---|---|---|
@@ -337,7 +341,7 @@ What each Mac last reported in its heartbeat. One row per device, overwritten.
 | `replica_lag_ms` | `integer` | yes | | |
 | `s3_access_key_tail` | `text` | yes | | The key its mounts use: with a team key, read from the format on its replica, and it counts the Macs that picked up a rotation; with `person` or `device` scope, the tail of the key it was given |
 | `mounted_volume_ids` | `uuid[]` | | `'{}'` | The disks whose JuiceFS mount is up inside the VM, each a folder of the one share (see [Disks on a Mac](#disks-on-a-mac)). For `Disk.mountedBy`. No foreign key: an observation, replaced at every heartbeat |
-| `outdated_logged_version` | `text` | yes | | The version for which `mac_seen_outdated` was logged, so it is logged once |
+| `outdated_logged_version` | `text` | yes | | The version for which `device_seen_outdated` was logged, so it is logged once |
 | `updated_at` | `timestamptz` | | `now()` | |
 
 Separate from `devices` on purpose: a heartbeat every 30-60 seconds per Mac rewrites this row, while `devices` holds credentials and changes rarely. The table is created with `fillfactor = 70` so these updates stay HOT (no index churn). Indexes: `(organization_id, last_seen_at DESC)`, and a GIN index on `mounted_volume_ids`.
@@ -371,7 +375,7 @@ Indexes:
 - `UNIQUE (organization_id, volume_name)` over every row: the objects of a deleted disk stay under that prefix, and a new volume there would collide with them (the gotcha of a reinstall with the same `VOLUME_NAME`).
 - `UNIQUE (organization_id, meta_db)` over every row: a deleted disk's tree stays in its database; reusing the number would hand a new disk an old tree.
 
-Constraints also include `CHECK (state <> 'ready' OR (s3_key_id IS NOT NULL AND juicefs_uuid IS NOT NULL))`; **(0002)** it becomes `CHECK (state <> 'ready' OR juicefs_uuid IS NOT NULL)`, since with `person` or `device` scope a volume is ready with no key in its format.
+Constraints also include `CHECK (state <> 'ready' OR (s3_key_id IS NOT NULL AND juicefs_uuid IS NOT NULL))`; (0002) it becomes `CHECK (state <> 'ready' OR juicefs_uuid IS NOT NULL)`, since with `person` or `device` scope a volume is ready with no key in its format.
 
 Creating a disk is an **asynchronous job**: under the organization's lock, allocate the lowest `meta_db` never used (at most `valkey_databases - 1`, otherwise `disk_limit_reached`) and insert as `creating`; `POST /disks` answers `201` with that row. A background job then runs `juicefs format` and sets `ready`, `juicefs_uuid` and, with a team key, `s3_key_id`. If the format fails, or the job finds a `creating` row it was interrupted on, the row becomes `failed` with `format_error` and is soft deleted; `GET /disks/{id}` still shows it, so the web can say why. Its number and prefix stay burned: a half-written format must never be reused.
 
@@ -408,20 +412,20 @@ The organization's S3 keys, one row per key ever pasted or created (DECISIONS #2
 | `organization_id` | `uuid` | | | |
 | `access_key_id` | `text` | | | Not a secret, needed for `juicefs config` |
 | `access_key_tail` | `text` | | generated | `GENERATED ALWAYS AS (right(access_key_id, 5)) STORED`: all the API ever shows |
-| `secret_key_enc` | `bytea` | yes | | Encrypted (see [Secrets](#secrets)). Wiped to null when the key is retired or rejected: the provider deleted it, and nothing needs it again. **(0002)** Kept for a person's key, which every new Mac of that person receives; never stored for a Mac's own key, which is returned once at registration |
-| `holder` | `text` | | `'team'` | **(0002)** `CHECK IN ('team', 'person', 'device', 'control_plane')`. `team`: the key in the formats. `person`: one person's key, given to each of their Macs. `device`: one Mac's own key. `control_plane`: with `person` or `device` scope, the control plane's own key for `juicefs format`, the probe and maintenance, never given to a Mac |
-| `membership_id` | `uuid` | yes | | **(0002)** Composite foreign key to `memberships`; `CHECK ((holder = 'person') = (membership_id IS NOT NULL))` |
-| `device_id` | `uuid` | yes | | **(0002)** Composite foreign key to `devices`; `CHECK ((holder = 'device') = (device_id IS NOT NULL))` |
-| `origin` | `text` | | `'pasted'` | **(0002)** `CHECK IN ('pasted', 'provider')`: pasted by an admin, or created by the adapter |
-| `provider_ref` | `text` | yes | | **(0002)** The provider's id to delete the key with (Garage key id, IAM user name, MinIO account, OVH user id). `CHECK ((origin = 'provider') = (provider_ref IS NOT NULL))` |
+| `secret_key_enc` | `bytea` | yes | | Encrypted (see [Secrets](#secrets)). Wiped to null when the key is retired or rejected: the provider deleted it, and nothing needs it again. (0002) Kept for a person's key, which every new Mac of that person receives; never stored for a Mac's own key, which is returned once at registration |
+| `holder` | `text` | | `'team'` | (0002) `CHECK IN ('team', 'person', 'device', 'control_plane')`. `team`: the key in the formats. `person`: one person's key, given to each of their Macs. `device`: one Mac's own key. `control_plane`: with `person` or `device` scope, the control plane's own key for `juicefs format`, the probe and maintenance, never given to a Mac |
+| `membership_id` | `uuid` | yes | | (0002) Composite foreign key to `memberships`; `CHECK ((holder = 'person') = (membership_id IS NOT NULL))` |
+| `device_id` | `uuid` | yes | | (0002) Composite foreign key to `devices`; `CHECK ((holder = 'device') = (device_id IS NOT NULL))` |
+| `origin` | `text` | | `'pasted'` | (0002) `CHECK IN ('pasted', 'provider')`: pasted by an admin, or created by the adapter |
+| `provider_ref` | `text` | yes | | (0002) The provider's id to delete the key with (Garage key id, IAM user name, MinIO account, OVH user id). `CHECK ((origin = 'provider') = (provider_ref IS NOT NULL))` |
 | `state` | `text` | | `'pending'` | `CHECK IN ('pending', 'active', 'retiring', 'retired', 'rejected')` |
 | `created_by_user_id` | `uuid` | yes | | Null for the bootstrap key |
 | `created_at` | `timestamptz` | | `now()` | |
 | `activated_at`, `retiring_at`, `retired_at`, `rejected_at` | `timestamptz` | yes | | One per state reached |
 
-Constraints: `CHECK ((state IN ('retired', 'rejected')) = (secret_key_enc IS NULL))`; **(0002)** it becomes `CHECK ((holder = 'device' OR state IN ('retired', 'rejected')) = (secret_key_enc IS NULL))`: a person's key keeps its secret until retired, a Mac's never has one here.
+Constraints: `CHECK ((state IN ('retired', 'rejected')) = (secret_key_enc IS NULL))`; (0002) it becomes `CHECK ((holder = 'device' OR state IN ('retired', 'rejected')) = (secret_key_enc IS NULL))`: a person's key keeps its secret until retired, a Mac's never has one here.
 
-Indexes: `UNIQUE (organization_id) WHERE state = 'active'`: one key in use; `UNIQUE (organization_id, access_key_id) WHERE state IN ('pending', 'active', 'retiring')`. **(0002)** The first becomes `UNIQUE (organization_id) WHERE state = 'active' AND holder IN ('team', 'control_plane')`, joined by `UNIQUE (device_id) WHERE holder = 'device' AND state IN ('pending', 'active')` and `UNIQUE (membership_id) WHERE holder = 'person' AND state IN ('pending', 'active')` (one live key per Mac or person) and `(organization_id) WHERE origin = 'provider' AND state = 'retiring'`, for the reconciler that deletes keys at the provider.
+Indexes: `UNIQUE (organization_id) WHERE state = 'active'`: one key in use; `UNIQUE (organization_id, access_key_id) WHERE state IN ('pending', 'active', 'retiring')`. (0002) The first becomes `UNIQUE (organization_id) WHERE state = 'active' AND holder IN ('team', 'control_plane')`, joined by `UNIQUE (device_id) WHERE holder = 'device' AND state IN ('pending', 'active')` and `UNIQUE (membership_id) WHERE holder = 'person' AND state IN ('pending', 'active')` (one live key per Mac or person) and `(organization_id) WHERE origin = 'provider' AND state = 'retiring'`, for the reconciler that deletes keys at the provider.
 
 For a Mac's or a person's key the states read: `pending` created or pasted and not yet probed, `active` in use, `retiring` its Mac or person lost access, or it was replaced, and the deletion at the provider is owed (by the admin in manual mode, who confirms it; by the adapter in managed mode), `retired` deleted. A `retiring` person or Mac key is what the admin web shows as "delete this key at the provider": the key window of those scopes, one key wide. Manual `person` keys are pasted with `origin = 'pasted'` and no `provider_ref`.
 
@@ -440,8 +444,8 @@ A rotation of the team key: probe write with the new key, `juicefs config` on ea
 | `probe_state` | `text` | | `'pending'` | `CHECK IN ('pending', 'running', 'done', 'failed')` |
 | `probe_error_code`, `probe_error_request` | `text` | yes | | The provider's answer, e.g. `AccessDenied`, `PUT /<bucket>/floppy-probe-7f3a` |
 | `macs_total` | `integer` | | | Macs connected when it started; `Rotation.macs.updated` counts those whose `device_status.s3_access_key_tail` shows the new key |
-| `started_by_user_id` | `uuid` | yes | | **(0002)** nullable: null when the adapter starts it after a revocation |
-| `trigger` | `text` | | `'admin'` | **(0002)** `CHECK IN ('admin', 'revocation')`; `CHECK ((trigger = 'admin') = (started_by_user_id IS NOT NULL))` |
+| `started_by_user_id` | `uuid` | yes | | (0002) nullable: null when the adapter starts it after a revocation |
+| `trigger` | `text` | | `'admin'` | (0002) `CHECK IN ('admin', 'revocation')`; `CHECK ((trigger = 'admin') = (started_by_user_id IS NOT NULL))` |
 | `started_at` | `timestamptz` | | `now()` | |
 | `applied_at`, `failed_at`, `superseded_at`, `closed_at` | `timestamptz` | yes | | |
 | `closed_by_user_id` | `uuid` | yes | | Null when the adapter deleted the old key and closed it |
@@ -473,15 +477,15 @@ Why the key window is open: someone who could read the key no longer has access.
 |---|---|---|---|---|
 | `id` | `uuid` | | `uuidv7()` | Primary key |
 | `organization_id` | `uuid` | | | |
-| `kind` | `text` | | | `CHECK IN ('person_removed', 'mac_revoked')` |
+| `kind` | `text` | | | `CHECK IN ('person_removed', 'device_revoked')`; `mac_revoked` until `0002`, which rewrote the rows |
 | `membership_id` | `uuid` | yes | | Set for `person_removed` |
-| `device_id` | `uuid` | yes | | Set for `mac_revoked` |
+| `device_id` | `uuid` | yes | | Set for `device_revoked` |
 | `label` | `text` | | | The person's or the Mac's name at that moment |
 | `occurred_at` | `timestamptz` | | `now()` | |
 | `closed_at` | `timestamptz` | yes | | |
 | `closed_by_rotation_id` | `uuid` | yes | | Composite foreign key to `key_rotations` |
 
-Constraints: `CHECK ((kind = 'person_removed') = (membership_id IS NOT NULL))`, `CHECK ((kind = 'mac_revoked') = (device_id IS NOT NULL))`, `CHECK ((closed_at IS NULL) = (closed_by_rotation_id IS NULL))`.
+Constraints: `CHECK ((kind = 'person_removed') = (membership_id IS NOT NULL))`, `CHECK ((kind = 'device_revoked') = (device_id IS NOT NULL))`, `CHECK ((closed_at IS NULL) = (closed_by_rotation_id IS NULL))`.
 
 Indexes: `(organization_id) WHERE closed_at IS NULL`. The window is open while one such row exists; `openedAt` is the oldest `occurred_at`.
 
@@ -500,8 +504,8 @@ The audit log: append only.
 | `actor_user_id` | `uuid` | yes | | Foreign key to `users`; `CHECK ((actor_kind = 'person') = (actor_user_id IS NOT NULL))` |
 | `actor_label` | `text` | yes | | The actor's name or address at that moment |
 | `action` | `text` | | | `CHECK IN (...)` with the list below |
-| `category` | `text` | | | `CHECK IN ('access', 'people', 'macs', 'key', 'disks', 'settings')`. Fixed by the action in code; stored to filter with an index |
-| `target_kind` | `text` | | | `CHECK IN ('person', 'mac', 'disk', 'key', 'organization')` |
+| `category` | `text` | | | `CHECK IN ('access', 'people', 'devices', 'key', 'disks', 'settings')` (`macs` until `0002`). Fixed by the action in code; stored to filter with an index |
+| `target_kind` | `text` | | | `CHECK IN ('person', 'device', 'disk', 'key', 'organization')` (`mac` until `0002`) |
 | `target_id` | `uuid` | | | The user, device, volume, key or organization id |
 | `target_label` | `text` | | | The target's name at that moment: a removed person or a revoked Mac still reads right years later |
 | `detail` | `jsonb` | | `'{}'` | Small facts (`{"role": "member"}`, `{"appVersion": "0.4.0"}`); `CHECK (jsonb_typeof(detail) = 'object')` |
@@ -517,9 +521,9 @@ Append only, twice: the application role has only `INSERT` and `SELECT` on this 
 | S3 secret key | `s3_keys.secret_key_enc` | Encrypted | The control plane must use it (format, probe). Wiped when the key is retired |
 | Valkey admin password (hosted) | `organizations.valkey_admin_password_enc` | Encrypted | Used to manage ACL users and run `juicefs`. Self-hosted: null, taken from the environment |
 | SMTP password | `organizations.smtp_password_enc` | Encrypted | Used to send. Null: the environment's |
-| Storage adapter's admin credentials | `organizations.storage_admin_credentials_enc` **(0002)** | Encrypted | Used to create buckets and keys and delete them. Null in a managed organization: the environment's |
-| A person's S3 secret | `s3_keys.secret_key_enc` **(0002)** | Encrypted | Each new Mac of that person receives it. Wiped when retired |
-| A Mac's own S3 secret | Not in PostgreSQL **(0002)** | | Created by the adapter, returned once to the app with the Valkey password; `s3_keys` keeps its id and tail. A lost Keychain means a new key, the old one deleted |
+| Storage adapter's admin credentials | `organizations.storage_admin_credentials_enc` (0002) | Encrypted | Used to create buckets and keys and delete them. Null in a managed organization: the environment's |
+| A person's S3 secret | `s3_keys.secret_key_enc` (0002) | Encrypted | Each new Mac of that person receives it. Wiped when retired |
+| A Mac's own S3 secret | Not in PostgreSQL (0002) | | Created by the adapter, returned once to the app with the Valkey password; `s3_keys` keeps its id and tail. A lost Keychain means a new key, the old one deleted |
 | Valkey password of each Mac | `devices.valkey_password_sha256` | SHA-256, the form Valkey keeps | Generated by the control plane, returned once to the app, never stored in clear. The hash rebuilds ACL users (see [devices](#devices)) |
 | Device token | `devices.token_hash` | SHA-256 | 256 random bits: a fast hash is enough, nobody can guess the preimage |
 | Session cookie | `web_sessions.token_hash` | SHA-256 | Same |
@@ -535,24 +539,24 @@ Append only, twice: the application role has only `INSERT` and `SELECT` on this 
 
 ## Audit log
 
-What it records (the `CHECK` list in `0001`; rows marked **(0002)** are still to add):
+What it records, the `CHECK` list after `0002` (which renamed the Mac actions to device ones and rewrote existing rows, `person_removed`'s `{macs}` included):
 
 | Action | Category | Actor | Target | Detail |
 |---|---|---|---|---|
-| `organization_created` | settings | operator or system | organization | `{storageMode, provider}`: the bootstrap or the hosted service's command. **(0002)** in the `CHECK` list |
+| `organization_created` (0002) | settings | operator or system | organization | `{storageMode, provider}`: the bootstrap or the hosted service's command |
 | `signed_in` | access | person | person | `{via: "link" \| "code" \| "invitation", kind: "web" \| "app"}` |
 | `sign_in_locked` | access | system | person | `{}`: five wrong codes on a known address |
 | `person_invited`, `invite_resent` | people | person | person | `{role}` |
 | `invite_accepted` | people | person | person | `{}` |
 | `role_changed` | people | person | person | `{from, to}` |
-| `person_removed` | people | person | person | `{macs}` |
-| `mac_registered` | macs | person | mac | `{appVersion, macosVersion}`, plus `{reissued: 1}` when an active Mac got new credentials |
-| `key_created` **(0002)** | key | person or system | key | `{holder, accessKeyTail, for}`: a person's key pasted or created, a Mac's key created |
-| `key_deleted` **(0002)** | key | person or system | key | `{holder, accessKeyTail, by: "admin" \| "adapter"}`: a person's or a Mac's key deleted at the provider, confirmed by the admin or done by the adapter |
-| `mac_revoked` | macs | person or system | mac | `{reason}` |
-| `mac_signed_out` | macs | person | mac | `{}`: "Esci" in the app, no key window |
-| `mac_seen_outdated` | macs | system | mac | `{appVersion}` |
-| `key_rotation_started` | key | person, or system **(0002)** | key | `{newKeyTail, oldKeyTail}`, plus `{trigger: "revocation"}` when the adapter starts it |
+| `person_removed` | people | person | person | `{devices}` |
+| `device_registered` | devices | person | device | `{appVersion, macosVersion}`, plus `{reissued: 1}` when an active Mac got new credentials |
+| `key_created` (0002) | key | person or system | key | `{holder, accessKeyTail, for}`, `for` the person's or the Mac's name: a person's key pasted or created, a Mac's key created |
+| `key_deleted` (0002) | key | person or system | key | `{holder, accessKeyTail, by: "admin" \| "adapter"}`: a person's or a Mac's key deleted at the provider, confirmed by the admin or done by the adapter |
+| `device_revoked` | devices | person or system | device | `{reason}` |
+| `device_signed_out` | devices | person | device | `{}`: "Esci" in the app, no key window |
+| `device_seen_outdated` | devices | system | device | `{appVersion}` |
+| `key_rotation_started` | key | person, or system (0002) | key | `{newKeyTail, oldKeyTail}`, plus `{trigger: "revocation"}` when the adapter starts it (0002) |
 | `key_rotated` | key | system | key | `{disks}`: every disk configured |
 | `key_rotation_failed` | key | system | key | `{step, code}` |
 | `key_window_closed` | key | person, or system when the adapter deleted the old key | key | `{oldKeyTail, reasons}` |
@@ -611,10 +615,10 @@ Expired is `pending` past `expires_at` (the API's `expired`; `superseded` is als
 
 | From | To | When |
 |---|---|---|
-| (none) | `applying` | `POST /key/rotations`: new key `pending`, one step per `ready` disk. **(0002)** In a managed organization with a team key, also started by the adapter two minutes after the last revocation (`trigger = 'revocation'`), so removing a person with three Macs makes one rotation; the adapter creates the new key itself, and an admin's "rotate now" sends no key |
+| (none) | `applying` | `POST /key/rotations`: new key `pending`, one step per `ready` disk. (0002) In a managed organization with a team key, also started by the adapter two minutes after the last revocation (`trigger = 'revocation'`), so removing a person with three Macs makes one rotation; the adapter creates the new key itself, and an admin's "rotate now" sends no key |
 | `applying` | `awaiting_old_key_deletion` | Probe done and every disk `done`: new key `active`, old key `retiring`. The Macs count is shown, not waited for: a Mac switched off would block the rotation forever |
 | `applying` | `failed` | Probe failed (new key `rejected`) or a disk failed |
-| `awaiting_old_key_deletion` | `closed` | Manual: `POST /key/rotations/{id}/close`. **(0002)** Managed: the adapter deletes the old key at the provider and closes it. Every `retiring` key becomes `retired`, exposures closed |
+| `awaiting_old_key_deletion` | `closed` | Manual: `POST /key/rotations/{id}/close`. (0002) Managed: the adapter deletes the old key at the provider and closes it. Every `retiring` key becomes `retired`, exposures closed |
 | `awaiting_old_key_deletion` | `superseded` | A new rotation starts before the close: its keys stay `retiring` until the new one closes |
 
 A rotation that failed after some disks were configured leaves those disks on the new key (`volumes.s3_key_id` says which): starting again with the same access key reuses its `pending` row and configures the rest; `juicefs config` is idempotent.
@@ -632,29 +636,29 @@ The admin web's contract (`web/src/lib/api/http.ts`, under `/api/v1`), as built 
 | `POST /auth/sign-in/{id}/code` | `sign_in_requests` | `code_attempts` or `completed`; `users.last_sign_in_at` and `name`; membership `invited` to `active`; `invitations`; `web_sessions`; `audit_events` |
 | `POST /auth/magic-link` | `sign_in_requests` by `link_token_hash` | As above, `completed_via = 'link'` |
 | `POST /auth/invitation` `{token}` | `invitations` by `token_hash`, `memberships` | Invitation `accepted`, membership `active`, `users.name` if empty, `web_sessions` with `invitation_id`, `audit_events` (`invite_accepted`, `signed_in` via `invitation`): the invitation link opens a session directly |
-| `GET /session` | `web_sessions`, `memberships`, `users`, `organizations`, counts of `volumes`, `memberships`, `devices` | `web_sessions.last_seen_at`, at most every 5 minutes |
+| `GET /session` | `web_sessions`, `memberships`, `users`, `organizations`, counts of `volumes`, `memberships`, `devices` (`diskCount`, `peopleCount`, `deviceCount`) | `web_sessions.last_seen_at`, at most every 5 minutes |
 | `DELETE /session` | | `web_sessions.revoked_at` |
-| `GET /people` (admin) | `memberships` (latest per user), `users`, `invitations`, count of non-revoked `devices` | |
-| `POST /people` (admin) | `users` by email, `memberships` | `users` if new, `memberships`, `invitations`, `audit_events`, the mail. **(0002)** Manual `person` scope: the request carries the person's key, probed before anything is written (`probe_failed`); managed `person` scope: the adapter creates it |
+| `GET /people` (admin) | `memberships` (latest per user), `users`, `invitations`, count of non-revoked `devices` (`deviceCount`) | |
+| `POST /people` (admin) | `users` by email, `memberships` | `users` if new, `memberships`, `invitations`, `audit_events`, the mail. (0002) Manual `person` scope: the request carries the person's key, probed before anything is written (`probe_failed`); managed `person` scope: the adapter creates it |
 | `PATCH /people/{id}` (admin) | `memberships` under the organization lock | `memberships.role`, `audit_events` |
-| `DELETE /people/{id}` (admin) | `memberships`, `devices` under the organization lock | `memberships`, `devices`, `web_sessions`, `invitations`, `key_exposures`, `audit_events`; then Valkey `ACL DELUSER`, `CLIENT KILL` |
-| **(0002)** `PUT /people/{id}/key` (admin, manual `person` scope) | `s3_keys` | New person key `active` after a probe, old one `retiring`, `audit_events` |
-| **(0002)** `POST /key/{keyId}/deleted` (admin, manual) | `s3_keys` | A `retiring` person key `retired` (the admin confirms it is deleted at the provider), secret wiped, `audit_events` (`key_deleted`) |
+| `DELETE /people/{id}` (admin) | `memberships`, `devices` under the organization lock | `memberships`, `devices`, `web_sessions`, `invitations`, `key_exposures` or the person's key, `audit_events`; then Valkey `ACL DELUSER`, `CLIENT KILL`. Answers `{person, revokedDevices, key}` |
+| (0002) `PUT /people/{id}/key` (admin, manual `person` scope) | `s3_keys` | New person key `active` after a probe, old one `retiring`, `audit_events`. Answers the key status |
+| (0002) `POST /key/{keyId}/deleted` (admin, manual) | `s3_keys` | A `retiring` person key `retired` (the admin confirms it is deleted at the provider), secret wiped, `audit_events` (`key_deleted`) |
 | `POST /people/{id}/resend` (admin) | `memberships`, `invitations` | Old invitation `superseded`, new one, `audit_events`, the mail |
-| `GET /macs` | `devices`, `device_status`, `users`; members only `user_id = me` | |
-| `POST /macs/{id}/revoke` | `devices` (a member only their own) | `devices`, `key_exposures`, `audit_events`; Valkey |
+| `GET /devices` (`/macs` until `0002`) | `devices`, `device_status`, `users`; members only `user_id = me`. Answers `DeviceOut[]` | |
+| `POST /devices/{id}/revoke` | `devices` (a member only their own) | `devices`, `key_exposures` or the key it reached, `audit_events`; Valkey. Answers `RevokeDeviceResponse {device, key}`, `key` null for a member |
 | `GET /disks` (admin) | `volumes`, `volume_status`, count of `device_status` with the disk mounted and connected | |
 | `GET /disks/{id}` (admin) | The same for one disk, a recently failed one included with its `format_error` | |
 | `POST /disks` (admin) | `organizations` under lock, `volumes` (`disk_limit_reached` past `valkey_databases - 1`), active `s3_keys` | `volumes` (`creating`), `volume_status`, `audit_events`; answers `201`, then the job runs `juicefs format` |
 | `PATCH /disks/{id}` (admin) | `volumes` | `juicefs config --trash-days` first, then `volumes`; `audit_events` |
 | `GET /key` (admin) | `s3_keys`, `key_rotations` not closed, open `key_exposures` | |
-| | **(0002)** plus `organizations.storage_mode`, `storage_provider`, `storage_key_scope`, `organization_status.bucket_versioning` and `bucket_old_versions_days`; with `person` or `device` scope: the live keys and the `retiring` ones whose deletion is owed, no window | |
-| `POST /key/rotations` (admin) | `key_rotations` under the organization lock | `s3_keys`, `key_rotations`, `key_rotation_volumes`, `audit_events`; the worker then writes the probe, Valkey (`juicefs config`), `volumes.s3_key_id`, `organization_status`. **(0002)** Managed with a team key: no body, the adapter creates the key; `person` or `device` scope: `invalid_state` |
+| | (0002) plus `storageMode`, `storageProvider`, `keyScope`, `keys[]` (each person's or Mac's key, live or `retiring` while its deletion is owed: id, holder, owner, tail, state, origin) and `versioning {state, oldVersionsDays}`; with `person` or `device` scope `accessKeyTail` is the control plane's own key and there is no window | |
+| `POST /key/rotations` (admin) | `key_rotations` under the organization lock | `s3_keys`, `key_rotations`, `key_rotation_volumes`, `audit_events`; the worker then writes the probe, Valkey (`juicefs config`), `volumes.s3_key_id`, `organization_status`. (0002) Managed with a team key: no body, the adapter creates the key; `person` or `device` scope: `invalid_state`. A failed call to the provider answers `provider_failed` |
 | `GET /key/rotations/{id}` (admin) | `key_rotations`, `key_rotation_volumes`, `device_status` | |
 | `POST /key/rotations/{id}/close` (admin) | `key_rotations` | `key_rotations`, `s3_keys`, `key_exposures`, `audit_events` |
 | `GET /audit` (admin) | `audit_events` | |
-| `GET /health` (admin) | `organization_status`, with **(0002)** the bucket's versioning | |
-| `GET /settings`, `PATCH /settings` (admin) | `organizations`, live `volumes` (storage is frozen once one exists: `storage_in_use`) | `organizations`, `audit_events`. **(0002)** `mailLanguage`; the storage mode and provider are shown, set only at creation |
+| `GET /health` (admin) | `organization_status`; (0002) `storage.versioning {state, oldVersionsDays}` | |
+| `GET /settings`, `PATCH /settings` (admin) | `organizations`, live `volumes` (storage is frozen once one exists: `storage_in_use`, and `storageLocked` says so) | `organizations`, `audit_events`. (0002) `mailLanguage` is editable; `storageMode`, `storageProvider` and `storageKeyScope` are shown, set only at creation |
 | `POST /settings/mail/test` (admin) | `organizations` | `organization_status.mail_*` |
 | `POST /settings/storage/probe` (admin) | active `s3_keys` | `organization_status.storage_*` |
 
@@ -667,12 +671,17 @@ The app's API, built in phase 1 and not in the admin web's contract:
 | `POST /auth/app/link/continue` (the button, a form) | `completed`, `auth_code_hash`; answers `303` to the app's loopback with the authorization code, `410` with a page when the link is used or expired |
 | `POST /auth/app/link` `{token}` | The same, answering `{redirectTo}` as JSON |
 | `POST /auth/app/token`: verifier plus authorization code or 6-digit code | `exchanged_at`; `devices` (`pending`) with its token |
-| `POST /device/register` (device token) | ACL user; `devices` `active` with `valkey_password_sha256`; `audit_events` `mac_registered`. Returns the Valkey user and password once. **(0002)** With `device` scope also the Mac's S3 key, created at the provider, returned once (a reissue retires the old one); with `person` scope the person's key |
-| `GET /device/config` | Nothing: Valkey address, the disks (`name`, `volume_name`, `meta_db`, `cache_expire_days`), and **(0002)** the key scope, so the app knows whether to pass a key to `juicefs mount`, and with `person` scope the tail of the person's current key, so a Mac notices a replaced key and fetches it |
+| `POST /device/register` (device token) | ACL user; `devices` `active` with `valkey_password_sha256`; `audit_events` `device_registered`. Answers `{valkeyUsername, valkeyPassword, valkeyUrl, keyScope, s3}` once; (0002) `s3 {accessKeyId, secretKey}` is the Mac's own key with `device` scope (created at the provider; a reissue retires the old one), the person's key with `person` scope, null with `team` scope |
+| `GET /device/config` | Nothing: `valkeyUrl`, the disks (`name`, `volume_name`, `meta_db`, `cache_expire_days`), and (0002) `keyScope`, so the app knows whether to pass a key to `juicefs mount`, and `s3AccessKeyTail`, which with `person` scope changes when the person's key is replaced |
+| (0002) `GET /device/key` | Nothing: the person's current key `{accessKeyId, secretKey}`, fetched after `s3AccessKeyTail` changed (`person` scope; a Mac's own key is returned only at registration) |
 | `POST /device/heartbeat` | `device_status`; answers `revoked` so the app stops the disk and clears cache and replica |
 | `POST /device/sign-out` | `devices` `revoked` with `signed_out` |
 
-**Error codes** beyond the contract's: `invalid_state` (409, an action the current state does not allow, such as closing a rotation that is not awaiting), `mail_failed` (503, the SMTP server refused; the request is not recorded as sent), `metadata_unavailable` (503, the central Valkey did not answer an action that needs it), `format_failed` (502, JuiceFS refused a `juicefs config`; a failed `juicefs format` lands in `format_error` instead).
+**Error codes** beyond the contract's: `invalid_state` (409, an action the current state does not allow, such as closing a rotation that is not awaiting), `mail_failed` (503, the SMTP server refused; the request is not recorded as sent), `metadata_unavailable` (503, the central Valkey did not answer an action that needs it), `format_failed` (502, JuiceFS refused a `juicefs config`; a failed `juicefs format` lands in `format_error` instead), (0002) `provider_failed` (502, the storage adapter's call to the provider failed; `details.reason` says why) and `rate_limited` (429 with `Retry-After`).
+
+**Rate limits**, per client address and per rule, in memory: `sign-in` (`POST /auth/sign-in`, `/auth/app/sign-in`) 10 a minute and 60 an hour, `code` (`/auth/sign-in/{id}/code`, `/auth/app/token`) 30 a minute, `link` (`/auth/magic-link`, `/auth/invitation`, the app's link routes) 30 a minute; each configurable, 0 turns it off. Separately, more than 10 sign-ins an hour for one address return the latest request unchanged instead of mailing again.
+
+**Bootstrap** (`floppy-server bootstrap --from-env`): `FLOPPY_BOOTSTRAP_ORGANIZATION_NAME`, `_ORGANIZATION_SLUG`, `_ADMIN_EMAIL`, `_S3_ENDPOINT`, `_S3_REGION`, `_S3_BUCKET`, `_S3_ACCESS_KEY_ID` and `_S3_SECRET_KEY` (or `--secret-key-stdin`; manual only), `_VALKEY_URL`, `_VALKEY_ADMIN_URL`, `_VALKEY_DATABASES`, and (0002) `_MAIL_LANGUAGE`, `_STORAGE_MODE`, `_STORAGE_PROVIDER`, `_KEY_SCOPE`, `_STORAGE_ADMIN_CREDENTIALS` (JSON). A managed organization gets its key from the adapter and refuses a pasted one.
 
 ## First migration
 
@@ -690,15 +699,18 @@ Built: `server/migrations/versions/0001_initial.py`. One Alembic revision, writt
 
 ## Migration 0002
 
-Phase 2, for the storage modes and the mail language. Every change keeps existing rows valid: an organization from `0001` is a manual one with a team key, in Italian.
+Built: `server/migrations/versions/0002_storage_modes_and_mail_language.py`, for the storage modes, the mail language and the device rename. Every change keeps existing rows valid: an organization from `0001` is a manual one with a team key, in Italian.
 
-1. `organizations`: add `mail_language` (`NOT NULL DEFAULT 'it'`, `CHECK IN ('it', 'en')`), `storage_mode` (`NOT NULL DEFAULT 'manual'`), `storage_provider`, `storage_key_scope` (`NOT NULL DEFAULT 'team'`, `team`, `person` or `device`), `storage_admin_credentials_enc`, with the four `CHECK`s in [organizations](#organizations).
-2. `organization_status`: add `bucket_versioning` (`NOT NULL DEFAULT 'unknown'`) and `bucket_old_versions_days`.
-3. `s3_keys`: add `holder` (`NOT NULL DEFAULT 'team'`, four values), `membership_id` and `device_id` with their composite foreign keys, `origin` (`NOT NULL DEFAULT 'pasted'`), `provider_ref`; replace `ck_s3_keys_secret_wiped` with `(holder = 'device' OR state IN ('retired', 'rejected')) = (secret_key_enc IS NULL)`; replace `uq_s3_keys_organization_id_active` with the form that excludes `person` and `device` (`holder IN ('team', 'control_plane')`); add the per-Mac and per-person unique indexes and the reconciler's index.
-4. `key_rotations`: `started_by_user_id` becomes nullable; add `trigger` (`NOT NULL DEFAULT 'admin'`) and its `CHECK`.
-5. `volumes`: replace `ck_volumes_ready` with `state <> 'ready' OR juicefs_uuid IS NOT NULL`.
-6. `audit_events`: add `organization_created`, `key_created` and `key_deleted` to `ck_audit_events_action`.
-7. Grants: nothing new; the new columns follow their tables.
+1. `organizations`: `mail_language` (`NOT NULL DEFAULT 'it'`), `storage_mode` (`NOT NULL DEFAULT 'manual'`), `storage_provider`, `storage_key_scope` (`NOT NULL DEFAULT 'team'`), `storage_admin_credentials_enc`, with their `CHECK`s (`mail_language`, `storage_mode`, `storage_provider`, `storage_provider_managed`, `storage_key_scope`, `storage_key_scope_manual`, `storage_admin_credentials_managed`).
+2. `organization_status`: `bucket_versioning` (`NOT NULL DEFAULT 'unknown'`) and `bucket_old_versions_days`.
+3. `s3_keys`: `holder` (`NOT NULL DEFAULT 'team'`), `membership_id` and `device_id` with their composite foreign keys, `origin` (`NOT NULL DEFAULT 'pasted'`), `provider_ref`; `ck_s3_keys_secret_wiped` becomes `(holder = 'device' OR state IN ('retired', 'rejected')) = (secret_key_enc IS NULL)`; `uq_s3_keys_organization_id_active` is limited to `holder IN ('team', 'control_plane')`; new `uq_s3_keys_device_id_live`, `uq_s3_keys_membership_id_live` and `ix_s3_keys_organization_id_deletion_owed`.
+4. `key_rotations`: `started_by_user_id` nullable; `trigger` (`NOT NULL DEFAULT 'admin'`) with `ck_key_rotations_trigger` and `ck_key_rotations_trigger_started_by`.
+5. `volumes`: `ck_volumes_ready` becomes `state <> 'ready' OR juicefs_uuid IS NOT NULL`.
+6. `audit_events`: the action, category and target `CHECK`s are replaced; `mac_registered`, `mac_revoked`, `mac_signed_out` and `mac_seen_outdated` become `device_*`, the `macs` category `devices`, the `mac` target `device`, and `person_removed`'s `{macs}` becomes `{devices}`, existing rows rewritten in place (the owner runs the migration, the one role the append-only trigger lets do it); `organization_created`, `key_created` and `key_deleted` join the list.
+7. `key_exposures`: the kind `mac_revoked` becomes `device_revoked`, rows rewritten, with `ck_key_exposures_device_revoked` replacing `ck_key_exposures_mac_revoked`.
+8. Grants: nothing new; the new columns follow their tables.
+
+`downgrade()` reverses it for development and fails on rows that use the new values.
 
 ## Decisions taken
 
