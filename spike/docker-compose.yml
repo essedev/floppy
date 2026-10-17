@@ -64,6 +64,21 @@ services:
       - "127.0.0.1:4501:4501" # S3 through the simulated link
       - "127.0.0.1:4502:8474" # Toxiproxy API
 
+  # The "shaped" profile turns the simulated link into one real bottleneck: a
+  # token bucket on everything Toxiproxy sends, so all of JuiceFS's downloads
+  # share one queue like on a real line. JuiceFS's own --download-limit lets
+  # the first megabyte through at once and then stalls, which hides how
+  # readahead competes with a new read. Use it with DOWNLOAD_LIMIT_MBPS=0.
+  shaper:
+    image: alpine:3.22
+    profiles: [shaped]
+    network_mode: "service:toxiproxy"
+    cap_add: [NET_ADMIN]
+    command: >-
+      sh -c "apk add --no-cache iproute2-tc >/dev/null &&
+      tc qdisc replace dev eth0 root tbf rate ${LINE_MBPS:-100}mbit burst 64kb latency 100ms &&
+      tc qdisc show dev eth0 && exec sleep infinity"
+
   drive:
     build:
       context: ./drive
@@ -81,6 +96,8 @@ services:
       TRASH_DAYS: ${TRASH_DAYS:-0}
       SMB_DOS_ATTRIBUTES: ${SMB_DOS_ATTRIBUTES:-yes}
       BUCKET_URL: http://toxiproxy:4501/floppy
+      # Extra flags for the first `juicefs format`, e.g. --block-size 1024
+      FORMAT_OPTS: ${FORMAT_OPTS:-}
       # Read only by the first `juicefs format`, which stores them in the metadata
       ACCESS_KEY: ${ACCESS_KEY:-}
       SECRET_KEY: ${SECRET_KEY:-}
@@ -119,6 +136,8 @@ services:
       TRASH_DAYS: ${TRASH_DAYS:-0}
       SMB_DOS_ATTRIBUTES: ${SMB_DOS_ATTRIBUTES:-yes}
       BUCKET_URL: http://toxiproxy:4501/floppy
+      # Extra flags for the first `juicefs format`, e.g. --block-size 1024
+      FORMAT_OPTS: ${FORMAT_OPTS:-}
       # Read only by the first `juicefs format`, which stores them in the metadata
       ACCESS_KEY: ${ACCESS_KEY:-}
       SECRET_KEY: ${SECRET_KEY:-}

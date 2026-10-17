@@ -8,12 +8,18 @@ both over SMB. Each test prints its measure, its threshold and PASS or FAIL.
 
 Usage: spike/acceptance.py [--baseline] [test ...]
   --baseline  same tests without the replica option, for comparison
-  tests       t01 ... t12 (default: all)
+  tests       t01 ... t13 (default: all)
 
 Needs setup.sh run first, the patched juicefs in the drive image
 (JUICEFS_SOURCE=replica), the footage in spike/footage for t03, and the macOS SMB
 timeout raised for localhost and 127.0.0.1 in ~/Library/Preferences/nsmb.conf
 (max_resp_timeout=600), as the real install does for the VM's address.
+
+The data path runs as the product does (DECISIONS #15): the shaped link and the
+same format and mount flags, passed through the environment:
+  LINE_MBPS=100 docker compose --profile shaped up -d shaper
+  DOWNLOAD_LIMIT_MBPS=0 FORMAT_OPTS="--block-size 1024" \
+    MOUNT_OPTS="--max-readahead 4" spike/acceptance.py
 """
 
 import argparse
@@ -215,18 +221,17 @@ def t03(baseline):
     if not clip.exists():
         record("t03 copy and stream a clip", "skipped", "-", False, "(no footage in spike/footage)")
         return
-    size_mb = clip.stat().st_size / 2**20
+    size_mb = clip.stat().st_size / 1e6
     up = timed(lambda: subprocess.run(["cp", str(clip), str(MNT_A / "acc" / "clip.mov")], check=True))
     restart_b(baseline)
     exec_in("drive-b", "juicefs warmup --evict /mnt/drive/acc/clip.mov >/dev/null 2>&1 || true", check=False)
     down = timed(lambda: subprocess.run(["dd", f"if={MNT_B / 'acc' / 'clip.mov'}", "of=/dev/null", "bs=4m"],
                                         check=True, capture_output=True))
-    # Today's figure on this rig: metadata in SQLite next to JuiceFS, same 100 Mbps link and
-    # SMB timeout, 5.7 MB/s measured on 17/10 (SMB takes about half the line)
-    today = 5.7
+    # The data-path target (ROADMAP 1): a cold read at 80% of the simulated line, in MB/s
+    line = int(os.environ.get("LINE_MBPS", "100")) / 8
     rate = size_mb / down
-    record("t03 cold read of a clip on B", f"{rate:.1f} MB/s", f">= 90% of today's {today} MB/s",
-           rate >= 0.9 * today, f"(copy on A {size_mb / up:.1f} MB/s)")
+    record("t03 cold read of a clip on B", f"{rate:.1f} MB/s", f">= 80% of the {line:.1f} MB/s line",
+           rate >= 0.8 * line, f"(copy on A {size_mb / up:.1f} MB/s)")
 
 
 def t04(baseline):

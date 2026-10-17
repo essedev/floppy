@@ -6,9 +6,11 @@ set -eu
 : "${META_URL:?}" "${BUCKET_URL:?}" "${SMB_PASSWORD:?}"
 mkdir -p /mnt/drive /cache
 
+# FORMAT_OPTS applies only when the volume is created, e.g. --block-size 1024.
 if ! juicefs status "$META_URL" >/dev/null 2>&1; then
+  # shellcheck disable=SC2086 # FORMAT_OPTS is a list of flags
   juicefs format "$META_URL" "${VOLUME_NAME:-spike}" --storage s3 --bucket "$BUCKET_URL" \
-    --trash-days "${TRASH_DAYS:-0}"
+    --trash-days "${TRASH_DAYS:-0}" ${FORMAT_OPTS:-}
 fi
 
 # shellcheck disable=SC2086 # MOUNT_OPTS is a list of flags
