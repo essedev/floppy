@@ -1,7 +1,8 @@
 /*
-  Devices (concept-e-admin, "Mac"; DECISIONS #7, #12): one Valkey user per device, its last contact
-  and how its replica keeps up; revoking one leaves the others alone. Members see only their
-  own, as "I miei dispositivi", and can revoke a lost one themselves.
+  Devices (concept-e-admin, "Mac"; DECISIONS #7, #12, #23): one Valkey user per device on every
+  disk it sees, its last contact and how its replica keeps up; revoking one leaves the others
+  alone. Members see only their own, as "I miei dispositivi", and can revoke a lost one
+  themselves.
 */
 
 import { Users } from 'lucide-react'
@@ -19,6 +20,7 @@ import { useFormat } from '@/lib/format'
 import { useFlash, useNow } from '@/lib/hooks'
 import { useCurrentSession } from '@/features/auth/hooks'
 import { KeyNotice } from '@/features/key/KeyNotice'
+import { useKeyStatus } from '@/features/key/hooks'
 import { useDevices, useRevokeDevice } from './hooks'
 
 function ReplicaCell({ device }: { device: Device }) {
@@ -41,6 +43,8 @@ function RevokeDialog({ device, all, admin, onClose, onDone }: { device: Device;
   const { t } = useI18n()
   const errorText = useErrorText()
   const revoke = useRevokeDevice()
+  // Admins only: members do not see the keys.
+  const mode = useKeyStatus(admin).data?.storageMode
   const other = all.find((m) => m.owner.id === device.owner.id && m.id !== device.id && !m.revokedAt)
   return (
     <Dialog
@@ -60,7 +64,7 @@ function RevokeDialog({ device, all, admin, onClose, onDone }: { device: Device;
     >
       <p>{t.devices.revokeBody}</p>
       {other && <p>{rich(t.devices.revokeOther, { owner: device.owner.name, other: <b className="font-semibold text-ink">{other.name}</b> })}</p>}
-      <p>{admin ? t.devices.revokeKeyAdmin : t.devices.revokeKeyMember}</p>
+      <p>{!admin ? t.devices.revokeKeyMember : mode === 'managed' ? t.devices.revokeKeyManaged : t.devices.revokeKeyAdmin}</p>
       {revoke.isError && (
         <div className="notice grid gap-1 px-4 py-3" role="alert">
           <State led="err">{t.common.failed}</State>
@@ -161,6 +165,8 @@ export function DevicesPage() {
                         <State led="err">{fmt(t.devices.revoked, { date: f.relative(m.revokedAt) })}</State>
                       ) : m.lastSeenAt ? (
                         f.relative(m.lastSeenAt)
+                      ) : m.state === 'pending' ? (
+                        <Readout>{t.devices.pending}</Readout>
                       ) : (
                         t.common.never
                       )}

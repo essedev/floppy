@@ -16,7 +16,7 @@ import { useFormat } from '@/lib/format'
 import { useDescribe } from './describe'
 import { useAudit } from './hooks'
 
-const CATEGORIES: (AuditCategory | 'all')[] = ['all', 'access', 'people', 'macs', 'key', 'disks', 'settings']
+const CATEGORIES: (AuditCategory | 'all')[] = ['all', 'access', 'people', 'devices', 'key', 'disks', 'settings']
 const PERIODS: AuditQuery['sinceDays'][] = [7, 30, 90]
 const WIDTHS = [90, 110, 90, 220]
 

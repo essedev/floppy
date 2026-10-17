@@ -1,7 +1,7 @@
 /*
   The real client: JSON over fetch to the control plane under /api/v1, same origin, with the
-  session in an HttpOnly cookie the API sets after a magic link or a code. Not exercised until
-  the backend exists; the paths here are the proposed endpoints.
+  session in an HttpOnly cookie the API sets after a magic link, a code or an invitation
+  (`__Host-floppy_session` behind TLS). In development Vite proxies /api to the server.
 */
 
 import { ApiError, type Api } from './client'
@@ -9,7 +9,7 @@ import type { AuditQuery, ErrorCode, Session } from './types'
 
 const BASE = import.meta.env.VITE_API_URL ?? '/api/v1'
 
-type Method = 'GET' | 'POST' | 'PATCH' | 'DELETE'
+type Method = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
 
 async function request<T>(method: Method, path: string, body?: unknown): Promise<T> {
   let response: Response
@@ -55,6 +55,7 @@ export const httpApi: Api = {
     status: (requestId) => request('GET', `/auth/sign-in/${id(requestId)}`),
     verifyCode: (requestId, code) => request('POST', `/auth/sign-in/${id(requestId)}/code`, { code }),
     openLink: (token) => request('POST', '/auth/magic-link', { token }),
+    acceptInvitation: (token) => request('POST', '/auth/invitation', { token }),
     session: async () => {
       try {
         return await request<Session>('GET', '/session')
@@ -81,6 +82,11 @@ export const httpApi: Api = {
     get: (diskId) => request('GET', `/disks/${id(diskId)}`),
     create: (body) => request('POST', '/disks', body),
     update: (diskId, body) => request('PATCH', `/disks/${id(diskId)}`, body),
+    probe: (diskId) => request('POST', `/disks/${id(diskId)}/probe`),
+  },
+  access: {
+    list: () => request('GET', '/access'),
+    set: (diskId, personId, access) => request('PUT', `/disks/${id(diskId)}/access/${id(personId)}`, { access }),
   },
   key: {
     get: () => request('GET', '/key'),

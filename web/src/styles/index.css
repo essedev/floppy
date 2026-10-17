@@ -135,6 +135,16 @@
   .tbl tr[aria-selected='true'] td {
     background: var(--raised);
   }
+  /* A first column that stays put while the table scrolls sideways: opaque, on hover too. */
+  .tbl .pin {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    background: var(--page);
+  }
+  .tbl tbody tr:hover td.pin {
+    background: color-mix(in srgb, var(--sunken) 55%, var(--page));
+  }
 
   /* Tabular readout numbers, not uppercase state text. */
   .num {

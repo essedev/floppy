@@ -4,7 +4,7 @@
   own devices. On a narrow screen the sidebar folds into a bar on top.
 */
 
-import { HardDrive, KeyRound, LaptopMinimal, LayoutGrid, LogOut, Monitor, Moon, ScrollText, SlidersHorizontal, Sun, Users, type LucideIcon } from 'lucide-react'
+import { FolderLock, HardDrive, KeyRound, LaptopMinimal, LayoutGrid, LogOut, Monitor, Moon, ScrollText, SlidersHorizontal, Sun, Users, type LucideIcon } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router'
 import { IconButton } from '@/components/Button'
@@ -13,7 +13,7 @@ import { Wordmark } from '@/components/marks'
 import { useI18n, plural } from '@/i18n'
 import { useTheme, type ThemeMode } from '@/lib/theme'
 import { useCurrentSession, useSignOut } from '@/features/auth/hooks'
-import { useKeyStatus } from '@/features/key/hooks'
+import { openWindows, useKeyStatus } from '@/features/key/hooks'
 import { FakeBanner } from './FakeBanner'
 
 const NEXT_THEME: Record<ThemeMode, ThemeMode> = { system: 'light', light: 'dark', dark: 'system' }
@@ -38,7 +38,7 @@ function NavItem({ to, icon: Icon, label, extra, end }: { to: string; icon: Luci
 function KeyNavLed() {
   const { t } = useI18n()
   const key = useKeyStatus()
-  return key.data?.window ? <Led state="dl" label={t.nav.keyWindowOpen} /> : null
+  return openWindows(key.data).length > 0 ? <Led state="dl" label={t.nav.keyWindowOpen} /> : null
 }
 
 /** The layout of every signed-in page. */
@@ -78,6 +78,7 @@ export function AppShell() {
               <>
                 <NavItem to="/" end icon={LayoutGrid} label={t.nav.overview} />
                 <NavItem to="/persone" icon={Users} label={t.nav.people} extra={count(org.peopleCount)} />
+                <NavItem to="/accessi" icon={FolderLock} label={t.nav.access} />
                 <NavItem to="/dispositivi" icon={LaptopMinimal} label={t.nav.devices} extra={count(org.deviceCount)} />
                 <NavItem to="/dischi" icon={HardDrive} label={t.nav.disks} />
                 <NavItem to="/chiave" icon={KeyRound} label={t.nav.key} extra={<KeyNavLed />} />

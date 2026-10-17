@@ -1,11 +1,13 @@
 /*
-  People (concept-e-admin, "Persone"): who can use the disks, invite, role, removal. Removing
-  someone with Macs revokes them and leaves the key reminder until the key changes
-  (DECISIONS #12); the confirmation says in plain words what happens.
+  People (concept-e-admin, "Persone"): who can use the disks, invite with the disks they will
+  see, role, removal. Removing someone with devices revokes them and, in manual storage, leaves
+  the key reminder of every disk they saw until its key changes (DECISIONS #12, #24); the
+  confirmation says in plain words what happens.
 */
 
 import { ChevronDown, Ellipsis, Plus } from 'lucide-react'
 import { useState } from 'react'
+import { Link } from 'react-router'
 import { Button, IconButton } from '@/components/Button'
 import { Avatar, Notice, SlotList, State } from '@/components/detail'
 import { Dialog } from '@/components/Dialog'
@@ -13,13 +15,16 @@ import { Choice, Field, Input } from '@/components/Field'
 import { AppIcon } from '@/components/marks'
 import { Menu } from '@/components/Menu'
 import { useErrorText } from '@/components/error-text'
-import { EmptyState, PageHeader, QueryView, SkeletonRows } from '@/components/states'
+import { EmptyState, PageHeader, QueryView, SkeletonLines, SkeletonRows } from '@/components/states'
 import { fmt, rich, useI18n } from '@/i18n'
-import type { Person, Role } from '@/lib/api'
+import type { AccessLevel, Person, Role } from '@/lib/api'
 import { useFormat } from '@/lib/format'
 import { useFlash, useNow } from '@/lib/hooks'
+import { AccessList } from '@/features/access/AccessControl'
 import { useCurrentSession } from '@/features/auth/hooks'
+import { useDisks } from '@/features/disks/hooks'
 import { KeyNotice } from '@/features/key/KeyNotice'
+import { useKeyStatus } from '@/features/key/hooks'
 import { useDevices } from '@/features/devices/hooks'
 import { useChangeRole, useInvite, usePeople, useRemovePerson, useResendInvite } from './hooks'
 
@@ -29,14 +34,20 @@ function InviteDialog({ onClose, onSent }: { onClose(): void; onSent(email: stri
   const { t } = useI18n()
   const errorText = useErrorText()
   const invite = useInvite()
+  const disks = useDisks()
   const [email, setEmail] = useState('')
   const [role, setRole] = useState<Role>('member')
+  // Closed by default: a disk not listed stays hidden from the new person (DECISIONS #23).
+  const [access, setAccess] = useState<Record<string, AccessLevel>>({})
   const [invalid, setInvalid] = useState(false)
 
   const submit = () => {
-    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.trim())) return setInvalid(true)
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s.]+$/.test(email.trim())) return setInvalid(true)
     setInvalid(false)
-    invite.mutate({ email: email.trim(), role }, { onSuccess: (p) => onSent(p.email) })
+    const entries = Object.entries(access)
+      .filter(([diskId, level]) => level !== 'none' && disks.data?.some((d) => d.id === diskId))
+      .map(([diskId, level]) => ({ diskId, access: level }))
+    invite.mutate({ email: email.trim(), role, disks: entries }, { onSuccess: (p) => onSent(p.email) })
   }
 
   return (
@@ -73,6 +84,22 @@ function InviteDialog({ onClose, onSent }: { onClose(): void; onSent(email: stri
           ]}
         />
       </div>
+      <div className="grid gap-1.5">
+        <span className="text-[13px] font-semibold text-ink">{t.people.inviteDisks}</span>
+        <QueryView query={disks} loading={<SkeletonLines lines={2} />} isEmpty={(list) => list.length === 0} empty={<span className="text-[13px]">{t.people.inviteNoDisks}</span>}>
+          {(list) => (
+            <>
+              <AccessList
+                rows={list.map((d) => ({ id: d.id, label: d.name, sub: d.mountPath }))}
+                value={access}
+                onChange={setAccess}
+                labelFor={(row) => fmt(t.access.changeTo, { disk: row.label })}
+              />
+              <span className="text-[13px]">{t.people.inviteDisksHint}</span>
+            </>
+          )}
+        </QueryView>
+      </div>
       <div className="flex items-center gap-3 text-sm">
         <AppIcon size={40} />
         <span>{t.people.inviteAppline}</span>
@@ -85,8 +112,9 @@ function RemoveDialog({ person, onClose, onDone }: { person: Person; onClose(): 
   const { t } = useI18n()
   const errorText = useErrorText()
   const remove = useRemovePerson()
-  const macs = useDevices()
-  const theirs = macs.data?.filter((m) => m.owner.id === person.id && !m.revokedAt) ?? []
+  const devices = useDevices()
+  const mode = useKeyStatus().data?.storageMode
+  const theirs = devices.data?.filter((m) => m.owner.id === person.id && !m.revokedAt) ?? []
   const invited = person.status === 'invited'
   const name = displayName(person)
   const deviceNames = rich(theirs.map((_, i) => `{m${i}}`).join(t.people.and), Object.fromEntries(theirs.map((m, i) => [`m${i}`, <b key={m.id} className="font-semibold text-ink">{m.name}</b>])))
@@ -110,7 +138,13 @@ function RemoveDialog({ person, onClose, onDone }: { person: Person; onClose(): 
       {invited ? (
         <p>{t.people.cancelInviteBody}</p>
       ) : person.deviceCount > 0 ? (
-        <SlotList items={[rich(t.people.removeDevices, { devices: deviceNames }), t.people.removeCache, t.people.removeKey]} />
+        <SlotList
+          items={[
+            rich(t.people.removeDevices, { devices: deviceNames }),
+            t.people.removeCache,
+            ...(mode ? [mode === 'managed' ? t.people.removeKeyManaged : t.people.removeKeyManual] : []),
+          ]}
+        />
       ) : (
         <SlotList items={[t.people.removeNoDevices]} />
       )}
@@ -169,16 +203,16 @@ function PersonRow({ person, onRemove, onFlash }: { person: Person; onRemove(): 
   return (
     <tr data-dim={removed || undefined}>
       <td>
-        <div className="flex min-w-0 items-center gap-3">
+        <Link to={`/persone/${encodeURIComponent(person.id)}`} aria-label={fmt(t.people.open, { name })} className="flex min-w-0 items-center gap-3 text-ink no-underline">
           <Avatar name={name} />
           <div className="min-w-0">
-            <b className="block font-semibold">
+            <b className="block font-semibold hover:underline">
               {name}
               {person.isMe && <span className="font-normal text-ink-3"> ({t.common.you})</span>}
             </b>
             {person.name && <span className="text-[13px] text-ink-3">{person.email}</span>}
           </div>
-        </div>
+        </Link>
       </td>
       <td>
         {removed ? (

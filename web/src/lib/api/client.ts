@@ -5,10 +5,12 @@
 */
 
 import type {
+  AccessLevel,
   AuditEvent,
   AuditQuery,
   CreateDiskRequest,
   Disk,
+  DiskAccess,
   Health,
   InviteRequest,
   KeyStatus,
@@ -58,6 +60,8 @@ export interface Api {
     status(requestId: string): Promise<SignInStatusResponse>
     verifyCode(requestId: string, code: string): Promise<Session>
     openLink(token: string): Promise<Session>
+    /** Accepts an invitation from its link and signs in. */
+    acceptInvitation(token: string): Promise<Session>
     /** The current session, or null when signed out. */
     session(): Promise<Session | null>
     signOut(): Promise<void>
@@ -81,6 +85,14 @@ export interface Api {
     get(id: string): Promise<Disk>
     create(body: CreateDiskRequest): Promise<Disk>
     update(id: string, body: UpdateDiskRequest): Promise<Disk>
+    /** A test write on the disk's bucket; the result also lands in its storage status. */
+    probe(id: string): Promise<void>
+  }
+  access: {
+    /** Every live disk and person that is not removed, `none` included. */
+    list(): Promise<DiskAccess[]>
+    /** Sets a person's access to a disk, applied live to their devices. */
+    set(diskId: string, personId: string, access: AccessLevel): Promise<DiskAccess>
   }
   key: {
     get(): Promise<KeyStatus>

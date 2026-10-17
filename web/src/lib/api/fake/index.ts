@@ -1,29 +1,68 @@
 /*
-  FAKE API. An in-memory stand-in for the control plane, used while the backend does not
-  exist (VITE_API=fake, the default of `pnpm dev`). It implements the same `Api` interface as
-  http.ts with realistic latency, seeded data (seed.ts) and the rules of docs/DATABASE_SCHEMA.md
-  ("State machines"): members see only their own Macs; only admins invite, and an invitation
-  lasts 7 days; removing a person revokes their Macs and opens the key window, as revoking a Mac
-  does, but only if a Mac ever had the key; the last admin cannot be demoted; a sign-in answers
-  the same for unknown addresses and polling never signs in; a rotation awaits the old key's
-  deletion once every disk is configured, and closing it closes only the exposures that happened
-  before it started; storage settings are locked while a disk exists; at most 15 disks.
+  FAKE API. An in-memory stand-in for the control plane (VITE_API=fake, the default of
+  `pnpm dev`). It implements the same `Api` interface as http.ts with realistic latency, seeded
+  data (seed.ts) and the rules of docs/DATABASE_SCHEMA.md ("Access per disk", "Storage modes",
+  "State machines"): members see only their own devices; only admins invite, an invitation lasts
+  7 days and gives no access to a disk it does not list; a new disk gives write to its creator
+  and none to everyone else unless listed; a change of access is owed until the disk's instance
+  takes it; in manual mode each disk brings its own bucket and key, probed first, and removing a
+  person, revoking a device or lowering someone to none opens the key window of each disk they
+  could see; in managed mode the adapter creates the bucket and each device has its own key,
+  deleted at the provider on revocation; the last admin cannot be demoted; a sign-in answers the
+  same for unknown addresses and polling never signs in; a rotation awaits the old key's deletion
+  once the disk is configured, and closing it closes only that disk's exposures from before it
+  started; the default endpoint is locked while a disk exists.
 
   State persists in localStorage so reloads keep it; `fakeControl` resets it, switches the
   scenario, makes every call fail like a network outage, and exposes the last email "sent".
   Deterministic triggers for error states:
-    - an access key containing DENIED makes the rotation's probe write fail (AccessDenied);
-    - a storage probe on a bucket other than the organization's fails (NoSuchBucket);
+    - an access key containing DENIED fails the probe write (AccessDenied), BADCONFIG fails a
+      rotation's juicefs config;
     - a new disk whose name contains "fail" fails its format;
-    - ?fake=empty seeds a new organization, ?fake=fail starts with the network down,
-      ?fake=default goes back to the full one.
+    - ?fake=empty seeds a new organization, ?fake=managed the managed one, ?fake=fail starts
+      with the network down, ?fake=default goes back to the full manual one.
 */
 
 import { ApiError, type Api } from '../client'
-import { DISK_NAME, type AuditEvent, type AuditQuery, type Disk, type KeyStatus, type Device, type Person, type Rotation, type Session, type StepState } from '../types'
-import { DEFAULT_CACHE, INVITE_TTL, LATEST_APP, mountPathOf, seed, type DiskRow, type FakeDb, type DeviceRow, type PersonRow, type Scenario } from './seed'
+import {
+  BUCKET_NAME,
+  DISK_NAME,
+  type AccessLevel,
+  type AuditEvent,
+  type AuditQuery,
+  type Device,
+  type Disk,
+  type DiskAccess,
+  type DiskKey,
+  type Health,
+  type KeyStatus,
+  type KeyWindowReason,
+  type MetadataHealth,
+  type Person,
+  type Rotation,
+  type Session,
+  type Settings,
+  type StepState,
+  type StorageHealth,
+  type Versioning,
+} from '../types'
+import {
+  DEFAULT_CACHE,
+  INVITE_TTL,
+  LATEST_APP,
+  managedBucketOf,
+  metaUrlOf,
+  mountPathOf,
+  seed,
+  type AccessRow,
+  type DeviceRow,
+  type DiskRow,
+  type FakeDb,
+  type PersonRow,
+  type Scenario,
+} from './seed'
 
-const DB_KEY = 'floppy.fake.db.v3'
+const DB_KEY = 'floppy.fake.db.v4'
 const SESSION_KEY = 'floppy.fake.session'
 const FAILING_KEY = 'floppy.fake.failing'
 const OUTBOX_KEY = 'floppy.fake.outbox'
@@ -33,8 +72,10 @@ const RESEND_AFTER = 60_000
 const MAX_ATTEMPTS = 5
 const CONNECTED_WITHIN = 2 * 60_000
 const FORMAT_MS = 3_000
-/** Valkey's 16 databases, the first left empty (DATABASE_SCHEMA.md, open question 10). */
-const DISK_LIMIT = 15
+/** How long the fake takes to set a changed access on an instance and at the provider. */
+const APPLY_MS = 2_500
+/** How long the adapter takes to delete a revoked device's key. */
+const DELETE_KEY_MS = 2_000
 
 // Storage can be missing or throw (private windows): the fake then lives in memory only.
 function read<T>(key: string): T | null {
@@ -56,7 +97,10 @@ function write(key: string, value: unknown): void {
 
 /** The email the fake would have sent last, shown in the fake banner. */
 export interface FakeMail {
+  /** A sign-in link and code, or an invitation link. */
+  kind: 'sign-in' | 'invite'
   to: string
+  /** Empty for an invitation, which has only a link. */
   code: string
   token: string
   at: string
@@ -68,12 +112,14 @@ const listeners = new Set<() => void>()
 
 function bootFromUrl(): void {
   const param = new URLSearchParams(location.search).get('fake')
-  if (param === 'empty' || param === 'default') {
+  if (param === 'empty' || param === 'default' || param === 'managed') {
     db = seed(param)
+    // Persisted at once: the next load reads the stored database, not the URL.
+    write(DB_KEY, db)
     write(SESSION_KEY, null)
+    failing = false
   }
   if (param === 'fail') failing = true
-  if (param === 'default' || param === 'empty') failing = false
   write(FAILING_KEY, failing)
 }
 bootFromUrl()
@@ -83,7 +129,9 @@ const notify = () => listeners.forEach((fn) => fn())
 const now = () => Date.now()
 const iso = (t = now()) => new Date(t).toISOString()
 const uid = (prefix: string) => `${prefix}-${Math.random().toString(36).slice(2, 10)}`
+const tailOf = (accessKeyId: string) => accessKeyId.trim().slice(-5).toUpperCase()
 const SYSTEM = { kind: 'system' as const, id: null, label: null }
+const manual = () => db.storageMode === 'manual'
 
 /** Waits like a network round trip, then fails if the fake network is down. */
 async function latency(min = 220, max = 600): Promise<void> {
@@ -108,7 +156,8 @@ function requireAdmin(): PersonRow {
   if (user.role !== 'admin') throw new ApiError(403, 'forbidden', 'Admins only')
   return user
 }
-const actorOf = (p: PersonRow) => ({ kind: 'person' as const, id: p.id, label: p.name ?? p.email })
+const labelOf = (p: PersonRow) => p.name ?? p.email
+const actorOf = (p: PersonRow) => ({ kind: 'person' as const, id: p.id, label: labelOf(p) })
 const inviteLive = (p: PersonRow) => p.inviteExpiresAt !== null && Date.parse(p.inviteExpiresAt) > now()
 
 function sessionOf(user: PersonRow): Session {
@@ -125,38 +174,52 @@ function sessionOf(user: PersonRow): Session {
   }
 }
 
-function startSession(userId: string, via: 'link' | 'code'): Session {
+/** Accepts a pending invitation: the person becomes active, named from the address. */
+function accept(person: PersonRow): void {
+  person.status = 'active'
+  person.inviteExpiresAt = null
+  person.inviteToken = null
+  const local = person.email.split('@')[0] ?? person.email
+  person.name = local.charAt(0).toUpperCase() + local.slice(1)
+  log({ actor: actorOf(person), action: 'invite_accepted', category: 'people', target: { kind: 'person', id: person.id, label: person.name }, detail: {} })
+}
+
+function startSession(userId: string, via: 'link' | 'code' | 'invitation'): Session {
   write(SESSION_KEY, userId)
   const person = db.people.find((p) => p.id === userId)
   if (!person) throw new ApiError(401, 'unauthorized', 'Unknown user')
-  if (person.status === 'invited') {
-    // First sign-in accepts the invitation; the name comes from the address.
-    person.status = 'active'
-    person.inviteExpiresAt = null
-    const local = person.email.split('@')[0] ?? person.email
-    person.name = local.charAt(0).toUpperCase() + local.slice(1)
-    log({ actor: actorOf(person), action: 'invite_accepted', category: 'people', target: { kind: 'person', id: person.id, label: person.name }, detail: {} })
-  }
+  if (person.status === 'invited') accept(person)
   person.lastSignInAt = iso()
-  log({ actor: actorOf(person), action: 'signed_in', category: 'access', target: { kind: 'person', id: person.id, label: person.name ?? person.email }, detail: { via, kind: 'web' } })
+  log({ actor: actorOf(person), action: 'signed_in', category: 'access', target: { kind: 'person', id: person.id, label: labelOf(person) }, detail: { via, kind: 'web' } })
   save()
   return sessionOf(person)
+}
+
+function sendInvite(person: PersonRow): void {
+  person.inviteToken = uid('inv')
+  person.invitedAt = iso()
+  person.inviteExpiresAt = iso(now() + INVITE_TTL)
+  write(OUTBOX_KEY, { kind: 'invite', to: person.email, code: '', token: person.inviteToken, at: iso() } satisfies FakeMail)
+  db.lastMailAt = iso()
 }
 
 // Rows to API shapes
 
 function heartbeat(): void {
-  // Live Macs keep reporting while the page is open, as the app's heartbeat would.
+  // Live devices keep reporting while the page is open, as the app's heartbeat would.
   for (const m of db.devices) if (m.live && !m.revokedAt) m.lastSeenAt = iso(now() - 5_000 - Math.random() * 20_000)
 }
 
+const isConnected = (m: DeviceRow) => !m.revokedAt && m.lastSeenAt !== null && now() - Date.parse(m.lastSeenAt) < CONNECTED_WITHIN
+
 function toDevice(m: DeviceRow): Device {
   const owner = db.people.find((p) => p.id === m.ownerId)
-  const connected = !m.revokedAt && m.lastSeenAt !== null && now() - Date.parse(m.lastSeenAt) < CONNECTED_WITHIN
+  const connected = isConnected(m)
   return {
     id: m.id,
     name: m.name,
-    owner: { id: m.ownerId, name: owner?.name ?? owner?.email ?? m.ownerId },
+    state: m.revokedAt ? 'revoked' : m.lastSeenAt ? 'active' : 'pending',
+    owner: { id: m.ownerId, name: owner ? labelOf(owner) : m.ownerId },
     valkeyUser: m.valkeyUser,
     macosVersion: m.macosVersion,
     appVersion: m.appVersion,
@@ -170,20 +233,66 @@ function toDevice(m: DeviceRow): Device {
 }
 
 function toPerson(p: PersonRow, me: PersonRow): Person {
+  const { inviteToken: _token, ...person } = p
   return {
-    ...p,
+    ...person,
     deviceCount: db.devices.filter((m) => m.ownerId === p.id && !m.revokedAt).length,
     isMe: p.id === me.id,
   }
 }
 
 function toDisk(d: DiskRow): Disk {
-  const { formatDoneAt: _done, formatFails: _fails, volumeName: _volume, ...disk } = d
-  return structuredClone(disk)
+  return structuredClone({
+    id: d.id, name: d.name, mountPath: d.mountPath, state: d.state, error: d.error, status: d.status,
+    bucket: d.bucket, region: d.region, endpoint: d.endpoint, metaUrl: d.state === 'ready' ? d.metaUrl : null,
+    blockSizeKb: d.blockSizeKb, trashDays: d.trashDays, trashBytes: d.trashBytes, usedBytes: d.usedBytes,
+    fileCount: d.fileCount, lastWriteAt: d.lastWriteAt, mountedBy: d.mountedBy, cache: d.cache,
+    createdAt: d.createdAt, createdBy: d.createdBy,
+  })
 }
 
 function log(event: Omit<AuditEvent, 'id' | 'at'>): void {
   db.audit.unshift({ ...event, id: uid('e'), at: iso() })
+}
+
+// Access per disk
+
+const activeDevicesOf = (personId: string) => db.devices.filter((m) => m.ownerId === personId && !m.revokedAt)
+const accessRow = (diskId: string, personId: string) => db.access.find((a) => a.diskId === diskId && a.personId === personId)
+const accessOf = (diskId: string, personId: string): AccessLevel => accessRow(diskId, personId)?.access ?? 'none'
+
+/** Owed rows of reachable instances are applied once their time has come. */
+function advanceAccess(): void {
+  for (const a of db.access) {
+    const disk = db.disks.find((d) => d.id === a.diskId)
+    if (a.appliedAt === null && disk?.status === 'online' && disk.state === 'ready') a.appliedAt = iso(now() + APPLY_MS)
+  }
+}
+
+/** Whether a person's devices have their access to a disk, or are still owed it. */
+function applied(a: AccessRow | undefined): boolean {
+  if (!a || activeDevicesOf(a.personId).length === 0) return true
+  return a.appliedAt !== null && Date.parse(a.appliedAt) <= now()
+}
+
+/** Writes an access and logs it, as the server's put_access; nothing when it does not change. */
+function putAccess(disk: DiskRow, person: PersonRow, access: AccessLevel, by: PersonRow): void {
+  const row = accessRow(disk.id, person.id)
+  const from = row?.access ?? 'none'
+  if (from === access) return
+  // An instance that does not answer leaves the change owed; a reachable one takes it shortly.
+  const appliedAt = disk.status === 'online' && disk.state === 'ready' ? iso(now() + (activeDevicesOf(person.id).length > 0 ? APPLY_MS : 0)) : null
+  if (row) Object.assign(row, { access, appliedAt })
+  else db.access.push({ diskId: disk.id, personId: person.id, access, appliedAt })
+  log({ actor: actorOf(by), action: 'disk_access_changed', category: 'disks', target: { kind: 'disk', id: disk.id, label: disk.name }, detail: { person: labelOf(person), from, to: access } })
+}
+
+/** The disks one of the person's active devices has a user on: those it could read the key of. */
+const disksSeenBy = (personId: string) =>
+  activeDevicesOf(personId).length === 0 ? [] : db.disks.filter((d) => accessOf(d.id, personId) !== 'none')
+
+function openExposure(disk: DiskRow, kind: KeyWindowReason['kind'], label: string): void {
+  disk.exposures.push({ id: uid('x'), kind, label, at: iso() })
 }
 
 // Disks being created finish their fake format after a few seconds.
@@ -198,84 +307,119 @@ function advanceDisks(): void {
       d.error = { code: 'format_failed', message: 'juicefs format: the bucket refused the new volume' }
       db.disks = db.disks.filter((x) => x.id !== d.id)
       db.failedDisks.push(d)
+      db.access = db.access.filter((a) => a.diskId !== d.id)
     } else {
       d.state = 'ready'
+      d.lastProbeAt = iso()
+      d.storageState = 'ok'
+      for (const a of db.access) if (a.diskId === d.id) a.appliedAt = iso(now() + APPLY_MS)
     }
   }
   if (changed) save()
 }
 
-// The key and its rotation
+// The adapter deletes revoked devices' keys shortly after.
+function advanceDeviceKeys(): void {
+  for (const k of [...db.deviceKeys]) {
+    if (k.state !== 'retiring' || !k.deleteAt || Date.parse(k.deleteAt) > now()) continue
+    db.deviceKeys = db.deviceKeys.filter((x) => x.id !== k.id)
+    log({ actor: SYSTEM, action: 'key_deleted', category: 'key', target: { kind: 'key', id: k.id, label: k.tail }, detail: { holder: 'device', accessKeyTail: k.tail, by: 'adapter' } })
+    save()
+  }
+}
+
+function advance(): void {
+  advanceDisks()
+  advanceAccess()
+  advanceDeviceKeys()
+}
+
+// Keys and rotations
 
 const PROBE_MS = 1200
-const DISK_MS = 900
-const MAC_MS = 700
+const CONFIG_MS = 1100
+const DEVICE_MS = 700
 
-function rotationOf(): Rotation | null {
-  const r = db.key.rotation
+function rotationOf(disk: DiskRow): Rotation | null {
+  const r = disk.rotation
   if (!r) return null
   const elapsed = now() - Date.parse(r.startedAt)
-  const disksAtStart = db.disks.filter((d) => d.state === 'ready')
-  const probe: StepState = elapsed < PROBE_MS ? 'running' : r.failCode ? 'failed' : 'done'
-  if (probe === 'failed') {
+  const base = { id: r.id, diskId: disk.id, diskName: disk.name, newKeyTail: r.newKeyTail, oldKeyTails: r.oldKeyTails, startedAt: r.startedAt }
+  const probe: StepState = elapsed < PROBE_MS ? 'running' : r.failStep === 'probe' ? 'failed' : 'done'
+  const config: StepState = probe !== 'done' ? 'pending' : elapsed < PROBE_MS + CONFIG_MS ? 'running' : r.failStep === 'config' ? 'failed' : 'done'
+  if (probe === 'failed' || config === 'failed') {
+    const step = probe === 'failed' ? 'probe' : 'config'
+    const code = step === 'probe' ? 'AccessDenied' : 'juicefs config exited 1'
     if (!r.failLogged) {
       r.failLogged = true
-      log({ actor: SYSTEM, action: 'key_rotation_failed', category: 'key', target: { kind: 'key', id: r.id, label: r.newKeyTail }, detail: { step: 'probe', code: r.failCode ?? 'AccessDenied' } })
+      log({ actor: SYSTEM, action: 'key_rotation_failed', category: 'key', target: { kind: 'key', id: r.newKeyId, label: r.newKeyTail }, detail: { disk: disk.name, step, code } })
       save()
     }
     return {
-      id: r.id, state: 'failed', newKeyTail: r.newKeyTail, oldKeyTails: r.oldKeyTails, probe,
-      disks: disksAtStart.map((d) => ({ id: d.id, name: d.name, state: 'pending' })),
-      devices: { updated: 0, total: r.devicesTotal },
-      error: { step: 'probe', code: r.failCode ?? 'AccessDenied', request: `PUT /${db.storage.bucket}/floppy-probe-${r.id.slice(-4)}` },
-      startedAt: r.startedAt,
+      ...base, state: 'failed', probe, config, devices: { updated: 0, total: r.devicesTotal },
+      error: { step, code, request: step === 'probe' ? `PUT /${disk.bucket}/floppy-probe-${r.id.slice(-4)}` : `juicefs config ${disk.volumeName}` },
     }
   }
-  const disks = disksAtStart.map((d, i) => {
-    const start = PROBE_MS + i * DISK_MS
-    const state: StepState = elapsed < start ? 'pending' : elapsed < start + DISK_MS ? 'running' : 'done'
-    return { id: d.id, name: d.name, state }
-  })
-  const macsStart = PROBE_MS + disks.length * DISK_MS
-  const updated = Math.max(0, Math.min(r.devicesTotal, Math.floor((elapsed - macsStart) / MAC_MS)))
-  // Every disk configured is enough: the Macs are counted, not waited for.
-  const configured = disks.every((d) => d.state === 'done') && elapsed >= macsStart
+  const configuredAt = PROBE_MS + CONFIG_MS
+  const updated = Math.max(0, Math.min(r.devicesTotal, Math.floor((elapsed - configuredAt) / DEVICE_MS)))
+  // The disk configured is enough: the devices are counted, not waited for.
+  const configured = config === 'done'
   if (configured && !r.applied) {
     r.applied = true
-    db.key.accessKeyTail = r.newKeyTail
-    db.key.rotatedAt = iso()
-    log({ actor: SYSTEM, action: 'key_rotated', category: 'key', target: { kind: 'key', id: r.id, label: r.newKeyTail }, detail: { disks: disks.length } })
+    disk.keyTail = r.newKeyTail
+    disk.keyId = r.newKeyId
+    disk.rotatedAt = iso()
+    log({ actor: SYSTEM, action: 'key_rotated', category: 'key', target: { kind: 'key', id: r.newKeyId, label: r.newKeyTail }, detail: { disk: disk.name } })
     save()
   }
+  return { ...base, state: configured ? 'awaiting_old_key_deletion' : 'applying', probe, config, devices: { updated, total: r.devicesTotal }, error: null }
+}
+
+const VERSIONING_UNKNOWN: Versioning = { state: 'unknown', oldVersionsDays: null }
+
+function diskKeyOf(d: DiskRow): DiskKey {
+  const openedAt = d.exposures.map((x) => x.at).sort()[0]
   return {
-    id: r.id, state: configured ? 'awaiting_old_key_deletion' : 'applying', newKeyTail: r.newKeyTail, oldKeyTails: r.oldKeyTails,
-    probe, disks, devices: { updated, total: r.devicesTotal }, error: null, startedAt: r.startedAt,
+    diskId: d.id,
+    diskName: d.name,
+    bucket: d.bucket,
+    endpoint: d.endpoint,
+    // The format holds the key once the disk is ready; while creating it is still pending.
+    accessKeyTail: manual() && d.state === 'ready' ? d.keyTail : null,
+    rotatedAt: d.rotatedAt,
+    window: manual() && openedAt ? { openedAt, reasons: structuredClone(d.exposures) } : null,
+    rotation: rotationOf(d),
+    versioning: { ...d.versioning },
   }
 }
 
 function keyStatus(): KeyStatus {
-  const rotation = rotationOf()
-  const exposures = db.key.exposures
-  const openedAt = exposures.map((x) => x.at).sort()[0]
+  advance()
   return {
-    bucket: db.storage.bucket,
-    accessKeyTail: db.key.accessKeyTail,
-    rotatedAt: db.key.rotatedAt,
-    window: openedAt ? { openedAt, reasons: structuredClone(exposures) } : null,
-    rotation,
+    storageMode: db.storageMode,
+    storageProvider: db.storageProvider,
+    controlPlaneKeyTail: db.controlPlaneKeyTail,
+    disks: db.disks.map(diskKeyOf),
+    keys: db.deviceKeys.map((k) => {
+      const m = db.devices.find((x) => x.id === k.deviceId)
+      const owner = db.people.find((p) => p.id === m?.ownerId)
+      return {
+        id: k.id, deviceId: k.deviceId, owner: `${m?.name ?? k.deviceId} (${owner ? labelOf(owner) : ''})`,
+        accessKeyTail: k.tail, state: k.state, activatedAt: k.activatedAt, retiringAt: k.retiringAt,
+      }
+    }),
   }
-}
-
-function openExposure(kind: 'person_removed' | 'mac_revoked', label: string): void {
-  db.key.exposures.push({ id: uid('x'), kind, label, at: iso() })
 }
 
 function revokeDeviceRow(m: DeviceRow, by: PersonRow, reason: 'admin' | 'owner' | 'member_removed'): void {
   m.revokedAt = iso()
-  m.revokedBy = by.name ?? by.email
+  m.revokedBy = labelOf(by)
   m.live = false
   m.replica = null
-  log({ actor: actorOf(by), action: 'mac_revoked', category: 'macs', target: { kind: 'mac', id: m.id, label: m.name }, detail: { reason } })
+  for (const k of db.deviceKeys) {
+    if (k.deviceId === m.id && k.state !== 'retiring') Object.assign(k, { state: 'retiring', retiringAt: iso(), deleteAt: iso(now() + DELETE_KEY_MS) })
+  }
+  log({ actor: actorOf(by), action: 'device_revoked', category: 'devices', target: { kind: 'device', id: m.id, label: m.name }, detail: { reason } })
 }
 
 function activeAdmins(): PersonRow[] {
@@ -292,15 +436,15 @@ function filterAudit(q: AuditQuery): AuditEvent[] {
   )
 }
 
-const validEmail = (s: string) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(s)
-/** JuiceFS's volume name pattern, which is also the object prefix. */
+const validEmail = (s: string) => /^[^@\s]+@[^@\s]+\.[^@\s.]+$/.test(s)
+const validKey = (s: string) => /^\S{8,}$/.test(s)
+/** JuiceFS's volume name pattern. */
 const VOLUME_NAME = /^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/
 
 /**
- * JuiceFS's name for a new disk, derived once from its display name (DATABASE_SCHEMA.md,
- * volumes.volume_name): lowercased, every other character a hyphen. The schema asks for "a
- * short suffix" when the result is taken without fixing its form: the fake appends -2, -3...
- * Names of failed and deleted disks stay taken forever, their objects are still there.
+ * JuiceFS's name for a new disk, derived once from its display name as the server does:
+ * lowercased, every run of other characters a hyphen, then -2, -3... while taken. Names of
+ * failed and deleted disks stay taken forever.
  */
 function deriveVolumeName(name: string, taken: Set<string>): string {
   const base = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 58).replace(/-+$/, '')
@@ -311,12 +455,49 @@ function deriveVolumeName(name: string, taken: Set<string>): string {
   }
 }
 
-const settingsOf = () => ({
+/** A probe write with a pasted key: DENIED in the key id is refused like a real AccessDenied. */
+function probeWith(bucket: string, accessKeyId: string): void {
+  if (accessKeyId.toUpperCase().includes('DENIED')) {
+    throw new ApiError(422, 'probe_failed', 'The test write failed', { code: 'AccessDenied', request: `PUT /${bucket}/floppy-probe-${uid('p').slice(-4)}` })
+  }
+}
+
+const settingsOf = (): Settings => ({
   organizationName: db.organizationName,
+  mailLanguage: db.mailLanguage,
   mail: { ...db.mail },
   storage: { ...db.storage },
   storageLocked: db.disks.length > 0,
+  storageMode: db.storageMode,
+  storageProvider: db.storageProvider,
 })
+
+function healthOf(d: DiskRow): Health['disks'][number] {
+  return {
+    id: d.id,
+    name: d.name,
+    metadata: { state: d.status === 'online' ? 'ok' : 'down', latencyMs: d.status === 'online' ? d.latencyMs + Math.round(Math.random() * 3) : null, checkedAt: iso(now() - 18_000) },
+    storage: { state: d.storageState, lastProbeAt: d.lastProbeAt, versioning: { ...d.versioning } },
+  }
+}
+
+/** The worst state and the highest latency; versioning only when every disk agrees (as the server). */
+function summary(disks: Health['disks']): { metadata: MetadataHealth; storage: StorageHealth } {
+  const latencies = disks.flatMap((d) => (d.metadata.latencyMs === null ? [] : [d.metadata.latencyMs]))
+  const checked = disks.flatMap((d) => (d.metadata.checkedAt ? [d.metadata.checkedAt] : [])).sort()
+  const probed = disks.flatMap((d) => (d.storage.lastProbeAt ? [d.storage.lastProbeAt] : [])).sort()
+  const states = new Set(disks.map((d) => d.storage.state))
+  const versionings = new Set(disks.map((d) => `${d.storage.versioning.state}|${d.storage.versioning.oldVersionsDays ?? ''}`))
+  const first = disks[0]?.storage.versioning
+  return {
+    metadata: { state: disks.some((d) => d.metadata.state === 'down') ? 'down' : 'ok', latencyMs: latencies.length ? Math.max(...latencies) : null, checkedAt: checked[0] ?? null },
+    storage: {
+      state: states.has('failing') ? 'failing' : states.size === 1 && states.has('ok') ? 'ok' : 'unknown',
+      lastProbeAt: probed[0] ?? null,
+      versioning: versionings.size === 1 && first ? { ...first } : { ...VERSIONING_UNKNOWN },
+    },
+  }
+}
 
 /** The fake implementation of the API. */
 export const fakeApi: Api = {
@@ -337,7 +518,7 @@ export const fakeApi: Api = {
       db.signIns.push(row)
       save()
       // Unknown addresses get a mail that says so; the fake shows it like any other.
-      write(OUTBOX_KEY, { to: address, code: row.code, token: row.token, at: iso() } satisfies FakeMail)
+      write(OUTBOX_KEY, { kind: 'sign-in', to: address, code: row.code, token: row.token, at: iso() } satisfies FakeMail)
       notify()
       return { requestId: row.id, email: address, expiresAt: row.expiresAt, resendAt: row.resendAt }
     },
@@ -361,7 +542,7 @@ export const fakeApi: Api = {
         const left = MAX_ATTEMPTS - row.attempts
         const person = db.people.find((p) => p.id === row.userId)
         if (left <= 0 && person) {
-          log({ actor: SYSTEM, action: 'sign_in_locked', category: 'access', target: { kind: 'person', id: person.id, label: person.name ?? person.email }, detail: {} })
+          log({ actor: SYSTEM, action: 'sign_in_locked', category: 'access', target: { kind: 'person', id: person.id, label: labelOf(person) }, detail: {} })
         }
         save()
         if (left <= 0) throw new ApiError(429, 'request_locked', 'Too many attempts')
@@ -378,6 +559,12 @@ export const fakeApi: Api = {
       }
       row.completed = true
       return startSession(row.userId, 'link')
+    },
+    async acceptInvitation(token) {
+      await latency()
+      const person = db.people.find((p) => p.inviteToken === token && p.status === 'invited')
+      if (!token || !person || !inviteLive(person)) throw new ApiError(410, 'link_invalid', 'Invitation expired or used')
+      return startSession(person.id, 'invitation')
     },
     async session() {
       await latency(150, 350)
@@ -397,22 +584,29 @@ export const fakeApi: Api = {
       const order = { active: 0, invited: 1, removed: 2 }
       return db.people.map((p) => toPerson(p, me)).sort((a, b) => order[a.status] - order[b.status])
     },
-    async invite({ email, role }) {
+    async invite({ email, role, disks = [] }) {
       await latency()
       const me = requireAdmin()
       const address = email.trim().toLowerCase()
       if (!validEmail(address)) throw new ApiError(422, 'validation', 'Invalid email')
-      let person = db.people.find((p) => p.email === address && p.status !== 'removed')
-      if (person) throw new ApiError(409, 'already_member', 'Already in the organization')
-      // A removed person invited again gets a new membership; the old row keeps its history.
-      person = {
+      if (db.people.some((p) => p.email === address && p.status !== 'removed')) throw new ApiError(409, 'already_member', 'Already in the organization')
+      const targets = disks.map((entry) => {
+        const disk = db.disks.find((d) => d.id === entry.diskId)
+        if (!disk) throw new ApiError(422, 'validation', 'No such disk', { field: 'disks', diskId: entry.diskId })
+        return { disk, access: entry.access }
+      })
+      // A removed person invited again gets a new membership, with no access; the old row keeps
+      // its history.
+      const person: PersonRow = {
         id: uid('u'), name: null, email: address, role, status: 'invited', lastSignInAt: null,
-        invitedAt: iso(), invitedBy: me.name, inviteExpiresAt: iso(now() + INVITE_TTL), removedAt: null,
+        invitedAt: iso(), invitedBy: labelOf(me), inviteExpiresAt: null, removedAt: null, inviteToken: null,
       }
       db.people.push(person)
+      for (const { disk, access } of targets) putAccess(disk, person, access, me)
+      sendInvite(person)
       log({ actor: actorOf(me), action: 'person_invited', category: 'people', target: { kind: 'person', id: person.id, label: address }, detail: { role } })
-      db.lastMailAt = iso()
       save()
+      notify()
       return toPerson(person, me)
     },
     async update(id, { role }) {
@@ -424,8 +618,10 @@ export const fakeApi: Api = {
         throw new ApiError(409, 'last_admin', 'The organization needs an admin')
       }
       const from = person.role
-      person.role = role
-      log({ actor: actorOf(me), action: 'role_changed', category: 'people', target: { kind: 'person', id, label: person.name ?? person.email }, detail: { from, to: role } })
+      if (from !== role) {
+        person.role = role
+        log({ actor: actorOf(me), action: 'role_changed', category: 'people', target: { kind: 'person', id, label: labelOf(person) }, detail: { from, to: role } })
+      }
       save()
       return toPerson(person, me)
     },
@@ -438,28 +634,28 @@ export const fakeApi: Api = {
       if (person.role === 'admin' && person.status === 'active' && activeAdmins().length === 1) {
         throw new ApiError(409, 'last_admin', 'The organization needs an admin')
       }
-      const macs = db.devices.filter((m) => m.ownerId === id && !m.revokedAt)
-      macs.forEach((m) => revokeDeviceRow(m, me, 'member_removed'))
+      // Read before the revocation: the disks their devices had a user on, whose key they could read.
+      if (manual()) for (const disk of disksSeenBy(id)) openExposure(disk, 'person_removed', labelOf(person))
+      const devices = activeDevicesOf(id)
+      devices.forEach((m) => revokeDeviceRow(m, me, 'member_removed'))
       person.status = 'removed'
       person.removedAt = iso()
       person.inviteExpiresAt = null
-      // Only a Mac ever held the key (it lives in the metadata): no Mac, no window. One
-      // exposure for the person, not one per Mac.
-      if (macs.length > 0) openExposure('person_removed', person.name ?? person.email)
-      log({ actor: actorOf(me), action: 'person_removed', category: 'people', target: { kind: 'person', id, label: person.name ?? person.email }, detail: { macs: macs.length } })
+      person.inviteToken = null
+      log({ actor: actorOf(me), action: 'person_removed', category: 'people', target: { kind: 'person', id, label: labelOf(person) }, detail: { devices: devices.length } })
       save()
-      return { person: toPerson(person, me), revokedDevices: macs.length, key: keyStatus() }
+      return { person: toPerson(person, me), revokedDevices: devices.length, key: keyStatus() }
     },
     async resendInvite(id) {
       await latency()
       const me = requireAdmin()
-      const person = db.people.find((p) => p.id === id && p.status === 'invited')
-      if (!person) throw new ApiError(404, 'not_found', 'No such invite')
-      person.invitedAt = iso()
-      person.inviteExpiresAt = iso(now() + INVITE_TTL)
+      const person = db.people.find((p) => p.id === id && p.status !== 'removed')
+      if (!person) throw new ApiError(404, 'not_found', 'No such person')
+      if (person.status !== 'invited') throw new ApiError(409, 'invalid_state', 'Only an invited person can get a new invitation')
+      sendInvite(person)
       log({ actor: actorOf(me), action: 'invite_resent', category: 'people', target: { kind: 'person', id, label: person.email }, detail: { role: person.role } })
-      db.lastMailAt = iso()
       save()
+      notify()
       return toPerson(person, me)
     },
   },
@@ -477,10 +673,10 @@ export const fakeApi: Api = {
       const me = requireUser()
       const m = db.devices.find((x) => x.id === id && !x.revokedAt)
       if (!m || (me.role !== 'admin' && m.ownerId !== me.id)) throw new ApiError(404, 'not_found', 'No such device')
-      revokeDeviceRow(m, me, m.ownerId === me.id && me.role !== 'admin' ? 'owner' : 'admin')
-      openExposure('mac_revoked', m.name)
+      if (manual()) for (const disk of db.disks.filter((d) => accessOf(d.id, m.ownerId) !== 'none')) openExposure(disk, 'device_revoked', m.name)
+      revokeDeviceRow(m, me, me.role === 'admin' && m.ownerId !== me.id ? 'admin' : 'owner')
       save()
-      return { device: toDevice(m), key: keyStatus() }
+      return { device: toDevice(m), key: me.role === 'admin' ? keyStatus() : null }
     },
   },
 
@@ -488,63 +684,121 @@ export const fakeApi: Api = {
     async list() {
       await latency()
       requireAdmin()
-      advanceDisks()
+      advance()
       return db.disks.map(toDisk)
     },
     async get(id) {
       await latency(150, 300)
       requireAdmin()
-      advanceDisks()
+      advance()
       const disk = db.disks.find((d) => d.id === id) ?? db.failedDisks.find((d) => d.id === id)
       if (!disk) throw new ApiError(404, 'not_found', 'No such disk')
       return toDisk(disk)
     },
-    async create({ name, trashDays }) {
+    async create({ name, trashDays, storage, access = [] }) {
       await latency(400, 700)
       const me = requireAdmin()
-      advanceDisks()
+      advance()
       const clean = name.trim()
       if (!DISK_NAME.test(clean) || !Number.isInteger(trashDays) || trashDays < 0 || trashDays > 365) {
         throw new ApiError(422, 'validation', 'Invalid disk')
       }
-      if (db.disks.length >= DISK_LIMIT) throw new ApiError(409, 'disk_limit_reached', 'At most 15 disks')
-      // Names are unique among live disks; the name in the bucket and the database number are
-      // burned forever, failed and deleted disks included.
-      const all = [...db.disks, ...db.failedDisks]
-      // macOS compares folder names case-insensitively: "Progetti" and "progetti" collide.
-      if (db.disks.some((d) => d.name.toLowerCase() === clean.toLowerCase())) {
-        throw new ApiError(409, 'disk_name_taken', 'Name taken')
+      if (!manual() && storage) throw new ApiError(422, 'validation', 'The provider creates each disk’s bucket: send no storage', { field: 'storage' })
+      if (manual() && !storage) throw new ApiError(422, 'validation', 'Each disk has its own bucket and key: paste them', { field: 'storage' })
+      if (storage && (!BUCKET_NAME.test(storage.bucket) || !validKey(storage.accessKeyId) || !validKey(storage.secretKey))) {
+        throw new ApiError(422, 'validation', 'Invalid request')
       }
+      const endpoint = storage?.endpoint?.trim() || db.storage.endpoint
+      const region = storage?.region?.trim() || db.storage.region
+      // The pasted key is probed before anything is recorded.
+      if (storage) probeWith(storage.bucket, storage.accessKeyId)
+      // macOS compares folder names case-insensitively: "Progetti" and "progetti" collide.
+      if (db.disks.some((d) => d.name.toLowerCase() === clean.toLowerCase())) throw new ApiError(409, 'disk_name_taken', 'Name already in use')
+      const id = uid('d')
+      const bucket = storage?.bucket ?? managedBucketOf(id)
+      if (db.disks.some((d) => d.endpoint === endpoint && d.bucket === bucket)) throw new ApiError(409, 'bucket_taken', 'Another disk uses this bucket', { field: 'bucket' })
+      if (storage && db.disks.some((d) => d.keyId === storage.accessKeyId.trim())) throw new ApiError(422, 'validation', 'This key already serves another disk', { field: 'accessKeyId' })
+      const people = access.map((entry) => {
+        const person = db.people.find((p) => p.id === entry.personId && p.status !== 'removed')
+        if (!person) throw new ApiError(422, 'validation', 'No such person', { field: 'access', personId: entry.personId })
+        return { person, access: entry.access }
+      })
+      if (!people.some((e) => e.person.id === me.id)) people.push({ person: me, access: 'write' })
+      const all = [...db.disks, ...db.failedDisks]
       const volumeName = deriveVolumeName(clean, new Set(all.map((d) => d.volumeName)))
+      const keyId = storage ? storage.accessKeyId.trim() : null
       const disk: DiskRow = {
-        id: uid('d'), name: clean, volumeName, mountPath: mountPathOf(clean), state: 'creating', error: null, status: 'online',
-        bucket: db.storage.bucket, region: db.storage.region, endpoint: db.storage.endpoint,
-        metaDb: Math.max(0, ...all.map((d) => d.metaDb)) + 1, blockSizeKb: 1024, trashDays, trashBytes: 0, usedBytes: 0, fileCount: 0,
-        lastWriteAt: null, mountedBy: 0, cache: { ...DEFAULT_CACHE }, createdAt: iso(), createdBy: me.name ?? me.email,
+        id, name: clean, volumeName, mountPath: mountPathOf(clean), state: 'creating', error: null, status: 'online',
+        bucket, region, endpoint, metaUrl: metaUrlOf(volumeName), blockSizeKb: 1024, trashDays, trashBytes: 0, usedBytes: 0, fileCount: 0,
+        lastWriteAt: null, mountedBy: 0, cache: { ...DEFAULT_CACHE }, createdAt: iso(), createdBy: labelOf(me),
         formatDoneAt: iso(now() + FORMAT_MS), formatFails: /fail/i.test(clean),
+        keyId, keyTail: keyId ? tailOf(keyId) : null, rotatedAt: null, exposures: [], rotation: null,
+        versioning: { ...VERSIONING_UNKNOWN }, storageState: 'unknown', lastProbeAt: null, latencyMs: 3,
       }
       db.disks.push(disk)
-      log({ actor: actorOf(me), action: 'disk_created', category: 'disks', target: { kind: 'disk', id: disk.id, label: disk.name }, detail: { blockSize: '1 MB' } })
+      log({ actor: actorOf(me), action: 'disk_created', category: 'disks', target: { kind: 'disk', id, label: clean }, detail: { blockSize: '1 MB' } })
+      if (keyId) log({ actor: actorOf(me), action: 'key_created', category: 'key', target: { kind: 'key', id: uid('k'), label: tailOf(keyId) }, detail: { holder: 'disk', accessKeyTail: tailOf(keyId), for: clean } })
+      for (const e of people) putAccess(disk, e.person, e.access, me)
       save()
       return toDisk(disk)
     },
     async update(id, body) {
       await latency()
       const me = requireAdmin()
-      const disk = db.disks.find((d) => d.id === id && d.state === 'ready')
+      const disk = db.disks.find((d) => d.id === id)
       if (!disk) throw new ApiError(404, 'not_found', 'No such disk')
-      const fields: string[] = []
+      if (disk.state !== 'ready') throw new ApiError(409, 'invalid_state', 'The disk is not ready')
+      const detail: Record<string, number[]> = {}
       if (body.trashDays !== undefined && body.trashDays !== disk.trashDays) {
+        detail.trashDays = [disk.trashDays, body.trashDays]
         disk.trashDays = body.trashDays
-        fields.push('trashDays')
       }
       if (body.cache && body.cache.expireDays !== disk.cache.expireDays) {
+        detail.cacheExpireDays = [disk.cache.expireDays, body.cache.expireDays]
         disk.cache = { expireDays: body.cache.expireDays }
-        fields.push('cacheExpireDays')
       }
-      log({ actor: actorOf(me), action: 'disk_updated', category: 'disks', target: { kind: 'disk', id, label: disk.name }, detail: { fields } })
+      if (Object.keys(detail).length > 0) log({ actor: actorOf(me), action: 'disk_updated', category: 'disks', target: { kind: 'disk', id, label: disk.name }, detail })
       save()
       return toDisk(disk)
+    },
+    async probe(id) {
+      await latency(700, 1300)
+      requireAdmin()
+      const disk = db.disks.find((d) => d.id === id)
+      if (!disk) throw new ApiError(404, 'not_found', 'No such disk')
+      if (disk.state !== 'ready' && !disk.keyId) throw new ApiError(409, 'invalid_state', 'The disk has no key to probe with')
+      disk.lastProbeAt = iso()
+      disk.storageState = 'ok'
+      save()
+    },
+  },
+
+  access: {
+    async list() {
+      await latency()
+      requireAdmin()
+      advance()
+      const people = db.people.filter((p) => p.status !== 'removed')
+      return db.disks.flatMap((d) =>
+        people.map((p): DiskAccess => {
+          const row = accessRow(d.id, p.id)
+          return { diskId: d.id, personId: p.id, access: row?.access ?? 'none', applied: applied(row) }
+        }),
+      )
+    },
+    async set(diskId, personId, access) {
+      await latency(250, 500)
+      const me = requireAdmin()
+      advance()
+      const disk = db.disks.find((d) => d.id === diskId)
+      if (!disk) throw new ApiError(404, 'not_found', 'No such disk')
+      const person = db.people.find((p) => p.id === personId && p.status !== 'removed')
+      if (!person) throw new ApiError(404, 'not_found', 'No such person')
+      // Read before the change: a device that had a user on the instance could read the key.
+      if (access === 'none' && manual() && disksSeenBy(person.id).some((d) => d.id === disk.id)) openExposure(disk, 'access_removed', labelOf(person))
+      putAccess(disk, person, access, me)
+      save()
+      return { diskId, personId, access, applied: applied(accessRow(diskId, personId)) }
     },
   },
 
@@ -554,48 +808,59 @@ export const fakeApi: Api = {
       requireAdmin()
       return keyStatus()
     },
-    async startRotation({ accessKeyId, secretKey }) {
+    async startRotation({ diskId, accessKeyId, secretKey }) {
       await latency()
       const me = requireAdmin()
-      if (accessKeyId.trim().length < 8 || secretKey.trim().length < 8) throw new ApiError(422, 'validation', 'Key too short')
-      const current = rotationOf()
-      if (current?.state === 'applying') throw new ApiError(409, 'rotation_in_progress', 'A rotation is running')
+      if (!manual()) throw new ApiError(409, 'invalid_state', 'Managed storage gives each device its own key: nothing to rotate')
+      if (!validKey(accessKeyId) || !validKey(secretKey)) throw new ApiError(422, 'validation', 'Invalid request')
+      const disk = db.disks.find((d) => d.id === diskId)
+      if (!disk) throw new ApiError(404, 'not_found', 'No such disk')
+      if (disk.state !== 'ready') throw new ApiError(409, 'invalid_state', 'The disk is not ready')
+      const current = rotationOf(disk)
+      if (current?.state === 'applying') throw new ApiError(409, 'rotation_in_progress', 'A rotation is already running')
+      const keyId = accessKeyId.trim()
+      if (db.disks.some((d) => d.keyId === keyId)) throw new ApiError(422, 'validation', 'This key is already in use', { field: 'accessKeyId' })
       heartbeat()
       // A rotation awaiting the old key's deletion is superseded: its keys stay to delete.
       const oldKeyTails =
         current?.state === 'awaiting_old_key_deletion' ? [...current.oldKeyTails, current.newKeyTail]
         : current?.state === 'failed' ? current.oldKeyTails
-        : [db.key.accessKeyTail]
-      const newKeyTail = accessKeyId.trim().slice(-5).toUpperCase()
-      db.key.rotation = {
-        id: uid('rot'), newKeyTail, oldKeyTails, startedAt: iso(),
-        devicesTotal: db.devices.map(toDevice).filter((m) => m.connected).length,
-        failCode: accessKeyId.toUpperCase().includes('DENIED') ? 'AccessDenied' : null, applied: false, failLogged: false,
+        : [disk.keyTail ?? '']
+      const newKeyTail = tailOf(keyId)
+      const upper = keyId.toUpperCase()
+      const seeing = db.devices.filter((m) => isConnected(m) && accessOf(disk.id, m.ownerId) !== 'none')
+      disk.rotation = {
+        id: uid('rot'), newKeyId: keyId, newKeyTail, oldKeyTails, startedAt: iso(), devicesTotal: seeing.length,
+        failStep: upper.includes('DENIED') ? 'probe' : upper.includes('BADCONFIG') ? 'config' : null, applied: false, failLogged: false,
       }
-      log({ actor: actorOf(me), action: 'key_rotation_started', category: 'key', target: { kind: 'key', id: db.key.rotation.id, label: newKeyTail }, detail: { newKeyTail, oldKeyTail: oldKeyTails.join(', ') } })
+      log({ actor: actorOf(me), action: 'key_rotation_started', category: 'key', target: { kind: 'key', id: disk.rotation.id, label: newKeyTail }, detail: { disk: disk.name, newKeyTail, oldKeyTail: oldKeyTails.join(', ') } })
       save()
-      const rotation = rotationOf()
+      const rotation = rotationOf(disk)
       if (!rotation) throw new ApiError(500, 'server', 'Rotation lost')
       return rotation
     },
     async getRotation(id) {
       await latency(120, 260)
       requireAdmin()
-      const rotation = rotationOf()
-      if (!rotation || rotation.id !== id) throw new ApiError(404, 'not_found', 'No such rotation')
+      const disk = db.disks.find((d) => d.rotation?.id === id)
+      const rotation = disk ? rotationOf(disk) : null
+      if (!rotation) throw new ApiError(404, 'not_found', 'No such rotation')
       return rotation
     },
     async close(id) {
       await latency()
       const me = requireAdmin()
-      const rotation = rotationOf()
-      if (!rotation || rotation.id !== id || rotation.state !== 'awaiting_old_key_deletion') throw new ApiError(409, 'validation', 'Nothing to close')
-      // Only what happened before the rotation started: a Mac revoked during it may have read
-      // the new key from its replica.
-      const closed = db.key.exposures.filter((x) => x.at < rotation.startedAt)
-      db.key.exposures = db.key.exposures.filter((x) => x.at >= rotation.startedAt)
-      db.key.rotation = null
-      log({ actor: actorOf(me), action: 'key_window_closed', category: 'key', target: { kind: 'key', id, label: rotation.newKeyTail }, detail: { oldKeyTail: rotation.oldKeyTails.join(', '), reasons: closed.length } })
+      const disk = db.disks.find((d) => d.rotation?.id === id)
+      const rotation = disk ? rotationOf(disk) : null
+      if (!disk || !rotation) throw new ApiError(404, 'not_found', 'No such rotation')
+      if (rotation.state !== 'awaiting_old_key_deletion') throw new ApiError(409, 'invalid_state', 'Nothing to close')
+      // Only what happened before the rotation started: a device revoked during it may have
+      // read the new key from its replica.
+      const closed = disk.exposures.filter((x) => x.at < rotation.startedAt)
+      disk.exposures = disk.exposures.filter((x) => x.at >= rotation.startedAt)
+      disk.rotation = null
+      const tail = rotation.oldKeyTails.join(', ')
+      log({ actor: actorOf(me), action: 'key_window_closed', category: 'key', target: { kind: 'key', id, label: tail }, detail: { disk: disk.name, oldKeyTail: tail, reasons: closed.length } })
       save()
       return keyStatus()
     },
@@ -605,6 +870,7 @@ export const fakeApi: Api = {
     async list(q) {
       await latency(300, 700)
       requireAdmin()
+      advance()
       const all = filterAudit(q)
       const start = q.cursor ? Number(q.cursor) : 0
       const limit = q.limit ?? 20
@@ -617,11 +883,9 @@ export const fakeApi: Api = {
     async get() {
       await latency()
       requireAdmin()
-      return {
-        metadata: { state: 'ok', latencyMs: 3 + Math.round(Math.random() * 3), checkedAt: iso(now() - 18_000) },
-        storage: { state: 'ok', lastProbeAt: db.lastStorageProbeAt },
-        mail: { state: db.mail.host ? 'ok' : 'unconfigured', lastSentAt: db.lastMailAt },
-      }
+      advance()
+      const disks = db.disks.filter((d) => d.state === 'ready').map(healthOf)
+      return { ...summary(disks), mail: { state: db.mail.host ? 'ok' : 'unconfigured', lastSentAt: db.lastMailAt }, disks }
     },
   },
 
@@ -635,27 +899,33 @@ export const fakeApi: Api = {
       await latency(400, 800)
       const me = requireAdmin()
       const fields: string[] = []
-      if (body.storage) {
-        const changed = (['endpoint', 'region', 'bucket'] as const).some((k) => body.storage?.[k].trim() !== db.storage[k])
-        // A disk's format holds the bucket: storage cannot move under a live disk.
-        if (changed && db.disks.length > 0) throw new ApiError(409, 'storage_in_use', 'A disk exists')
-        if (changed) {
-          db.storage = { endpoint: body.storage.endpoint.trim(), region: body.storage.region.trim(), bucket: body.storage.bucket.trim() }
-          fields.push('storage')
-        }
-      }
       if (body.organizationName !== undefined && body.organizationName.trim() !== db.organizationName) {
-        if (!body.organizationName.trim()) throw new ApiError(422, 'validation', 'Name required')
+        if (!body.organizationName.trim()) throw new ApiError(422, 'validation', 'Invalid request')
         db.organizationName = body.organizationName.trim()
-        fields.push('name')
+        fields.push('organizationName')
+      }
+      if (body.mailLanguage && body.mailLanguage !== db.mailLanguage) {
+        db.mailLanguage = body.mailLanguage
+        fields.push('mailLanguage')
       }
       if (body.mail) {
         const { password, ...mail } = body.mail
-        const changed = (Object.keys(mail) as (keyof typeof mail)[]).some((k) => mail[k] !== db.mail[k]) || !!password
+        if (mail.host && (!mail.sender || mail.port < 1 || mail.port > 65535)) throw new ApiError(422, 'validation', 'A mail server needs a port and a sender', { field: 'mail' })
+        for (const k of ['host', 'port', 'username', 'sender'] as const) if (mail[k] !== db.mail[k]) fields.push(`mail.${k}`)
+        if (password) fields.push('mail.password')
         db.mail = { ...mail, passwordSet: db.mail.passwordSet || !!password }
-        if (changed) fields.push('smtp')
       }
-      log({ actor: actorOf(me), action: 'settings_updated', category: 'settings', target: { kind: 'organization', id: db.organizationId, label: db.organizationName }, detail: { fields } })
+      if (body.storage) {
+        const next = { endpoint: body.storage.endpoint.trim(), region: body.storage.region.trim() }
+        if (!next.endpoint) throw new ApiError(422, 'validation', 'Invalid request')
+        if (next.endpoint !== db.storage.endpoint || next.region !== db.storage.region) {
+          // The defaults are frozen once a disk exists.
+          if (db.disks.length > 0) throw new ApiError(409, 'storage_in_use', 'Storage cannot change while disks exist', { disks: db.disks.length })
+          db.storage = next
+          fields.push('storage')
+        }
+      }
+      if (fields.length > 0) log({ actor: actorOf(me), action: 'settings_updated', category: 'settings', target: { kind: 'organization', id: db.organizationId, label: db.organizationName }, detail: { fields } })
       save()
       return settingsOf()
     },
@@ -666,14 +936,12 @@ export const fakeApi: Api = {
       save()
       return { sentTo: me.email }
     },
-    async probeStorage({ bucket, region }) {
+    async probeStorage({ bucket, accessKeyId, secretKey }) {
       await latency(700, 1300)
       requireAdmin()
-      if (bucket.trim() !== db.storage.bucket) {
-        throw new ApiError(422, 'probe_failed', 'Probe failed', { code: 'NoSuchBucket', request: region.trim() || 'no region' })
-      }
-      db.lastStorageProbeAt = iso()
-      save()
+      if (!manual()) throw new ApiError(409, 'invalid_state', 'The provider creates each disk’s bucket: there is nothing to probe')
+      if (!bucket.trim() || !validKey(accessKeyId) || !validKey(secretKey)) throw new ApiError(422, 'validation', 'Invalid request')
+      probeWith(bucket.trim(), accessKeyId)
     },
   },
 }

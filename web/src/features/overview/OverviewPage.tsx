@@ -10,7 +10,7 @@ import { Led, Readout, State, Well } from '@/components/detail'
 import { Faceplate } from '@/components/marks'
 import { EmptyState, PageHeader, QueryView, SkeletonLines, StaleNotice } from '@/components/states'
 import { fmt, useI18n } from '@/i18n'
-import type { Disk, Health } from '@/lib/api'
+import type { Disk, Health, MetadataHealth, StorageHealth } from '@/lib/api'
 import { useFormat } from '@/lib/format'
 import { useNow } from '@/lib/hooks'
 import { useCurrentSession } from '@/features/auth/hooks'
@@ -115,16 +115,27 @@ function Services() {
   const { t } = useI18n()
   const f = useFormat()
   const health = useHealth()
+  const meta = (m: MetadataHealth) => (
+    <State led={m.state === 'ok' ? 'ok' : 'err'}>
+      {m.state === 'down' ? t.overview.metaDown : m.latencyMs === null ? t.overview.metaOkNoLatency : fmt(t.overview.metaOk, { ms: m.latencyMs })}
+    </State>
+  )
+  const storage = (s: StorageHealth) => (
+    <State led={s.state === 'ok' ? 'ok' : s.state === 'failing' ? 'err' : 'off'}>
+      {s.state === 'ok' ? t.overview.storageOk : s.state === 'failing' ? t.overview.storageFail : t.overview.storageUnknown}
+    </State>
+  )
   const body = (h: Health) => (
+    <>
     <div className="grid gap-x-7 gap-y-4 md:grid-cols-3">
       <Service
         name={t.overview.metadata}
-        state={<State led={h.metadata.state === 'ok' ? 'ok' : 'err'}>{h.metadata.state === 'ok' ? fmt(t.overview.metaOk, { ms: h.metadata.latencyMs ?? 0 }) : t.overview.metaDown}</State>}
-        note={fmt(t.overview.checked, { time: f.relative(h.metadata.checkedAt) })}
+        state={meta(h.metadata)}
+        note={h.metadata.checkedAt ? fmt(t.overview.checked, { time: f.relative(h.metadata.checkedAt) }) : t.overview.neverChecked}
       />
       <Service
         name={t.overview.storage}
-        state={<State led={h.storage.state === 'ok' ? 'ok' : 'err'}>{h.storage.state === 'ok' ? t.overview.storageOk : t.overview.storageFail}</State>}
+        state={storage(h.storage)}
         note={h.storage.lastProbeAt ? fmt(t.overview.probeAt, { time: f.relative(h.storage.lastProbeAt) }) : t.overview.neverProbed}
       />
       <Service
@@ -137,6 +148,30 @@ function Services() {
         note={h.mail.lastSentAt ? fmt(t.overview.lastSent, { time: f.relative(h.mail.lastSentAt) }) : t.overview.neverSent}
       />
     </div>
+    {/* The first two summarize the disks: the worst state, the highest latency. */}
+    {h.disks.length > 1 && (
+      <div className="relative -mx-[14px] mt-4 overflow-x-auto">
+        <table className="tbl">
+          <thead>
+            <tr>
+              <th>{t.overview.colDisk}</th>
+              <th>{t.overview.colMetadata}</th>
+              <th>{t.overview.colStorage}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {h.disks.map((d) => (
+              <tr key={d.id}>
+                <td className="font-semibold">{d.name}</td>
+                <td>{meta(d.metadata)}</td>
+                <td>{storage(d.storage)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    )}
+    </>
   )
   return (
     <Well title={t.overview.servicesTitle} className="mb-3.5">
@@ -150,13 +185,13 @@ function Services() {
 function ConnectedDevices() {
   const { t } = useI18n()
   const f = useFormat()
-  const macs = useDevices()
+  const devices = useDevices()
   useNow(30_000)
-  const live = macs.data?.filter((m) => !m.revokedAt) ?? []
+  const live = devices.data?.filter((m) => !m.revokedAt) ?? []
   const connected = live.filter((m) => m.connected).length
   return (
-    <Well title={macs.data ? fmt(t.overview.connectedTitle, { n: connected, total: live.length }) : t.nav.devices} className="flex flex-col">
-      <QueryView query={macs} staleNotice={false} loading={<SkeletonLines lines={5} />} isEmpty={() => live.length === 0} empty={<p className="text-sm text-ink-2">{t.overview.noneConnected}</p>}>
+    <Well title={devices.data ? fmt(t.overview.connectedTitle, { n: connected, total: live.length }) : t.nav.devices} className="flex flex-col">
+      <QueryView query={devices} staleNotice={false} loading={<SkeletonLines lines={5} />} isEmpty={() => live.length === 0} empty={<p className="text-sm text-ink-2">{t.overview.noneConnected}</p>}>
         {() => (
           <ul className="m-0 grid list-none gap-[13px] p-0 text-sm">
             {live.map((m) => (

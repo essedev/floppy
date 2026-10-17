@@ -9,15 +9,16 @@ export function useDevices() {
   return useQuery({ queryKey: queryKeys.devices, queryFn: () => api.devices.list(), refetchInterval: 30_000 })
 }
 
-/** Revokes a device's database user. */
+/** Revokes a device: its users on every disk are deleted. */
 export function useRevokeDevice() {
   const client = useQueryClient()
   return useMutation({
     mutationFn: (id: string) => api.devices.revoke(id),
     onSuccess: async (result) => {
-      client.setQueryData(queryKeys.key, result.key)
+      // A member gets no key status: the keys are for admins.
+      if (result.key) client.setQueryData(queryKeys.key, result.key)
       await Promise.all(
-        [queryKeys.devices, queryKeys.people, queryKeys.session, queryKeys.auditAll].map((queryKey) => client.invalidateQueries({ queryKey })),
+        [queryKeys.devices, queryKeys.people, queryKeys.access, queryKeys.session, queryKeys.auditAll].map((queryKey) => client.invalidateQueries({ queryKey })),
       )
     },
   })

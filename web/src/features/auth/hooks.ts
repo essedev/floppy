@@ -51,6 +51,15 @@ export function useOpenLink() {
   })
 }
 
+/** Accepts an invitation with the token of its link, and signs in. */
+export function useAcceptInvitation() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: (token: string) => api.auth.acceptInvitation(token),
+    onSuccess: (session) => client.setQueryData(queryKeys.session, session),
+  })
+}
+
 /** Signs out and forgets every cached answer. */
 export function useSignOut() {
   const client = useQueryClient()

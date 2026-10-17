@@ -19,7 +19,7 @@ export function useInvite() {
   const invalidate = useInvalidate()
   return useMutation({
     mutationFn: (body: InviteRequest) => api.people.invite(body),
-    onSuccess: () => invalidate(queryKeys.people, queryKeys.session, queryKeys.auditAll),
+    onSuccess: () => invalidate(queryKeys.people, queryKeys.access, queryKeys.session, queryKeys.auditAll),
   })
 }
 
@@ -32,7 +32,7 @@ export function useChangeRole() {
   })
 }
 
-/** Removes a person: their Macs are revoked and the key window opens. */
+/** Removes a person: their devices are revoked and, in manual storage, the windows of the disks they saw open. */
 export function useRemovePerson() {
   const client = useQueryClient()
   const invalidate = useInvalidate()
@@ -40,7 +40,7 @@ export function useRemovePerson() {
     mutationFn: (id: string) => api.people.remove(id),
     onSuccess: (result) => {
       client.setQueryData(queryKeys.key, result.key)
-      return invalidate(queryKeys.people, queryKeys.devices, queryKeys.session, queryKeys.auditAll)
+      return invalidate(queryKeys.people, queryKeys.access, queryKeys.devices, queryKeys.session, queryKeys.auditAll)
     },
   })
 }

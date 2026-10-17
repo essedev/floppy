@@ -36,11 +36,19 @@ export function FakeBanner() {
       {mail && (
         <span className="inline-flex flex-wrap items-center gap-x-2">
           <span>{fmt(t.fake.mail, { to: mail.to })}:</span>
-          <Link to={`/accedi/link?token=${encodeURIComponent(mail.token)}`} target="_blank" className="font-semibold text-ink underline underline-offset-2">
+          <Link
+            to={`${mail.kind === 'invite' ? '/invito' : '/accedi/link'}?token=${encodeURIComponent(mail.token)}`}
+            target="_blank"
+            className="font-semibold text-ink underline underline-offset-2"
+          >
             {t.fake.openLink}
           </Link>
-          <span>·</span>
-          <span className="num text-ink">{fmt(t.fake.code, { code: mail.code })}</span>
+          {mail.code && (
+            <>
+              <span>·</span>
+              <span className="num text-ink">{fmt(t.fake.code, { code: mail.code })}</span>
+            </>
+          )}
         </span>
       )}
       <span className="ml-auto flex flex-wrap gap-1.5">
@@ -64,6 +72,16 @@ export function FakeBanner() {
           }}
         >
           {t.fake.empty}
+        </button>
+        <button
+          type="button"
+          className={button}
+          onClick={() => {
+            control.reset('managed')
+            location.assign('/accedi')
+          }}
+        >
+          {t.fake.managed}
         </button>
         <button
           type="button"

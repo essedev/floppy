@@ -14,10 +14,12 @@ export interface DialogProps {
   onSubmit?(): void
   /** While a request runs, Escape and the backdrop do not close it. */
   busy?: boolean
+  /** A wider dialog, for forms with two columns of fields. */
+  wide?: boolean
 }
 
 /** A modal dialog, open while mounted. */
-export function Dialog({ title, children, actions, onClose, onSubmit, busy = false }: DialogProps) {
+export function Dialog({ title, children, actions, onClose, onSubmit, busy = false, wide = false }: DialogProps) {
   const ref = useRef<HTMLDialogElement>(null)
   const titleId = useId()
 
@@ -45,7 +47,7 @@ export function Dialog({ title, children, actions, onClose, onSubmit, busy = fal
     <dialog
       ref={ref}
       aria-labelledby={titleId}
-      className="dlg m-auto w-[min(480px,calc(100vw-32px))] max-w-none rounded-[20px] border-0 bg-surface p-0 text-ink shadow-pop"
+      className={`dlg m-auto ${wide ? 'w-[min(640px,calc(100vw-32px))]' : 'w-[min(480px,calc(100vw-32px))]'} max-w-none rounded-[20px] border-0 bg-surface p-0 text-ink shadow-pop`}
       onCancel={(e) => {
         e.preventDefault()
         if (!busy) onClose()

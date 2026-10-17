@@ -1,114 +1,34 @@
 /*
-  Disks (concept-e-admin, "Dischi"): each disk is a JuiceFS volume with its own Valkey
-  database, its objects in the organization's bucket, 1 MB blocks (DECISIONS #15), a trash and
-  the cache expiry its Macs get (each Mac sizes its own cache). On a Mac it is a folder,
-  /Volumes/Floppy/<name>; names never change, CapCut keeps full paths. Creating one is a state:
-  the format runs after the answer, and can fail.
+  Disks (concept-e-admin, "Dischi"): each disk is a JuiceFS volume with its own Valkey instance
+  and its own bucket (DECISIONS #23), 1 MB blocks (DECISIONS #15), a trash, the cache expiry its
+  devices get (each device sizes its own cache) and the people who see it. On a device it is a
+  folder, /Volumes/Floppy/<name>; names never change, CapCut keeps full paths. Creating one is
+  a state: the instance, the bucket and the format come after the answer, and can fail.
 */
 
 import { Plus } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
-import { useSearchParams } from 'react-router'
+import { Link, useSearchParams } from 'react-router'
 import { Button } from '@/components/Button'
 import { Notice, SlotNote, State, Well } from '@/components/detail'
 import { Dialog } from '@/components/Dialog'
 import { Field, Input } from '@/components/Field'
 import { Faceplate } from '@/components/marks'
+import { VersioningState } from '@/components/storage'
 import { useErrorText } from '@/components/error-text'
-import { EmptyState, PageHeader, QueryView, SkeletonRows } from '@/components/states'
-import { fmt, plural, rich, useI18n } from '@/i18n'
-import { isApiError, type CachePolicy, type Disk } from '@/lib/api'
-import { DISK_NAME } from '@/lib/api/types'
+import { EmptyState, PageHeader, QueryView, SkeletonLines, SkeletonRows } from '@/components/states'
+import { fmt, plural, useI18n } from '@/i18n'
+import type { CachePolicy, Disk } from '@/lib/api'
 import { useFormat } from '@/lib/format'
 import { useFlash } from '@/lib/hooks'
+import { AccessCell } from '@/features/access/AccessControl'
+import { accessOf, useAccess } from '@/features/access/hooks'
+import { usePeople } from '@/features/people/hooks'
+import { useHealth } from '@/features/settings/hooks'
 import { DiskState } from './DiskState'
-import { useCreateDisk, useDiskCreation, useDisks, useUpdateDisk } from './hooks'
-
-/** Where a disk appears on a Mac. */
-const mountPathOf = (name: string) => `/Volumes/Floppy/${name || '...'}`
-
-/** Parses a whole number in a range, or null. */
-const intIn = (value: string, min: number, max: number) => {
-  const n = Number(value)
-  return Number.isInteger(n) && n >= min && n <= max ? n : null
-}
-
-function NewDiskDialog({ onClose, onCreated }: { onClose(): void; onCreated(disk: Disk): void }) {
-  const { t } = useI18n()
-  const errorText = useErrorText()
-  const create = useCreateDisk()
-  const [name, setName] = useState('')
-  const [trash, setTrash] = useState('7')
-  const [tried, setTried] = useState(false)
-  const clean = name.trim()
-  const trashDays = intIn(trash, 0, 365)
-  const nameOk = DISK_NAME.test(clean)
-  const taken = isApiError(create.error, 'disk_name_taken')
-  const bucket = useDisks().data?.[0]?.bucket ?? 'bucket'
-
-  const submit = () => {
-    setTried(true)
-    if (!nameOk || trashDays === null) return
-    create.mutate({ name: clean, trashDays }, { onSuccess: onCreated })
-  }
-
-  return (
-    <Dialog
-      title={t.disks.newTitle}
-      onClose={onClose}
-      onSubmit={submit}
-      busy={create.isPending}
-      actions={
-        <>
-          <Button variant="ghost" onClick={onClose} disabled={create.isPending}>
-            {t.common.cancel}
-          </Button>
-          <Button type="submit" variant="ink" busy={create.isPending}>
-            {t.disks.create}
-          </Button>
-        </>
-      }
-    >
-      <Field
-        label={t.disks.name}
-        hint={
-          <>
-            {rich(t.disks.nameHint, { path: <span className="num text-ink">{mountPathOf(clean)}</span> })} {t.disks.nameRule}
-          </>
-        }
-        error={tried && !nameOk ? (clean ? t.disks.nameRule : t.disks.required) : taken ? fmt(t.disks.nameTaken, { name: clean }) : null}
-      >
-        {(id, describedBy) => <Input
-            id={id}
-            autoFocus
-            maxLength={60}
-            value={name}
-            invalid={(tried && !nameOk) || taken}
-            aria-describedby={describedBy}
-            onChange={(e) => {
-              setName(e.target.value)
-              // A "name taken" answer is about the old name.
-              if (create.isError) create.reset()
-            }}
-          />}
-      </Field>
-      <SlotNote className="text-[13px]">{fmt(t.disks.filesWhere, { bucket })}</SlotNote>
-      <div className="grid gap-1.5">
-        <span className="text-[13px] font-semibold text-ink">{t.disks.blockSize}</span>
-        <span className="num text-ink">1 MB</span>
-        <span className="text-[13px]">{t.disks.blockSizeHint}</span>
-      </div>
-      <Field label={t.disks.trashDays} error={tried && trashDays === null ? fmt(t.disks.numberRange, { min: 0, max: 365 }) : null}>
-        {(id, describedBy) => <Input id={id} mono inputMode="numeric" className="!w-[110px]" value={trash} invalid={tried && trashDays === null} aria-describedby={describedBy} onChange={(e) => setTrash(e.target.value)} />}
-      </Field>
-      {create.isError && !taken && (
-        <p className="text-[13px] text-bad-text" role="alert">
-          {errorText(create.error)}
-        </p>
-      )}
-    </Dialog>
-  )
-}
+import { NewDiskDialog } from './NewDiskDialog'
+import { intIn } from './numbers'
+import { useDiskCreation, useDisks, useProbeDisk, useUpdateDisk } from './hooks'
 
 function EditDialog({ disk, onClose, onSaved }: { disk: Disk; onClose(): void; onSaved(): void }) {
   const { t } = useI18n()
@@ -180,6 +100,81 @@ function Row({ term, children }: { term: string; children: ReactNode }) {
   )
 }
 
+/** The disk's bucket as the control plane last tested it, with a new test on demand. */
+function StoragePart({ disk }: { disk: Disk }) {
+  const { t } = useI18n()
+  const f = useFormat()
+  const errorText = useErrorText()
+  const health = useHealth()
+  const probe = useProbeDisk()
+  const ready = disk.state === 'ready'
+  const status = health.data?.disks.find((d) => d.id === disk.id)?.storage
+  const state = status?.state ?? 'unknown'
+  return (
+    <>
+      <div className="mt-5 flex items-center justify-between gap-3 border-t border-line pt-4">
+        <h3 className="eyebrow m-0">{t.disks.storageCheck}</h3>
+        <Button size="sm" busy={probe.isPending} disabled={!ready} title={ready ? undefined : t.disks.creatingNote} onClick={() => probe.mutate(disk.id)}>
+          {t.disks.probeDisk}
+        </Button>
+      </div>
+      <dl className="m-0 mt-2 grid grid-cols-[auto_minmax(0,1fr)] gap-x-[18px] gap-y-1.5 text-sm">
+        <Row term={t.overview.storage}>
+          <State led={state === 'ok' ? 'ok' : state === 'failing' ? 'err' : 'off'}>
+            {state === 'ok' ? t.overview.storageOk : state === 'failing' ? t.overview.storageFail : t.overview.storageUnknown}
+          </State>
+        </Row>
+        <Row term={t.disks.versioning}><VersioningState versioning={status?.versioning ?? { state: 'unknown', oldVersionsDays: null }} /></Row>
+      </dl>
+      {status?.lastProbeAt && <p className="mt-2 text-[13px] text-ink-2">{fmt(t.disks.lastProbe, { time: f.relative(status.lastProbeAt) })}</p>}
+      {probe.isSuccess && <div className="mt-2"><State led="ok">{t.disks.probeDiskOk}</State></div>}
+      {probe.isError && <p className="mt-2 text-[13px] text-bad-text" role="alert">{errorText(probe.error)}</p>}
+    </>
+  )
+}
+
+/** Who sees the disk, each access editable and applied live. */
+function AccessPart({ disk }: { disk: Disk }) {
+  const { t } = useI18n()
+  const people = usePeople()
+  const access = useAccess()
+  const [flash, setFlash] = useFlash<string>(8000)
+  return (
+    <>
+      <div className="mt-5 flex items-center justify-between gap-3 border-t border-line pt-4">
+        <h3 className="eyebrow m-0">{t.disks.accessTitle}</h3>
+        <Link to="/accessi" className="text-[13px] text-ink-2 underline-offset-2 hover:text-ink hover:underline">
+          {t.nav.access}
+        </Link>
+      </div>
+      {flash && <p className="mt-2 text-[13px] text-bad-text" role="alert">{flash}</p>}
+      <QueryView query={people} loading={<SkeletonLines />} staleNotice={false}>
+        {(list) => (
+          <QueryView query={access} loading={<SkeletonLines />} staleNotice={false}>
+            {(entries) => (
+              <ul className="m-0 mt-1 grid list-none p-0 text-sm">
+                {list
+                  .filter((p) => p.status !== 'removed')
+                  .map((p) => {
+                    const name = p.name ?? p.email
+                    return (
+                      <li key={p.id} className="flex items-center justify-between gap-3 py-1">
+                        <Link to={`/persone/${encodeURIComponent(p.id)}`} className="min-w-0 truncate text-ink no-underline hover:underline">
+                          {name}
+                        </Link>
+                        <AccessCell entry={accessOf(entries, disk.id, p.id)} person={name} disk={disk.name} onError={setFlash} align="right" withText />
+                      </li>
+                    )
+                  })}
+              </ul>
+            )}
+          </QueryView>
+        )}
+      </QueryView>
+    </>
+  )
+}
+
 function DiskDetail({ disk, onEdit }: { disk: Disk; onEdit(): void }) {
   const { t, locale } = useI18n()
   const f = useFormat()
@@ -200,12 +195,14 @@ function DiskDetail({ disk, onEdit }: { disk: Disk; onEdit(): void }) {
         <Row term={t.disks.bucket}><Breakable text={disk.bucket} /></Row>
         <Row term={t.disks.region}><span className="num">{disk.region}</span></Row>
         <Row term={t.disks.endpoint}><Breakable text={disk.endpoint} /></Row>
-        <Row term={t.disks.database}><span className="num">{fmt(t.disks.databaseValue, { n: disk.metaDb })}</span></Row>
+        <Row term={t.disks.database}>{disk.metaUrl ? <Breakable text={disk.metaUrl} /> : <span className="text-ink-3">{t.disks.databasePending}</span>}</Row>
         <Row term={t.disks.blocks}><span className="num">{disk.blockSizeKb >= 1024 ? `${disk.blockSizeKb / 1024} MB` : `${disk.blockSizeKb} KB`}</span></Row>
         <Row term={t.disks.trash}>{fmt(t.disks.trashValue, { days: disk.trashDays, size: f.bytes(disk.trashBytes) })}</Row>
         <Row term={t.disks.mounted}>{plural(t.disks.mountedValue, disk.mountedBy, locale)}</Row>
         <Row term={t.disks.created}>{fmt(t.disks.createdValue, { date: f.date(disk.createdAt), who: disk.createdBy })}</Row>
       </dl>
+      <StoragePart disk={disk} />
+      <AccessPart disk={disk} />
       <div className="mt-5 flex items-center justify-between gap-3 border-t border-line pt-4">
         <h3 className="eyebrow m-0">{t.disks.cacheTitle}</h3>
         <Button size="sm" onClick={onEdit} disabled={!ready} title={ready ? undefined : t.disks.creatingNote}>
@@ -310,7 +307,7 @@ export function DisksPage() {
         {(list) => {
           const selected = list.find((d) => d.id === params.get('disco')) ?? list[0]
           return (
-            <div className="grid items-start gap-[18px] xl:grid-cols-[minmax(0,1fr)_340px]">
+            <div className="grid items-start gap-[18px] xl:grid-cols-[minmax(0,1fr)_380px]">
               <div className="relative overflow-x-auto">
                 <table className="tbl">
                   <thead>

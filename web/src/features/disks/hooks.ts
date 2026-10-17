@@ -1,4 +1,4 @@
-/* Disks: list, create, change cache policy and trash. */
+/* Disks: list, create with their bucket and access, change cache policy and trash, probe. */
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, type CreateDiskRequest, type UpdateDiskRequest } from '@/lib/api'
@@ -21,7 +21,8 @@ export function useDiskCreation(id: string | null) {
     queryFn: async () => {
       const disk = await api.disks.get(id ?? '')
       if (disk.state !== 'creating') {
-        await Promise.all([queryKeys.disks, queryKeys.session].map((queryKey) => client.invalidateQueries({ queryKey, exact: true })))
+        // A ready disk has an instance, a probe and the users of its people now.
+        await Promise.all([queryKeys.disks, queryKeys.session, queryKeys.access, queryKeys.health, queryKeys.key].map((queryKey) => client.invalidateQueries({ queryKey, exact: true })))
       }
       return disk
     },
@@ -36,7 +37,16 @@ export function useCreateDisk() {
   return useMutation({
     mutationFn: (body: CreateDiskRequest) => api.disks.create(body),
     onSuccess: () =>
-      Promise.all([queryKeys.disks, queryKeys.session, queryKeys.auditAll].map((queryKey) => client.invalidateQueries({ queryKey }))),
+      Promise.all([queryKeys.disks, queryKeys.access, queryKeys.key, queryKeys.session, queryKeys.auditAll].map((queryKey) => client.invalidateQueries({ queryKey }))),
+  })
+}
+
+/** A test write on a disk's bucket; the result lands in its storage status. */
+export function useProbeDisk() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => api.disks.probe(id),
+    onSettled: () => Promise.all([queryKeys.health, queryKeys.key].map((queryKey) => client.invalidateQueries({ queryKey }))),
   })
 }
 

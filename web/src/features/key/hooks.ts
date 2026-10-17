@@ -1,32 +1,45 @@
-/* The S3 key: its status, starting a rotation, following it, closing the window. */
+/* The storage keys: each disk's (manual) or each device's (managed), rotations and windows. */
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { api, type StartRotationRequest } from '@/lib/api'
+import { api, type KeyStatus, type StartRotationRequest } from '@/lib/api'
 import { queryKeys } from '@/lib/api/keys'
 
-/** The key, its risk window and any rotation; polled fast while a rotation applies. */
-export function useKeyStatus() {
+/** How often to poll: fast while a rotation applies, slower while one awaits the old key's
+ * deletion (for the informative devices count) or a revoked device's key is being deleted. */
+function pollEvery(status: KeyStatus | undefined): number | false {
+  const states = new Set(status?.disks.map((d) => d.rotation?.state))
+  if (states.has('applying')) return 700
+  if (states.has('awaiting_old_key_deletion') || status?.keys.some((k) => k.state !== 'active')) return 3000
+  return false
+}
+
+/** The keys, their windows and rotations; `enabled` false for members, who do not see them. */
+export function useKeyStatus(enabled = true) {
   return useQuery({
     queryKey: queryKeys.key,
     queryFn: () => api.key.get(),
-    // Fast while applying; slower while awaiting, for the informative Macs count.
-    refetchInterval: (query) => {
-      const state = query.state.data?.rotation?.state
-      return state === 'applying' ? 700 : state === 'awaiting_old_key_deletion' ? 3000 : false
-    },
+    enabled,
+    refetchInterval: (query) => pollEvery(query.state.data),
   })
 }
 
-/** Starts a rotation with a new key. */
+/** The disks whose key window is open, the earliest first. */
+export function openWindows(status: KeyStatus | undefined) {
+  return (status?.disks ?? [])
+    .flatMap((d) => (d.window ? [{ disk: d, window: d.window }] : []))
+    .sort((a, b) => a.window.openedAt.localeCompare(b.window.openedAt))
+}
+
+/** Starts a rotation of one disk's key with a new key. */
 export function useStartRotation() {
   const client = useQueryClient()
   return useMutation({
     mutationFn: (body: StartRotationRequest) => api.key.startRotation(body),
-    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.key }),
+    onSuccess: () => Promise.all([queryKeys.key, queryKeys.auditAll].map((queryKey) => client.invalidateQueries({ queryKey }))),
   })
 }
 
-/** Confirms the old key is deleted at the provider: the window closes. */
+/** Confirms the old key is deleted at the provider: the disk's window closes. */
 export function useCloseWindow() {
   const client = useQueryClient()
   return useMutation({
