@@ -36,7 +36,8 @@ cd site && pnpm dev            # pnpm build, pnpm check
 
 # Menu bar app (Tauri; reads `floppy status --json`, so a change there changes app/src-tauri/src/engine.rs)
 cd app && FLOPPY_BIN=/path/to/fake-floppy pnpm tauri dev   # without FLOPPY_BIN: ~/.floppy/bin/floppy
-cd app && pnpm dev             # views in a browser: ?view=panel|settings|welcome&scenario=...
+cd app && pnpm dev             # views in a browser: ?view=panel|settings|welcome&scenario=... (sign-in: &stage=signin&scenario=auth_<state>)
+cd app/src-tauri && FLOPPY_E2E_SERVER=http://127.0.0.1:4507 cargo test e2e -- --ignored   # sign-in against the local server stack
 app/scripts/render-marks.sh    # tray PNGs and app icons from design/mark/
 
 # Control plane: server/ (commands in .claude/rules/server.md); admin web, dev on the fake API
