@@ -1,6 +1,9 @@
 #!/bin/bash
-# Installs Floppy from this unpacked package into ~/.floppy and
-# mounts the disk. Run with: bash install.sh
+# Installs Floppy from this unpacked package into ~/.floppy (or FLOPPY_HOME)
+# and sets up the VM. Run with: bash install.sh
+# With a config.env in the package (the test zip) it mounts the single-user
+# volume; without one (the app's bundle) it installs the team version, whose
+# disks come after sign-in through `floppy disks apply`.
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -9,7 +12,8 @@ cd "$(dirname "$0")"
 major=$(sw_vers -productVersion | cut -d. -f1)
 [ "$major" -ge 13 ] || { echo "Floppy needs macOS 13 or later." >&2; exit 1; }
 
-FLOPPY_HOME="$HOME/.floppy"
+FLOPPY_HOME="${FLOPPY_HOME:-$HOME/.floppy}"
+export FLOPPY_HOME
 # Over an existing install this is an update: it keeps the config, the VM and
 # the volume. A fresh start is `floppy uninstall` first.
 if [ -f "$FLOPPY_HOME/installed" ]; then
@@ -25,7 +29,7 @@ if [ -f "$FLOPPY_HOME/lima.log" ] && [ "$(du -m "$FLOPPY_HOME/lima.log" | cut -f
   : > "$FLOPPY_HOME/lima.log"
 fi
 # Keep the config of a previous install: it names the volume this Mac uses.
-if [ ! -f "$FLOPPY_HOME/config.env" ]; then
+if [ -f config.env ] && [ ! -f "$FLOPPY_HOME/config.env" ]; then
   install -m 600 config.env "$FLOPPY_HOME/config.env"
   # Empty VOLUME_NAME: one volume per Mac, named after the user plus a random
   # suffix, so the same package can go to several people on one bucket.
@@ -40,4 +44,6 @@ fi
 xattr -dr com.apple.quarantine "$FLOPPY_HOME" 2>/dev/null || true
 
 "$FLOPPY_HOME/bin/floppy" setup
-echo "Floppy is in the Finder sidebar. Commands: ~/.floppy/bin/floppy"
+if [ -f "$FLOPPY_HOME/config.env" ]; then
+  echo "Floppy is in the Finder sidebar. Commands: $FLOPPY_HOME/bin/floppy"
+fi

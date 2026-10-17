@@ -277,7 +277,7 @@ The macOS module: a command (`macos/bin/floppy`), the engine the Tauri app drive
 
 ## Team disks
 
-The engine of the team version, in `macos/` next to the single-user mode, which keeps working until the zip retires. The menu bar app drives it; nothing in it talks to the control plane. A Mac runs one mode: with `~/.floppy/config.env` the single-user volume, without it the team version. `floppy setup` without a `config.env` creates and provisions the VM before sign-in and prints "Installed; the disks are set up after sign-in".
+The engine of the team version, in `macos/` next to the single-user mode, which keeps working until the zip retires. The menu bar app drives it; nothing in it talks to the control plane. A Mac runs one mode: with `~/.floppy/config.env` the single-user volume, without it the team version. `install.sh` from a package without a `config.env` (the app's bundle) runs `floppy setup`, which creates and provisions the VM before sign-in and prints "Installed; the disks are set up after sign-in"; over an existing install with a `config.env` it stays an update of the single-user volume. `FLOPPY_HOME` moves the whole install elsewhere (tests), and `FLOPPY_VM` names a development VM with its own launchd agent and `nsmb.conf` block; Lima needs the home's path short (its sockets must fit in 104 characters).
 
 **The disks file**, `~/.floppy/disks.json`, written by the app from the control plane's answer, with no secrets in it. Unknown keys are ignored; anything else wrong is refused with the list of problems.
 
