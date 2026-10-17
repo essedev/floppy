@@ -81,11 +81,20 @@ VOLUME_STATES = ("creating", "ready", "failed")
 KEY_STATES = ("pending", "active", "retiring", "retired", "rejected")
 ROTATION_STATES = ("applying", "awaiting_old_key_deletion", "failed", "superseded", "closed")
 STEP_STATES = ("pending", "running", "done", "failed")
-EXPOSURE_KINDS = ("person_removed", "mac_revoked")
+EXPOSURE_KINDS = ("person_removed", "device_revoked")
 ACTOR_KINDS = ("person", "system", "operator")
-AUDIT_CATEGORIES = ("access", "people", "macs", "key", "disks", "settings")
-AUDIT_TARGETS = ("person", "mac", "disk", "key", "organization")
+AUDIT_CATEGORIES = ("access", "people", "devices", "key", "disks", "settings")
+AUDIT_TARGETS = ("person", "device", "disk", "key", "organization")
+MAIL_LANGUAGES = ("it", "en")
+STORAGE_MODES = ("manual", "managed")
+STORAGE_PROVIDERS = ("ovh", "aws", "minio", "garage")
+KEY_SCOPES = ("team", "person", "device")
+KEY_HOLDERS = ("team", "person", "device", "control_plane")
+KEY_ORIGINS = ("pasted", "provider")
+VERSIONING_STATES = ("enabled", "suspended", "off", "unknown")
+ROTATION_TRIGGERS = ("admin", "revocation")
 AUDIT_ACTIONS = (
+    "organization_created",
     "signed_in",
     "sign_in_locked",
     "person_invited",
@@ -93,14 +102,16 @@ AUDIT_ACTIONS = (
     "invite_accepted",
     "role_changed",
     "person_removed",
-    "mac_registered",
-    "mac_revoked",
-    "mac_signed_out",
-    "mac_seen_outdated",
+    "device_registered",
+    "device_revoked",
+    "device_signed_out",
+    "device_seen_outdated",
     "key_rotation_started",
     "key_rotated",
     "key_rotation_failed",
     "key_window_closed",
+    "key_created",
+    "key_deleted",
     "disk_created",
     "disk_updated",
     "settings_updated",
@@ -118,6 +129,22 @@ class Organization(Base):
         CheckConstraint("valkey_databases BETWEEN 2 AND 1024", name="valkey_databases_range"),
         CheckConstraint("smtp_port BETWEEN 1 AND 65535", name="smtp_port_range"),
         CheckConstraint("(smtp_host IS NULL) = (smtp_port IS NULL)", name="smtp_host_port"),
+        CheckConstraint(_in("mail_language", *MAIL_LANGUAGES), name="mail_language"),
+        CheckConstraint(_in("storage_mode", *STORAGE_MODES), name="storage_mode"),
+        CheckConstraint(_in("storage_provider", *STORAGE_PROVIDERS), name="storage_provider"),
+        CheckConstraint(
+            "(storage_mode = 'managed') = (storage_provider IS NOT NULL)",
+            name="storage_provider_managed",
+        ),
+        CheckConstraint(_in("storage_key_scope", *KEY_SCOPES), name="storage_key_scope"),
+        CheckConstraint(
+            "storage_mode = 'managed' OR storage_key_scope IN ('team', 'person')",
+            name="storage_key_scope_manual",
+        ),
+        CheckConstraint(
+            "storage_mode = 'managed' OR storage_admin_credentials_enc IS NULL",
+            name="storage_admin_credentials_managed",
+        ),
         UniqueConstraint("slug", name="uq_organizations_slug"),
         Index(
             "uq_organizations_valkey_url",
@@ -150,6 +177,11 @@ class Organization(Base):
     smtp_username: Mapped[str | None] = mapped_column(Text)
     smtp_sender: Mapped[str | None] = mapped_column(Text)
     smtp_password_enc: Mapped[bytes | None] = mapped_column(LargeBinary)
+    mail_language: Mapped[str] = mapped_column(Text, server_default=text("'it'"))
+    storage_mode: Mapped[str] = mapped_column(Text, server_default=text("'manual'"))
+    storage_provider: Mapped[str | None] = mapped_column(Text)
+    storage_key_scope: Mapped[str] = mapped_column(Text, server_default=text("'team'"))
+    storage_admin_credentials_enc: Mapped[bytes | None] = mapped_column(LargeBinary)
     created_at: Mapped[datetime] = _ts(default=True)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=NOW, onupdate=func.now()
@@ -165,6 +197,7 @@ class OrganizationStatus(Base):
         CheckConstraint(_in("metadata_state", "ok", "down"), name="metadata_state"),
         CheckConstraint(_in("storage_state", "ok", "failing"), name="storage_state"),
         CheckConstraint(_in("mail_state", "ok", "unconfigured", "failing"), name="mail_state"),
+        CheckConstraint(_in("bucket_versioning", *VERSIONING_STATES), name="bucket_versioning"),
     )
 
     organization_id: Mapped[UUID] = mapped_column(
@@ -175,6 +208,8 @@ class OrganizationStatus(Base):
     metadata_checked_at: Mapped[datetime | None] = _ts(nullable=True)
     storage_state: Mapped[str] = mapped_column(Text, server_default=text("'ok'"))
     storage_probed_at: Mapped[datetime | None] = _ts(nullable=True)
+    bucket_versioning: Mapped[str] = mapped_column(Text, server_default=text("'unknown'"))
+    bucket_old_versions_days: Mapped[int | None] = mapped_column(Integer)
     mail_state: Mapped[str] = mapped_column(Text, server_default=text("'unconfigured'"))
     mail_sent_at: Mapped[datetime | None] = _ts(nullable=True)
     updated_at: Mapped[datetime] = mapped_column(
@@ -495,21 +530,47 @@ class DeviceStatus(Base):
 
 
 class S3Key(Base):
-    """One of the organization's S3 keys, one row per key ever pasted (DECISIONS #4)."""
+    """One of the organization's S3 keys, one row per key ever pasted or created (DECISIONS #22)."""
 
     __tablename__ = "s3_keys"
     __table_args__ = (
         _tenant_unique("s3_keys"),
         CheckConstraint(_in("state", *KEY_STATES), name="state"),
+        _tenant_fk(["membership_id"], "memberships"),
+        _tenant_fk(["device_id"], "devices"),
+        # A Mac's own key never has its secret here; the others keep it until retired.
         CheckConstraint(
-            "(state IN ('retired', 'rejected')) = (secret_key_enc IS NULL)", name="secret_wiped"
+            "(holder = 'device' OR state IN ('retired', 'rejected')) = (secret_key_enc IS NULL)",
+            name="secret_wiped",
         ),
+        CheckConstraint(_in("holder", *KEY_HOLDERS), name="holder"),
+        CheckConstraint("(holder = 'person') = (membership_id IS NOT NULL)", name="person_holder"),
+        CheckConstraint("(holder = 'device') = (device_id IS NOT NULL)", name="device_holder"),
+        CheckConstraint(_in("origin", *KEY_ORIGINS), name="origin"),
+        CheckConstraint("(origin = 'provider') = (provider_ref IS NOT NULL)", name="provider_ref"),
         CheckConstraint("length(access_key_id) BETWEEN 1 AND 256", name="access_key_id_length"),
         Index(
             "uq_s3_keys_organization_id_active",
             "organization_id",
             unique=True,
-            postgresql_where=text("state = 'active'"),
+            postgresql_where=text("state = 'active' AND holder IN ('team', 'control_plane')"),
+        ),
+        Index(
+            "uq_s3_keys_device_id_live",
+            "device_id",
+            unique=True,
+            postgresql_where=text("holder = 'device' AND state IN ('pending', 'active')"),
+        ),
+        Index(
+            "uq_s3_keys_membership_id_live",
+            "membership_id",
+            unique=True,
+            postgresql_where=text("holder = 'person' AND state IN ('pending', 'active')"),
+        ),
+        Index(
+            "ix_s3_keys_organization_id_deletion_owed",
+            "organization_id",
+            postgresql_where=text("origin = 'provider' AND state = 'retiring'"),
         ),
         Index(
             "uq_s3_keys_organization_id_access_key_id_live",
@@ -529,6 +590,11 @@ class S3Key(Base):
         Text, Computed("right(access_key_id, 5)", persisted=True)
     )
     secret_key_enc: Mapped[bytes | None] = mapped_column(LargeBinary)
+    holder: Mapped[str] = mapped_column(Text, server_default=text("'team'"))
+    membership_id: Mapped[UUID | None] = mapped_column(PgUUID(as_uuid=True))
+    device_id: Mapped[UUID | None] = mapped_column(PgUUID(as_uuid=True))
+    origin: Mapped[str] = mapped_column(Text, server_default=text("'pasted'"))
+    provider_ref: Mapped[str | None] = mapped_column(Text)
     state: Mapped[str] = mapped_column(Text, server_default=text("'pending'"))
     created_by_user_id: Mapped[UUID | None] = mapped_column(
         PgUUID(as_uuid=True), ForeignKey("users.id")
@@ -561,9 +627,7 @@ class Volume(Base):
         CheckConstraint("block_size_kb > 0", name="block_size_positive"),
         CheckConstraint("trash_days BETWEEN 0 AND 365", name="trash_days_range"),
         CheckConstraint("cache_expire_days BETWEEN 1 AND 365", name="cache_expire_days_range"),
-        CheckConstraint(
-            "state <> 'ready' OR (s3_key_id IS NOT NULL AND juicefs_uuid IS NOT NULL)", name="ready"
-        ),
+        CheckConstraint("state <> 'ready' OR juicefs_uuid IS NOT NULL", name="ready"),
         Index(
             "uq_volumes_organization_id_name",
             "organization_id",
@@ -635,6 +699,10 @@ class KeyRotation(Base):
         CheckConstraint(_in("state", *ROTATION_STATES), name="state"),
         CheckConstraint(_in("probe_state", *STEP_STATES), name="probe_state"),
         CheckConstraint("macs_total >= 0", name="macs_total_positive"),
+        CheckConstraint(_in("trigger", *ROTATION_TRIGGERS), name="trigger"),
+        CheckConstraint(
+            "(trigger = 'admin') = (started_by_user_id IS NOT NULL)", name="trigger_started_by"
+        ),
         Index(
             "uq_key_rotations_organization_id_applying",
             "organization_id",
@@ -660,7 +728,10 @@ class KeyRotation(Base):
     probe_error_code: Mapped[str | None] = mapped_column(Text)
     probe_error_request: Mapped[str | None] = mapped_column(Text)
     macs_total: Mapped[int] = mapped_column(Integer)
-    started_by_user_id: Mapped[UUID] = mapped_column(PgUUID(as_uuid=True), ForeignKey("users.id"))
+    started_by_user_id: Mapped[UUID | None] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("users.id")
+    )
+    trigger: Mapped[str] = mapped_column(Text, server_default=text("'admin'"))
     started_at: Mapped[datetime] = _ts(default=True)
     applied_at: Mapped[datetime | None] = _ts(nullable=True)
     failed_at: Mapped[datetime | None] = _ts(nullable=True)
@@ -705,7 +776,9 @@ class KeyExposure(Base):
         CheckConstraint(
             "(kind = 'person_removed') = (membership_id IS NOT NULL)", name="person_removed"
         ),
-        CheckConstraint("(kind = 'mac_revoked') = (device_id IS NOT NULL)", name="mac_revoked"),
+        CheckConstraint(
+            "(kind = 'device_revoked') = (device_id IS NOT NULL)", name="device_revoked"
+        ),
         CheckConstraint("(closed_at IS NULL) = (closed_by_rotation_id IS NULL)", name="closed"),
         Index(
             "ix_key_exposures_organization_id_open",

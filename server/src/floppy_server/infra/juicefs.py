@@ -51,9 +51,19 @@ class VolumeFormatter(Protocol):
     """The JuiceFS operations on a volume's format."""
 
     async def format(
-        self, location: VolumeLocation, key: S3Credentials, *, block_size_kb: int, trash_days: int
+        self,
+        location: VolumeLocation,
+        key: S3Credentials,
+        *,
+        block_size_kb: int,
+        trash_days: int,
+        store_key: bool = True,
     ) -> UUID:
-        """Formats a new volume and returns its JuiceFS UUID."""
+        """
+        Formats a new volume and returns its JuiceFS UUID. With `store_key` the key goes into
+        the format (team scope); without, the format holds no key and every mount brings
+        its own (person and device scopes, DATABASE_SCHEMA.md "Storage modes").
+        """
         ...
 
     async def set_key(self, location: VolumeLocation, key: S3Credentials) -> None:
@@ -78,7 +88,13 @@ class FakeVolumeFormatter:
     fail_config: set[str] = field(default_factory=set)
 
     async def format(
-        self, location: VolumeLocation, key: S3Credentials, *, block_size_kb: int, trash_days: int
+        self,
+        location: VolumeLocation,
+        key: S3Credentials,
+        *,
+        block_size_kb: int,
+        trash_days: int,
+        store_key: bool = True,
     ) -> UUID:
         if location.volume_name in self.fail_format or location.volume_name.startswith("fail-"):
             raise FormatError("juicefs format: storage is not accessible")
@@ -89,7 +105,7 @@ class FakeVolumeFormatter:
         self.formats[slot] = {
             "name": location.volume_name,
             "uuid": volume_uuid,
-            "access_key_id": key.access_key_id,
+            "access_key_id": key.access_key_id if store_key else "",
             "block_size_kb": block_size_kb,
             "trash_days": trash_days,
         }
@@ -175,19 +191,37 @@ class JuiceFSFormatter:
         return stdout.decode(errors="replace")
 
     @staticmethod
-    def _secrets(location: VolumeLocation, key: S3Credentials | None = None) -> dict[str, str]:
+    def _secrets(
+        location: VolumeLocation, key: S3Credentials | None = None, *, store_key: bool = True
+    ) -> dict[str, str]:
         secrets: dict[str, str] = {}
         if location.meta_password:
             secrets["META_PASSWORD"] = location.meta_password
         if key is not None:
-            secrets["ACCESS_KEY"] = key.access_key_id
-            secrets["SECRET_KEY"] = key.secret_key
+            # ACCESS_KEY and SECRET_KEY end up in the format (and, with patch 0003, change it);
+            # the AWS SDK's own variables are only used, never stored.
+            names = (
+                ("ACCESS_KEY", "SECRET_KEY")
+                if store_key
+                else (
+                    "AWS_ACCESS_KEY_ID",
+                    "AWS_SECRET_ACCESS_KEY",
+                )
+            )
+            secrets[names[0]] = key.access_key_id
+            secrets[names[1]] = key.secret_key
             if location.s3_region:
                 secrets["AWS_REGION"] = location.s3_region
         return secrets
 
     async def format(
-        self, location: VolumeLocation, key: S3Credentials, *, block_size_kb: int, trash_days: int
+        self,
+        location: VolumeLocation,
+        key: S3Credentials,
+        *,
+        block_size_kb: int,
+        trash_days: int,
+        store_key: bool = True,
     ) -> UUID:
         await self._run(
             [
@@ -203,7 +237,7 @@ class JuiceFSFormatter:
                 meta_url(location),
                 location.volume_name,
             ],
-            self._secrets(location, key),
+            self._secrets(location, key, store_key=store_key),
         )
         return await self._uuid(location)
 

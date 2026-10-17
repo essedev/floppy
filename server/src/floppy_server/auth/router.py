@@ -71,7 +71,7 @@ class OrganizationSummary(CamelModel):
     name: str
     disk_count: int
     people_count: int
-    mac_count: int
+    device_count: int
 
 
 class SessionOut(CamelModel):
@@ -140,7 +140,7 @@ async def session_view(
             name=org.name,
             disk_count=disks or 0,
             people_count=people or 0,
-            mac_count=macs or 0,
+            device_count=macs or 0,
         ),
     )
 
@@ -178,9 +178,14 @@ def _start_response(request: SignInRequest) -> SignInStartResponse:
     response_model=SignInStartResponse,
     dependencies=[Depends(rate_limit("sign-in"))],
 )
-async def start_sign_in(body: SignInStartRequest, ctx: CtxDep) -> SignInStartResponse:
+async def start_sign_in(
+    body: SignInStartRequest, request: Request, ctx: CtxDep
+) -> SignInStartResponse:
     """Sends a magic link and a code."""
-    return _start_response(await service.start_sign_in(ctx, kind="web", email=body.email))
+    started = await service.start_sign_in(
+        ctx, kind="web", email=body.email, accept_language=request.headers.get("accept-language")
+    )
+    return _start_response(started)
 
 
 @router.get("/auth/sign-in/{request_id}", response_model=SignInStatusResponse)
@@ -263,17 +268,20 @@ async def delete_session(
     response_model=SignInStartResponse,
     dependencies=[Depends(rate_limit("sign-in"))],
 )
-async def start_app_sign_in(body: AppSignInRequest, ctx: CtxDep) -> SignInStartResponse:
+async def start_app_sign_in(
+    body: AppSignInRequest, request: Request, ctx: CtxDep
+) -> SignInStartResponse:
     """The app's sign-in: a magic link that ends on the app's loopback, and a code."""
-    request = await service.start_sign_in(
+    started = await service.start_sign_in(
         ctx,
         kind="app",
         email=body.email,
         code_challenge=body.code_challenge,
         redirect_uri=body.redirect_uri,
         device_name=body.device_name.strip(),
+        accept_language=request.headers.get("accept-language"),
     )
-    return _start_response(request)
+    return _start_response(started)
 
 
 @router.get("/auth/app/link", response_class=HTMLResponse, include_in_schema=False)

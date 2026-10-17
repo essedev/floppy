@@ -181,6 +181,7 @@ async def start_sign_in(
     code_challenge: str | None = None,
     redirect_uri: str | None = None,
     device_name: str | None = None,
+    accept_language: str | None = None,
 ) -> SignInRequest:
     """A new sign-in request with its mail, or the current one while it cannot be resent yet."""
     address = email.strip().lower()
@@ -252,10 +253,16 @@ async def start_sign_in(
         await db.flush()
         request.code_hmac = ctx.box.code_hmac(request.id, code)
         org = member.organization if member else None
+        lang = (
+            mail_language(org)
+            if org
+            else mailtext.language_of(accept_language, ctx.settings.default_mail_language)
+        )
         if member is None:
-            mail = mailtext.not_a_member(to=address)
+            mail = mailtext.not_a_member(lang=lang, to=address)
         elif kind == "app":
             mail = mailtext.app_sign_in(
+                lang=lang,
                 to=address,
                 organization=org.name if org else None,
                 public_url=ctx.settings.public_url,
@@ -265,6 +272,7 @@ async def start_sign_in(
             )
         else:
             mail = mailtext.sign_in(
+                lang=lang,
                 to=address,
                 organization=org.name if org else None,
                 public_url=ctx.settings.public_url,
@@ -273,6 +281,11 @@ async def start_sign_in(
             )
         await send_mail(ctx, db, mail, org)
         return request
+
+
+def mail_language(org: Organization) -> mailtext.Language:
+    """The language of the mail sent for an organization."""
+    return "en" if org.mail_language == "en" else "it"
 
 
 def status_of(request: SignInRequest, now: datetime) -> str:

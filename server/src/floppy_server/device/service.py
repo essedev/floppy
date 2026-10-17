@@ -22,11 +22,25 @@ from floppy_server.api import CamelModel
 from floppy_server.audit.service import AuditActor, Target, record
 from floppy_server.context import Context, utcnow
 from floppy_server.crypto import token_hash, valkey_password
+from floppy_server.devices.service import (
+    delete_valkey_users,
+    is_outdated,
+    retire_reached_keys,
+    revoke_rows,
+)
 from floppy_server.disks.service import mount_path
 from floppy_server.errors import ApiError, invalid_state, unauthorized
 from floppy_server.infra.metadata import MetadataUnavailableError
-from floppy_server.macs.service import delete_valkey_users, is_outdated, revoke_rows
-from floppy_server.models import Device, DeviceStatus, Organization, User, Volume, advisory_lock
+from floppy_server.keys import scoped
+from floppy_server.models import (
+    Device,
+    DeviceStatus,
+    Organization,
+    S3Key,
+    User,
+    Volume,
+    advisory_lock,
+)
 
 Version = Field(min_length=1, max_length=40, pattern=r"^[0-9A-Za-z.+-]+$")
 
@@ -38,12 +52,27 @@ class RegisterRequest(CamelModel):
     macos_version: str = Version
 
 
+class S3KeyOut(CamelModel):
+    """An S3 key for the Mac's mounts, for the Keychain and the VM's 0600 file."""
+
+    access_key_id: str
+    secret_key: str
+
+
+KeyScope = Literal["team", "person", "device"]
+
+
 class RegisterResponse(CamelModel):
-    """The Mac's Valkey credentials, returned once, for the Keychain."""
+    """
+    The Mac's Valkey credentials, returned once, for the Keychain; with `person` or `device`
+    scope also the S3 key its mounts use (a Mac's own key is returned only here).
+    """
 
     valkey_username: str
     valkey_password: str
     valkey_url: str
+    key_scope: KeyScope
+    s3: S3KeyOut | None
 
 
 class DiskConfig(CamelModel):
@@ -58,9 +87,15 @@ class DiskConfig(CamelModel):
 
 
 class DeviceConfig(CamelModel):
-    """Everything the app needs to mount: the Valkey address and the disks; no secret."""
+    """
+    Everything the app needs to mount, no secret: the Valkey address, the disks, and how the
+    mounts get their S3 key. With `person` scope `s3AccessKeyTail` changes when the person's
+    key is replaced, and the app fetches the new one from `GET /device/key`.
+    """
 
     valkey_url: str
+    key_scope: KeyScope
+    s3_access_key_tail: str | None
     disks: list[DiskConfig]
 
 
@@ -121,12 +156,25 @@ async def _status(db: AsyncSession, device: Device, now: datetime, **values: obj
 
 
 async def register(ctx: Context, token: str, body: RegisterRequest) -> RegisterResponse:
-    """Creates (or re-creates) the Mac's Valkey user and returns its password once."""
+    """
+    Creates (or re-creates) the Mac's Valkey user and returns its password once, with the S3
+    key its mounts use under `person` or `device` scope. A reissue in `device` scope retires
+    the Mac's previous key, which the adapter then deletes.
+    """
+    registered, organization_id = await _register(ctx, token, body)
+    if registered.key_scope == "device":
+        await scoped.delete_owed_keys(ctx, organization_id)
+    return registered
+
+
+async def _register(
+    ctx: Context, token: str, body: RegisterRequest
+) -> tuple[RegisterResponse, UUID]:
     now = utcnow()
     async with ctx.sessions() as db, db.begin():
         device = await device_by_token(db, token, for_update=True)
         if device.state == "revoked":
-            raise unauthorized("The Mac was revoked")
+            raise unauthorized("The device was revoked")
         org = await db.get(Organization, device.organization_id)
         if org is None or org.deleted_at is not None:
             raise unauthorized()
@@ -154,19 +202,49 @@ async def register(ctx: Context, token: str, body: RegisterRequest) -> RegisterR
         }
         if reissued:
             detail["reissued"] = 1
+        who = AuditActor.person(device.user_id, label)
         record(
-            db,
-            org.id,
-            "mac_registered",
-            AuditActor.person(device.user_id, label),
-            Target("mac", device.id, device.name),
-            detail,
+            db, org.id, "device_registered", who, Target("device", device.id, device.name), detail
         )
-        return RegisterResponse(
+        s3 = None
+        if org.storage_key_scope == "device":
+            created = await scoped.add_device_key(ctx, db, org, device, who)
+            s3 = S3KeyOut(access_key_id=created.access_key_id, secret_key=created.secret_key)
+        elif org.storage_key_scope == "person":
+            s3 = await _person_key_out(ctx, db, device)
+        response = RegisterResponse(
             valkey_username=device.valkey_username,
             valkey_password=password,
             valkey_url=org.valkey_url,
+            key_scope=org.storage_key_scope,
+            s3=s3,
         )
+        return response, org.id
+
+
+async def _person_key_out(ctx: Context, db: AsyncSession, device: Device) -> S3KeyOut | None:
+    key = await scoped.person_key(db, device.organization_id, device.membership_id)
+    if key is None:
+        return None
+    pair = ctx.credentials(key)
+    return S3KeyOut(access_key_id=pair.access_key_id, secret_key=pair.secret_key)
+
+
+async def mount_key(ctx: Context, token: str) -> S3KeyOut:
+    """The person's current S3 key, for an active Mac of a `person`-scope organization."""
+    async with ctx.sessions() as db:
+        device = await device_by_token(db, token)
+        if device.state != "active":
+            raise unauthorized("The device is not registered")
+        org = await db.get(Organization, device.organization_id)
+        if org is None:
+            raise unauthorized()
+        if org.storage_key_scope != "person":
+            raise invalid_state("Only person keys are fetched again; a Mac's own key comes once")
+        key = await _person_key_out(ctx, db, device)
+    if key is None:
+        raise invalid_state("The person has no key yet")
+    return key
 
 
 async def config(ctx: Context, token: str) -> DeviceConfig:
@@ -174,7 +252,7 @@ async def config(ctx: Context, token: str) -> DeviceConfig:
     async with ctx.sessions() as db:
         device = await device_by_token(db, token)
         if device.state != "active":
-            raise unauthorized("The Mac is not registered")
+            raise unauthorized("The device is not registered")
         org = await db.get(Organization, device.organization_id)
         if org is None:
             raise unauthorized()
@@ -189,8 +267,24 @@ async def config(ctx: Context, token: str) -> DeviceConfig:
                 .order_by(Volume.created_at)
             )
         ).scalars()
+        tail = None
+        if org.storage_key_scope != "team":
+            own = (
+                await db.execute(
+                    select(S3Key.access_key_tail).where(
+                        S3Key.organization_id == org.id,
+                        S3Key.state == "active",
+                        (S3Key.device_id == device.id)
+                        if org.storage_key_scope == "device"
+                        else (S3Key.membership_id == device.membership_id),
+                    )
+                )
+            ).scalar_one_or_none()
+            tail = own
         return DeviceConfig(
             valkey_url=org.valkey_url,
+            key_scope=org.storage_key_scope,
+            s3_access_key_tail=tail,
             disks=[
                 DiskConfig(
                     id=v.id,
@@ -213,7 +307,7 @@ async def heartbeat(ctx: Context, token: str, body: HeartbeatRequest) -> Heartbe
         if device.state != "active":
             if device.state == "revoked":
                 return HeartbeatResponse(state="revoked")
-            raise unauthorized("The Mac is not registered")
+            raise unauthorized("The device is not registered")
         await _status(
             db,
             device,
@@ -233,9 +327,9 @@ async def heartbeat(ctx: Context, token: str, body: HeartbeatRequest) -> Heartbe
                 record(
                     db,
                     device.organization_id,
-                    "mac_seen_outdated",
+                    "device_seen_outdated",
                     AuditActor.system(),
-                    Target("mac", device.id, device.name),
+                    Target("device", device.id, device.name),
                     {"appVersion": body.app_version},
                 )
         return HeartbeatResponse(state="active")
@@ -251,7 +345,7 @@ async def sign_out(ctx: Context, token: str) -> None:
     async with ctx.sessions() as db, db.begin():
         device = await device_by_token(db, token, for_update=True)
         if device.state == "revoked":
-            raise invalid_state("The Mac is already signed out")
+            raise invalid_state("The device is already signed out")
         label = await _owner_label(db, device)
         revoke_rows(
             db,
@@ -259,7 +353,11 @@ async def sign_out(ctx: Context, token: str) -> None:
             reason="signed_out",
             actor=AuditActor.person(device.user_id, label),
             now=now,
-            audit_action="mac_signed_out",
+            audit_action="device_signed_out",
         )
+        org = await db.get(Organization, device.organization_id)
+        if org is not None:
+            await retire_reached_keys(ctx, db, org, [device], "signed_out")
         organization_id, device_id = device.organization_id, device.id
     await delete_valkey_users(ctx, organization_id, [device_id])
+    await scoped.delete_owed_keys(ctx, organization_id)

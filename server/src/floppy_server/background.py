@@ -23,10 +23,11 @@ from sqlalchemy import select, update
 
 from floppy_server.audit.service import AuditActor
 from floppy_server.context import Context, utcnow
+from floppy_server.devices.service import revoke_rows
 from floppy_server.disks.service import run_disk_formats
 from floppy_server.infra.metadata import MetadataUnavailableError
-from floppy_server.keys.service import run_rotations
-from floppy_server.macs.service import revoke_rows
+from floppy_server.keys.scoped import delete_owed_keys
+from floppy_server.keys.service import rotate_after_revocations, run_rotations
 from floppy_server.models import (
     Device,
     Organization,
@@ -201,6 +202,8 @@ async def reconcile_all(ctx: Context) -> None:
     await expire_stale_rows(ctx)
     for organization_id in await _organizations(ctx):
         await reconcile_acl(ctx, organization_id)
+        await delete_owed_keys(ctx, organization_id)
+    await rotate_after_revocations(ctx)
 
 
 async def poll_all(ctx: Context) -> None:

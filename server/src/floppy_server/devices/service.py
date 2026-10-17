@@ -23,15 +23,16 @@ from floppy_server.audit.service import AuditActor, DetailValue, Target, record
 from floppy_server.context import Context, utcnow
 from floppy_server.errors import invalid_state, not_found
 from floppy_server.infra.metadata import MetadataUnavailableError
+from floppy_server.keys import scoped
 from floppy_server.keys.service import open_exposure
-from floppy_server.models import Device, DeviceStatus, Organization, User
+from floppy_server.models import Device, DeviceStatus, Membership, Organization, User
 
 log = logging.getLogger(__name__)
 
 CONNECTED_WITHIN = timedelta(minutes=2)
 
 
-class MacOwner(CamelModel):
+class DeviceOwner(CamelModel):
     """Whose Mac it is."""
 
     id: UUID
@@ -45,13 +46,13 @@ class Replica(CamelModel):
     lag_ms: int | None
 
 
-class MacOut(CamelModel):
+class DeviceOut(CamelModel):
     """A Mac, as the admin web lists it."""
 
     id: UUID
     name: str
     state: Literal["pending", "active", "revoked"]
-    owner: MacOwner
+    owner: DeviceOwner
     valkey_user: str
     macos_version: str
     app_version: str
@@ -79,9 +80,9 @@ def is_outdated(app_version: str | None, latest: str) -> bool:
     return bool(app_version) and version_tuple(app_version or "") < version_tuple(latest)
 
 
-def mac_view(
+def device_view(
     device: Device, owner: User, status: DeviceStatus | None, revoker: User | None, latest: str
-) -> MacOut:
+) -> DeviceOut:
     """The API shape of a device row with its status."""
     now = utcnow()
     connected = (
@@ -95,11 +96,11 @@ def mac_view(
     revoked_by = None
     if device.state == "revoked":
         revoked_by = (revoker.name or revoker.email) if revoker else None
-    return MacOut(
+    return DeviceOut(
         id=device.id,
         name=device.name,
         state=device.state,
-        owner=MacOwner(id=owner.id, name=owner.name or owner.email),
+        owner=DeviceOwner(id=owner.id, name=owner.name or owner.email),
         valkey_user=device.valkey_username,
         macos_version=status.macos_version if status else "",
         app_version=status.app_version if status else "",
@@ -112,7 +113,7 @@ def mac_view(
     )
 
 
-async def list_macs(ctx: Context, actor: Actor) -> list[MacOut]:
+async def list_devices(ctx: Context, actor: Actor) -> list[DeviceOut]:
     """Every Mac of the organization for an admin; only the caller's own for a member."""
     owner, revoker = aliased(User), aliased(User)
     query = (
@@ -130,12 +131,12 @@ async def list_macs(ctx: Context, actor: Actor) -> list[MacOut]:
         query = query.where(Device.user_id == actor.user_id)
     async with ctx.sessions() as db:
         rows = (await db.execute(query)).all()
-    macs = [mac_view(d, o, s, r, ctx.settings.latest_app_version) for d, o, s, r in rows]
+    macs = [device_view(d, o, s, r, ctx.settings.latest_app_version) for d, o, s, r in rows]
     order = {"active": 0, "pending": 1, "revoked": 2}
     return sorted(macs, key=lambda m: (order[m.state], not m.connected, m.name.lower()))
 
 
-async def get_mac(ctx: Context, organization_id: UUID, device_id: UUID) -> MacOut:
+async def get_device(ctx: Context, organization_id: UUID, device_id: UUID) -> DeviceOut:
     """One Mac with its status."""
     owner, revoker = aliased(User), aliased(User)
     async with ctx.sessions() as db:
@@ -153,9 +154,9 @@ async def get_mac(ctx: Context, organization_id: UUID, device_id: UUID) -> MacOu
             )
         ).one_or_none()
     if row is None:
-        raise not_found("No such Mac")
+        raise not_found("No such device")
     device, owner_row, status, revoker_row = row
-    return mac_view(device, owner_row, status, revoker_row, ctx.settings.latest_app_version)
+    return device_view(device, owner_row, status, revoker_row, ctx.settings.latest_app_version)
 
 
 def revoke_rows(
@@ -165,7 +166,7 @@ def revoke_rows(
     reason: str,
     actor: AuditActor,
     now: datetime,
-    audit_action: str = "mac_revoked",
+    audit_action: str = "device_revoked",
 ) -> list[Device]:
     """
     Marks devices revoked and logs each; returns those that held Valkey credentials, which
@@ -179,13 +180,15 @@ def revoke_rows(
         device.revoked_at = now
         device.revoke_reason = reason
         device.revoked_by_user_id = actor.user_id
-        detail: dict[str, DetailValue] = {"reason": reason} if audit_action == "mac_revoked" else {}
+        detail: dict[str, DetailValue] = (
+            {"reason": reason} if audit_action == "device_revoked" else {}
+        )
         record(
             db,
             device.organization_id,
             audit_action,
             actor,
-            Target("mac", device.id, device.name),
+            Target("device", device.id, device.name),
             detail,
         )
     return exposed
@@ -231,10 +234,37 @@ async def delete_valkey_users(
             )
 
 
-async def revoke_mac(ctx: Context, actor: Actor, device_id: UUID) -> None:
+async def retire_reached_keys(
+    ctx: Context, db: AsyncSession, org: Organization, devices: Sequence[Device], reason: str
+) -> None:
     """
-    Revokes a Mac: an admin any, a member only their own (reason `owner`, a lost Mac). A Mac
-    that held credentials opens the key window.
+    What a revocation does to S3 beyond the team key's window (DATABASE_SCHEMA.md, "Mac
+    enrolment and revocation"): with `device` scope each Mac's own key goes `retiring`; with
+    `person` scope the person's key does, except when the Mac only signed out, and a managed
+    organization replaces it at once for the person's other Macs.
+    """
+    scope = org.storage_key_scope
+    if scope == "device":
+        for device in devices:
+            await scoped.retire_keys(db, org.id, device_id=device.id)
+    elif scope == "person" and reason not in ("signed_out", "member_removed"):
+        for membership_id in {d.membership_id for d in devices}:
+            if not await scoped.retire_keys(db, org.id, membership_id=membership_id):
+                continue
+            if org.storage_mode == "managed":
+                label = await scoped.owner_label(db, membership_id)
+                membership = await db.get(Membership, membership_id)
+                if membership is not None:
+                    await scoped.add_person_key(
+                        ctx, db, org, membership, label, AuditActor.system(), None
+                    )
+
+
+async def revoke_device(ctx: Context, actor: Actor, device_id: UUID) -> None:
+    """
+    Revokes a Mac: an admin any, a member only their own (reason `owner`, a lost Mac). With a
+    team key a Mac that held credentials opens the key window; with person or device keys the
+    key it reached goes `retiring` instead.
     """
     now = utcnow()
     async with ctx.sessions() as db, db.begin():
@@ -247,10 +277,13 @@ async def revoke_mac(ctx: Context, actor: Actor, device_id: UUID) -> None:
             query = query.where(Device.user_id == actor.user_id)
         device = (await db.execute(query.with_for_update())).scalar_one_or_none()
         if device is None:
-            raise not_found("No such Mac")
+            raise not_found("No such device")
         if device.state == "revoked":
-            raise invalid_state("The Mac is already revoked")
+            raise invalid_state("The device is already revoked")
         reason = "admin" if actor.is_admin and device.user_id != actor.user_id else "owner"
+        org = await db.get(Organization, actor.organization_id)
+        if org is None:
+            raise not_found()
         exposed = revoke_rows(
             db,
             [device],
@@ -258,12 +291,14 @@ async def revoke_mac(ctx: Context, actor: Actor, device_id: UUID) -> None:
             actor=AuditActor.person(actor.user_id, actor.label),
             now=now,
         )
-        if exposed:
+        if exposed and org.storage_key_scope == "team":
             open_exposure(
                 db,
                 actor.organization_id,
-                kind="mac_revoked",
+                kind="device_revoked",
                 label=device.name,
                 device_id=device.id,
             )
+        await retire_reached_keys(ctx, db, org, [device], reason)
     await delete_valkey_users(ctx, actor.organization_id, [device_id])
+    await scoped.delete_owed_keys(ctx, actor.organization_id)

@@ -19,12 +19,14 @@ from sqlalchemy.orm import aliased
 from floppy_server import mailtext
 from floppy_server.api import Actor, CamelModel
 from floppy_server.audit.service import AuditActor, Target, record
-from floppy_server.auth.service import INVITATION_TTL, send_mail
+from floppy_server.auth.service import INVITATION_TTL, mail_language, send_mail
 from floppy_server.context import Context, utcnow
 from floppy_server.crypto import new_token, token_hash
-from floppy_server.errors import ApiError, invalid_state, not_found
+from floppy_server.devices.service import delete_valkey_users, retire_reached_keys, revoke_rows
+from floppy_server.errors import ApiError, invalid_state, not_found, validation
+from floppy_server.infra.juicefs import S3Credentials
+from floppy_server.keys import scoped
 from floppy_server.keys.service import open_exposure
-from floppy_server.macs.service import delete_valkey_users, revoke_rows
 from floppy_server.models import (
     Device,
     Invitation,
@@ -46,7 +48,7 @@ class PersonOut(CamelModel):
     email: str
     role: Role
     status: Literal["invited", "active", "removed"]
-    mac_count: int
+    device_count: int
     last_sign_in_at: datetime | None
     invited_at: datetime | None
     invited_by: str | None
@@ -88,7 +90,7 @@ async def _people(
         .limit(1)
         .lateral()
     )
-    mac_count = (
+    device_count = (
         select(func.count())
         .where(
             Device.organization_id == organization_id,
@@ -105,7 +107,7 @@ async def _people(
                 last_invitation.c.sent_at,
                 last_invitation.c.expires_at,
                 inviter,
-                mac_count,
+                device_count,
             )
             .join(membership, membership.user_id == User.id)
             .outerjoin(last_invitation, true())
@@ -119,7 +121,7 @@ async def _people(
             email=user.email,
             role=m.role,
             status=m.status,
-            mac_count=macs,
+            device_count=macs,
             last_sign_in_at=user.last_sign_in_at,
             invited_at=sent_at,
             invited_by=(inv.name or inv.email) if inv is not None else None,
@@ -212,6 +214,7 @@ async def _invite_mail(
     membership.invited_at = now
     await db.flush()
     mail = mailtext.invitation(
+        lang=mail_language(org),
         to=user.email,
         organization=org.name,
         inviter=actor.label,
@@ -221,10 +224,31 @@ async def _invite_mail(
     await send_mail(ctx, db, mail, org)
 
 
-async def invite(ctx: Context, actor: Actor, email: str, role: Role) -> PersonOut:
-    """Invites an address: a user if new, an `invited` membership, an invitation and its mail."""
+async def _check_key_for(ctx: Context, org: Organization, key: S3Credentials | None) -> None:
+    """A pasted person key is wanted exactly in manual `person` scope, and probed first."""
+    pasted = org.storage_mode == "manual" and org.storage_key_scope == "person"
+    if pasted and key is None:
+        raise validation("This organization gives each person a key: paste it", {"field": "key"})
+    if not pasted and key is not None:
+        raise validation("This organization takes no pasted person keys", {"field": "key"})
+    if key is not None:
+        await scoped.probe(ctx, org, key, "person")
+
+
+async def invite(
+    ctx: Context, actor: Actor, email: str, role: Role, key: S3Credentials | None = None
+) -> PersonOut:
+    """
+    Invites an address: a user if new, an `invited` membership, an invitation and its mail.
+    With `person` keys, the person's key too: pasted and probed (manual) or created (managed).
+    """
     address = email.strip().lower()
     now = utcnow()
+    async with ctx.sessions() as db:
+        org_now = await db.get(Organization, actor.organization_id)
+    if org_now is None:
+        raise not_found()
+    await _check_key_for(ctx, org_now, key)
     async with ctx.sessions() as db, db.begin():
         org = await db.get(Organization, actor.organization_id)
         if org is None:
@@ -262,6 +286,16 @@ async def invite(ctx: Context, actor: Actor, email: str, role: Role) -> PersonOu
         )
         db.add(membership)
         await db.flush()
+        if org.storage_key_scope == "person":
+            await scoped.add_person_key(
+                ctx,
+                db,
+                org,
+                membership,
+                address,
+                AuditActor.person(actor.user_id, actor.label),
+                key,
+            )
         await _invite_mail(ctx, db, org, membership, user, actor, now)
         record(
             db,
@@ -273,6 +307,35 @@ async def invite(ctx: Context, actor: Actor, email: str, role: Role) -> PersonOu
         )
         user_id = user.id
     return await get_person(ctx, actor, user_id)
+
+
+async def replace_key(ctx: Context, actor: Actor, user_id: UUID, key: S3Credentials) -> None:
+    """
+    Manual `person` scope: the admin pastes a person's new key, probed first; the old one goes
+    `retiring` until the admin confirms its deletion at the provider.
+    """
+    async with ctx.sessions() as db:
+        org = await db.get(Organization, actor.organization_id)
+    if org is None:
+        raise not_found()
+    if org.storage_mode != "manual" or org.storage_key_scope != "person":
+        raise invalid_state("Only a manual organization with person keys takes a pasted key")
+    await scoped.probe(ctx, org, key, "person")
+    async with ctx.sessions() as db, db.begin():
+        org_row = await db.get(Organization, actor.organization_id)
+        membership = await _live_membership(db, actor.organization_id, user_id)
+        user = await db.get(User, user_id)
+        if org_row is None or membership is None or user is None:
+            raise not_found("No such person")
+        await scoped.add_person_key(
+            ctx,
+            db,
+            org_row,
+            membership,
+            user.name or user.email,
+            AuditActor.person(actor.user_id, actor.label),
+            key,
+        )
 
 
 async def resend(ctx: Context, actor: Actor, user_id: UUID) -> PersonOut:
@@ -384,7 +447,13 @@ async def remove(ctx: Context, actor: Actor, user_id: UUID) -> tuple[PersonOut, 
             ).scalars()
         )
         exposed = revoke_rows(db, devices, reason="member_removed", actor=who, now=now)
-        if exposed:
+        org = await db.get(Organization, actor.organization_id)
+        if org is None:
+            raise not_found()
+        await retire_reached_keys(ctx, db, org, devices, "member_removed")
+        if org.storage_key_scope == "person":
+            await scoped.retire_keys(db, org.id, membership_id=membership.id)
+        if exposed and org.storage_key_scope == "team":
             open_exposure(
                 db,
                 actor.organization_id,
@@ -398,8 +467,9 @@ async def remove(ctx: Context, actor: Actor, user_id: UUID) -> tuple[PersonOut, 
             "person_removed",
             who,
             Target("person", user.id, label),
-            {"macs": len(devices)},
+            {"devices": len(devices)},
         )
         device_ids = [d.id for d in devices]
     await delete_valkey_users(ctx, actor.organization_id, device_ids)
+    await scoped.delete_owed_keys(ctx, actor.organization_id)
     return await get_person(ctx, actor, user_id), len(device_ids)

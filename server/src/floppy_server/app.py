@@ -25,6 +25,7 @@ from floppy_server.context import Context
 from floppy_server.crypto import SecretBox
 from floppy_server.db import make_engine, make_sessionmaker
 from floppy_server.device.router import router as device_router
+from floppy_server.devices.router import router as devices_router
 from floppy_server.disks.router import router as disks_router
 from floppy_server.errors import install_error_handlers
 from floppy_server.health.router import router as health_router
@@ -33,7 +34,6 @@ from floppy_server.infra.mail import ConsoleMailer, SmtpMailer
 from floppy_server.infra.metadata import FakeMetadataAdmin, ValkeyMetadataAdmin
 from floppy_server.infra.storage import FakeStorageProber, S3StorageProber
 from floppy_server.keys.router import router as keys_router
-from floppy_server.macs.router import router as macs_router
 from floppy_server.paths import API_PREFIX
 from floppy_server.people.router import router as people_router
 from floppy_server.settings.router import router as settings_router
@@ -120,7 +120,7 @@ def create_app(ctx: Context) -> FastAPI:
     for router in (
         auth_router,
         people_router,
-        macs_router,
+        devices_router,
         disks_router,
         keys_router,
         audit_router,

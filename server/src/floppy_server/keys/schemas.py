@@ -15,7 +15,7 @@ class KeyWindowReason(CamelModel):
     """Why the window is open: someone who had the key no longer has access."""
 
     id: UUID
-    kind: Literal["person_removed", "mac_revoked"]
+    kind: Literal["person_removed", "device_revoked"]
     label: str
     at: datetime
 
@@ -65,18 +65,47 @@ class RotationOut(CamelModel):
     started_at: datetime
 
 
+class Versioning(CamelModel):
+    """The bucket's versioning as the last probe read it with the control plane's key."""
+
+    state: Literal["enabled", "suspended", "off", "unknown"]
+    old_versions_days: int | None
+
+
+class ScopedKey(CamelModel):
+    """A person's or a Mac's key: live, or `retiring` while its deletion at the provider is owed."""
+
+    id: UUID
+    holder: Literal["person", "device"]
+    owner: str
+    access_key_tail: str
+    state: Literal["pending", "active", "retiring"]
+    origin: Literal["pasted", "provider"]
+    activated_at: datetime | None
+    retiring_at: datetime | None
+
+
 class KeyStatusOut(CamelModel):
-    """The organization's S3 key and its window."""
+    """
+    The organization's S3 keys. With a team key: the key in the formats, its window and its
+    rotation. With person or Mac keys (`keyScope`): the control plane's own key in
+    `accessKeyTail`, and every person's or Mac's key in `keys`, no window.
+    """
 
     bucket: str
+    storage_mode: Literal["manual", "managed"]
+    storage_provider: Literal["ovh", "aws", "minio", "garage"] | None
+    key_scope: Literal["team", "person", "device"]
     access_key_tail: str
     rotated_at: datetime | None
     window: KeyWindow | None
     rotation: RotationOut | None
+    keys: list[ScopedKey]
+    versioning: Versioning
 
 
 class StartRotationRequest(CamelModel):
-    """A new key; the secret is sent once and never returned."""
+    """A new pasted key (manual); the secret is sent once and never returned."""
 
     access_key_id: str = Field(min_length=8, max_length=256, pattern=r"^\S+$")
     secret_key: str = Field(min_length=8, max_length=512, pattern=r"^\S+$")

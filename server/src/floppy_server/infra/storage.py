@@ -9,7 +9,7 @@ S3, path style (DECISIONS #4: no provider API); `FakeStorageProber` answers from
 import asyncio
 import secrets
 from dataclasses import dataclass, field
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 import boto3
 from botocore.config import Config
@@ -17,7 +17,30 @@ from botocore.exceptions import BotoCoreError, ClientError
 
 from floppy_server.infra.juicefs import S3Credentials
 
+if TYPE_CHECKING:
+    from mypy_boto3_s3 import S3Client
+
 PROBE_BODY = b"floppy storage probe\n"
+
+
+def _versioning(client: S3Client, bucket: str) -> tuple[str, int | None]:
+    """The bucket's versioning state and the shortest expiry of old versions, if readable."""
+    try:
+        status = client.get_bucket_versioning(Bucket=bucket).get("Status")
+    except ClientError, BotoCoreError:
+        return "unknown", None
+    versioning = {"Enabled": "enabled", "Suspended": "suspended"}.get(status or "", "off")
+    try:
+        rules = client.get_bucket_lifecycle_configuration(Bucket=bucket).get("Rules", [])
+    except ClientError, BotoCoreError:
+        return versioning, None
+    days = [
+        rule["NoncurrentVersionExpiration"]["NoncurrentDays"]
+        for rule in rules
+        if rule.get("Status") == "Enabled"
+        and "NoncurrentDays" in rule.get("NoncurrentVersionExpiration", {})
+    ]
+    return versioning, min(days) if days else None
 
 
 class S3StorageProber:
@@ -53,6 +76,7 @@ class S3StorageProber:
             client.put_object(Bucket=bucket, Key=name, Body=PROBE_BODY)
             step = f"DELETE /{bucket}/{name}"
             client.delete_object(Bucket=bucket, Key=name)
+            versioning, days = _versioning(client, bucket)
         except ClientError as error:
             code = str(error.response.get("Error", {}).get("Code", "")) or "ClientError"
             return ProbeResult(ok=False, code=code, request=step)
@@ -61,7 +85,7 @@ class S3StorageProber:
             return ProbeResult(ok=False, code=type(error).__name__, request=step)
         finally:
             client.close()
-        return ProbeResult(ok=True)
+        return ProbeResult(ok=True, versioning=versioning, old_versions_days=days)
 
 
 @dataclass(frozen=True)
@@ -71,6 +95,10 @@ class ProbeResult:
     ok: bool
     code: str | None = None
     request: str | None = None
+    # The bucket's versioning and the days after which old versions expire, read with the
+    # same key: "unknown" when the provider or the key's policy does not answer.
+    versioning: str = "unknown"
+    old_versions_days: int | None = None
 
 
 class StorageProber(Protocol):

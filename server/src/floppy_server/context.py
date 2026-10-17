@@ -7,6 +7,7 @@ organization's own columns win, the instance's environment fills the gaps (self-
 """
 
 import asyncio
+import json
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
@@ -17,6 +18,7 @@ from floppy_server.crypto import SecretBox
 from floppy_server.infra.juicefs import S3Credentials, VolumeFormatter, VolumeLocation
 from floppy_server.infra.mail import Mailer, SmtpConfig
 from floppy_server.infra.metadata import MetadataAdmin, ValkeyTarget
+from floppy_server.infra.providers import GarageAdapter, ProviderError, StorageAdapter
 from floppy_server.infra.storage import StorageProber
 from floppy_server.models import Organization, S3Key, Volume
 from floppy_server.ratelimit import RateLimiter
@@ -42,6 +44,8 @@ class Context:
     rotation_wakeup: asyncio.Event = field(default_factory=asyncio.Event)
     disk_wakeup: asyncio.Event = field(default_factory=asyncio.Event)
     rate_limiter: RateLimiter = field(default_factory=RateLimiter)
+    # Tests put a fake here; otherwise each managed organization gets its provider's.
+    adapter_override: StorageAdapter | None = None
 
     def valkey_target(self, org: Organization) -> ValkeyTarget:
         """The organization's Valkey as the control plane reaches it, with admin credentials."""
@@ -113,6 +117,34 @@ class Context:
             s3_region=volume.s3_region,
             s3_bucket=volume.s3_bucket,
         )
+
+    def adapter_for(self, org: Organization) -> StorageAdapter:
+        """The storage adapter of a managed organization, with its credentials or the instance's."""
+        if org.storage_mode != "managed":
+            raise ProviderError("the organization's storage is manual: it has no adapter")
+        if self.adapter_override is not None:
+            return self.adapter_override
+        credentials: dict[str, str] = {}
+        if org.storage_admin_credentials_enc is not None:
+            credentials = json.loads(
+                self.box.open(
+                    org.storage_admin_credentials_enc,
+                    table="organizations",
+                    column="storage_admin_credentials_enc",
+                    row_id=org.id,
+                )
+            )
+        if org.storage_provider == "garage":
+            url = credentials.get("adminUrl") or self.settings.garage_admin_url
+            token = credentials.get("adminToken") or (
+                self.settings.garage_admin_token.get_secret_value()
+                if self.settings.garage_admin_token
+                else None
+            )
+            if not url or not token:
+                raise ProviderError("no Garage admin URL and token for this organization")
+            return GarageAdapter(url, token)
+        raise ProviderError(f"no adapter for {org.storage_provider} yet")
 
     def credentials(self, key: S3Key) -> S3Credentials:
         """The key pair of a stored S3 key whose secret is still kept."""

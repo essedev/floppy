@@ -12,6 +12,7 @@ from sqlalchemy import text
 from floppy_server.api import AdminDep, CamelModel, CtxDep
 from floppy_server.context import Context
 from floppy_server.errors import not_found
+from floppy_server.keys.schemas import Versioning
 from floppy_server.models import Organization, OrganizationStatus
 
 router = APIRouter(tags=["health"])
@@ -26,10 +27,11 @@ class MetadataHealth(CamelModel):
 
 
 class StorageHealth(CamelModel):
-    """The last test write."""
+    """The last test write, and the bucket's versioning it read."""
 
     state: Literal["ok", "failing"]
     last_probe_at: datetime | None
+    versioning: Versioning
 
 
 class MailHealth(CamelModel):
@@ -60,7 +62,14 @@ async def health_view(ctx: Context, org: Organization, status: OrganizationStatu
             latency_ms=status.metadata_latency_ms,
             checked_at=status.metadata_checked_at or status.updated_at,
         ),
-        storage=StorageHealth(state=status.storage_state, last_probe_at=status.storage_probed_at),
+        storage=StorageHealth(
+            state=status.storage_state,
+            last_probe_at=status.storage_probed_at,
+            versioning=Versioning(
+                state=status.bucket_versioning,
+                old_versions_days=status.bucket_old_versions_days,
+            ),
+        ),
         mail=MailHealth(state=mail_state, last_sent_at=status.mail_sent_at),
     )
 

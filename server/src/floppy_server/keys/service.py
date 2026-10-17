@@ -15,10 +15,13 @@ from uuid import UUID, uuid7
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from floppy_server.audit.service import AuditActor, Target, record
+from floppy_server.audit.service import AuditActor, DetailValue, Target, record
 from floppy_server.context import Context, utcnow
 from floppy_server.errors import ApiError, invalid_state, not_found, validation
 from floppy_server.infra.juicefs import FormatError, S3Credentials
+from floppy_server.infra.providers import ProviderError
+from floppy_server.infra.storage import ProbeResult
+from floppy_server.keys import scoped
 from floppy_server.keys.schemas import (
     KeyStatusOut,
     KeyWindow,
@@ -27,6 +30,8 @@ from floppy_server.keys.schemas import (
     RotationError,
     RotationMacs,
     RotationOut,
+    ScopedKey,
+    Versioning,
 )
 from floppy_server.models import (
     Device,
@@ -34,9 +39,11 @@ from floppy_server.models import (
     KeyExposure,
     KeyRotation,
     KeyRotationVolume,
+    Membership,
     Organization,
     OrganizationStatus,
     S3Key,
+    User,
     Volume,
     lock_organization,
 )
@@ -44,6 +51,8 @@ from floppy_server.models import (
 log = logging.getLogger(__name__)
 
 CONNECTED_WITHIN = timedelta(minutes=2)
+# Managed team keys rotate this long after the last revocation (DATABASE_SCHEMA.md).
+REVOCATION_QUIET = timedelta(minutes=2)
 SHOWN_ROTATION_STATES = ("applying", "awaiting_old_key_deletion", "failed")
 
 
@@ -53,10 +62,17 @@ def rotation_in_progress() -> ApiError:
 
 
 async def active_key(db: AsyncSession, organization_id: UUID) -> S3Key | None:
-    """The key in use."""
+    """
+    The key the control plane formats and probes with: the team key, or with `person` and
+    `device` scopes its own (`control_plane`).
+    """
     return (
         await db.execute(
-            select(S3Key).where(S3Key.organization_id == organization_id, S3Key.state == "active")
+            select(S3Key).where(
+                S3Key.organization_id == organization_id,
+                S3Key.state == "active",
+                S3Key.holder.in_(("team", "control_plane")),
+            )
         )
     ).scalar_one_or_none()
 
@@ -226,13 +242,72 @@ async def key_status(db: AsyncSession, org: Organization) -> KeyStatusOut:
     rotated_at = await db.scalar(
         select(func.max(KeyRotation.applied_at)).where(KeyRotation.organization_id == org.id)
     )
+    status = await db.get(OrganizationStatus, org.id)
     return KeyStatusOut(
         bucket=org.s3_bucket,
+        storage_mode=org.storage_mode,
+        storage_provider=org.storage_provider,
+        key_scope=org.storage_key_scope,
         access_key_tail=key.access_key_tail if key else "",
         rotated_at=rotated_at,
         window=window,
         rotation=rotation,
+        keys=await scoped_keys(db, org.id),
+        versioning=Versioning(
+            state=status.bucket_versioning if status else "unknown",
+            old_versions_days=status.bucket_old_versions_days if status else None,
+        ),
     )
+
+
+async def record_versioning(db: AsyncSession, organization_id: UUID, result: ProbeResult) -> None:
+    """Keeps what a successful probe read of the bucket's versioning."""
+    await db.execute(
+        update(OrganizationStatus)
+        .where(OrganizationStatus.organization_id == organization_id)
+        .values(
+            bucket_versioning=result.versioning,
+            bucket_old_versions_days=result.old_versions_days,
+        )
+    )
+
+
+async def scoped_keys(db: AsyncSession, organization_id: UUID) -> list[ScopedKey]:
+    """The live and owed person and Mac keys, with whose they are."""
+    rows = (
+        await db.execute(
+            select(S3Key, User.name, User.email, Device.name)
+            .outerjoin(
+                Membership,
+                (Membership.id == S3Key.membership_id)
+                & (Membership.organization_id == S3Key.organization_id),
+            )
+            .outerjoin(
+                Device,
+                (Device.id == S3Key.device_id) & (Device.organization_id == S3Key.organization_id),
+            )
+            .outerjoin(User, User.id == func.coalesce(Membership.user_id, Device.user_id))
+            .where(
+                S3Key.organization_id == organization_id,
+                S3Key.holder.in_(("person", "device")),
+                S3Key.state.in_(("pending", "active", "retiring")),
+            )
+            .order_by(S3Key.created_at)
+        )
+    ).all()
+    return [
+        ScopedKey(
+            id=key.id,
+            holder=key.holder,
+            owner=(device_name if key.holder == "device" else (name or email)) or "",
+            access_key_tail=key.access_key_tail,
+            state=key.state,
+            origin=key.origin,
+            activated_at=key.activated_at,
+            retiring_at=key.retiring_at,
+        )
+        for key, name, email, device_name in rows
+    ]
 
 
 async def connected_macs(db: AsyncSession, organization_id: UUID, now: datetime) -> int:
@@ -257,13 +332,33 @@ async def connected_macs(db: AsyncSession, organization_id: UUID, now: datetime)
 
 
 async def start_rotation(
-    ctx: Context, org_id: UUID, user_id: UUID, user_label: str, access_key_id: str, secret: str
+    ctx: Context,
+    org_id: UUID,
+    *,
+    user_id: UUID | None,
+    user_label: str | None,
+    key: S3Credentials | None,
 ) -> KeyRotation:
-    """Starts a rotation to a new key: one step per ready disk; the worker does the rest."""
+    """
+    Starts a rotation of the team key: one step per ready disk; the worker does the rest. A
+    manual organization pastes the new key; a managed one gets it from its adapter, started
+    by an admin (no key) or by the system after a revocation (`user_id` None).
+    """
     now = utcnow()
-    access_key_id = access_key_id.strip()
     async with ctx.sessions() as db, db.begin():
         await lock_organization(db, org_id)
+        org = await db.get(Organization, org_id)
+        if org is None:
+            raise not_found()
+        if org.storage_key_scope != "team":
+            raise invalid_state("With person or Mac keys there is no team key to rotate")
+        managed = org.storage_mode == "managed"
+        if managed and key is not None:
+            raise validation(
+                "The provider creates the new key: send none", {"field": "accessKeyId"}
+            )
+        if not managed and key is None:
+            raise validation("Paste the new key", {"field": "accessKeyId"})
         rotations = list(
             (
                 await db.execute(
@@ -288,39 +383,22 @@ async def start_rotation(
         old = await active_key(db, org_id)
         if old is None:
             raise invalid_state("The organization has no active key")
-        if old.access_key_id == access_key_id:
+        if key is not None and old.access_key_id == key.access_key_id.strip():
             raise validation("This key is already in use", {"field": "accessKeyId"})
         for awaiting in rotations:
             awaiting.state = "superseded"
             awaiting.superseded_at = now
-        new = (
-            await db.execute(
-                select(S3Key).where(
-                    S3Key.organization_id == org_id,
-                    S3Key.access_key_id == access_key_id,
-                    S3Key.state == "pending",
-                )
-            )
-        ).scalar_one_or_none()
-        if new is not None:
-            # A rotation that failed after some disks moved: the same key, configured again.
-            seal_secret(ctx, new, secret)
+        if key is None:
+            new = await _provider_team_key(ctx, db, org, user_id)
         else:
-            # A different key replaces a pending one left by a failed rotation.
-            await db.execute(
-                update(S3Key)
-                .where(S3Key.organization_id == org_id, S3Key.state == "pending")
-                .values(state="rejected", rejected_at=now, secret_key_enc=None)
-            )
-            new = new_key_row(ctx, org_id, access_key_id, secret, user_id)
-            db.add(new)
-            await db.flush()
+            new = await _pasted_team_key(ctx, db, org_id, key, user_id, now)
         rotation = KeyRotation(
             organization_id=org_id,
             old_key_id=old.id,
             new_key_id=new.id,
             macs_total=await connected_macs(db, org_id, now),
             started_by_user_id=user_id,
+            trigger="admin" if user_id is not None else "revocation",
             started_at=now,
         )
         db.add(rotation)
@@ -342,16 +420,82 @@ async def start_rotation(
             )
         await db.refresh(new)
         tails = await old_key_tails(db, rotation)
+        detail: dict[str, DetailValue] = {
+            "newKeyTail": new.access_key_tail,
+            "oldKeyTail": ", ".join(tails),
+        }
+        if user_id is None:
+            detail["trigger"] = "revocation"
+        actor = (
+            AuditActor.person(user_id, user_label or "")
+            if user_id is not None
+            else AuditActor.system()
+        )
         record(
             db,
             org_id,
             "key_rotation_started",
-            AuditActor.person(user_id, user_label),
+            actor,
             Target("key", new.id, new.access_key_tail),
-            {"newKeyTail": new.access_key_tail, "oldKeyTail": ", ".join(tails)},
+            detail,
         )
     ctx.rotation_wakeup.set()
     return rotation
+
+
+async def _provider_team_key(
+    ctx: Context, db: AsyncSession, org: Organization, user_id: UUID | None
+) -> S3Key:
+    """A new team key from the adapter, pending until the rotation configures every disk."""
+    try:
+        created = await ctx.adapter_for(org).create_key(org.s3_bucket, f"floppy-team-{uuid7()}")
+    except ProviderError as error:
+        raise ApiError(
+            502,
+            "provider_failed",
+            "The storage provider did not do it",
+            {"reason": str(error)[:200]},
+        ) from error
+    new = new_key_row(ctx, org.id, created.access_key_id, created.secret_key, user_id)
+    new.origin, new.provider_ref = "provider", created.provider_ref
+    db.add(new)
+    await db.flush()
+    return new
+
+
+async def _pasted_team_key(
+    ctx: Context,
+    db: AsyncSession,
+    org_id: UUID,
+    key: S3Credentials,
+    user_id: UUID | None,
+    now: datetime,
+) -> S3Key:
+    access_key_id = key.access_key_id.strip()
+    new = (
+        await db.execute(
+            select(S3Key).where(
+                S3Key.organization_id == org_id,
+                S3Key.access_key_id == access_key_id,
+                S3Key.state == "pending",
+                S3Key.holder == "team",
+            )
+        )
+    ).scalar_one_or_none()
+    if new is not None:
+        # A rotation that failed after some disks moved: the same key, configured again.
+        seal_secret(ctx, new, key.secret_key)
+        return new
+    # A different key replaces a pending one left by a failed rotation.
+    await db.execute(
+        update(S3Key)
+        .where(S3Key.organization_id == org_id, S3Key.state == "pending", S3Key.holder == "team")
+        .values(state="rejected", rejected_at=now, secret_key_enc=None)
+    )
+    new = new_key_row(ctx, org_id, access_key_id, key.secret_key, user_id)
+    db.add(new)
+    await db.flush()
+    return new
 
 
 async def get_rotation(ctx: Context, org_id: UUID, rotation_id: UUID) -> RotationOut:
@@ -370,7 +514,7 @@ async def get_rotation(ctx: Context, org_id: UUID, rotation_id: UUID) -> Rotatio
 
 
 async def close_rotation(
-    ctx: Context, org_id: UUID, rotation_id: UUID, user_id: UUID, user_label: str
+    ctx: Context, org_id: UUID, rotation_id: UUID, user_id: UUID | None, user_label: str | None
 ) -> None:
     """
     The admin confirmed the old key is deleted at the provider: every retiring key is
@@ -394,14 +538,13 @@ async def close_rotation(
         rotation.state = "closed"
         rotation.closed_at = now
         rotation.closed_by_user_id = user_id
-        retired = (
-            await db.execute(
-                update(S3Key)
-                .where(S3Key.organization_id == org_id, S3Key.state == "retiring")
-                .values(state="retired", retired_at=now, secret_key_enc=None)
-                .returning(S3Key.access_key_tail, S3Key.created_at)
-            )
-        ).all()
+        # Read before retiring: the adapter may have retired them already (managed).
+        tail = ", ".join(await old_key_tails(db, rotation))
+        await db.execute(
+            update(S3Key)
+            .where(S3Key.organization_id == org_id, S3Key.state == "retiring")
+            .values(state="retired", retired_at=now, secret_key_enc=None)
+        )
         closed = await db.execute(
             update(KeyExposure)
             .where(
@@ -413,12 +556,13 @@ async def close_rotation(
             .returning(KeyExposure.id)
         )
         reasons = len(closed.all())
-        tail = ", ".join(t for t, _ in sorted(retired, key=lambda row: row[1]))
         record(
             db,
             org_id,
             "key_window_closed",
-            AuditActor.person(user_id, user_label),
+            AuditActor.person(user_id, user_label or "")
+            if user_id is not None
+            else AuditActor.system(),
             Target("key", rotation.old_key_id, tail),
             {"oldKeyTail": tail, "reasons": reasons},
         )
@@ -449,6 +593,77 @@ async def run_rotations(ctx: Context) -> int:
                 return ran
             await _step(ctx, db, rotation)
             ran += 1
+            applied = rotation.state == "awaiting_old_key_deletion"
+            org = await db.get(Organization, rotation.organization_id)
+            managed = org is not None and org.storage_mode == "managed"
+            rotation_id, org_id = rotation.id, rotation.organization_id
+        if applied and managed:
+            await finish_managed_rotation(ctx, org_id, rotation_id)
+
+
+async def finish_managed_rotation(ctx: Context, org_id: UUID, rotation_id: UUID) -> None:
+    """
+    Managed: the adapter deletes the old team keys at the provider and the rotation closes by
+    itself. A key the provider did not delete keeps the rotation waiting for the next pass.
+    """
+    await scoped.delete_owed_keys(ctx, org_id)
+    async with ctx.sessions() as db:
+        owed = await db.scalar(
+            select(func.count()).where(S3Key.organization_id == org_id, S3Key.state == "retiring")
+        )
+    if not owed:
+        await close_rotation(ctx, org_id, rotation_id, None, None)
+
+
+async def rotate_after_revocations(ctx: Context, quiet: timedelta = REVOCATION_QUIET) -> int:
+    """
+    Managed organizations with a team key: a rotation starts by itself once revocations
+    stop for `quiet`, so a person removed with three Macs costs one rotation; a waiting
+    rotation left by a provider that did not answer is finished first. Returns how many started.
+    """
+    now = utcnow()
+    async with ctx.sessions() as db:
+        rows = (
+            (
+                await db.execute(
+                    select(Organization.id).where(
+                        Organization.storage_mode == "managed",
+                        Organization.storage_key_scope == "team",
+                        Organization.deleted_at.is_(None),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    started = 0
+    for org_id in rows:
+        async with ctx.sessions() as db:
+            waiting = (
+                await db.execute(
+                    select(KeyRotation.id, KeyRotation.state).where(
+                        KeyRotation.organization_id == org_id,
+                        KeyRotation.state.in_(("applying", "awaiting_old_key_deletion")),
+                    )
+                )
+            ).all()
+            last = await db.scalar(
+                select(func.max(KeyExposure.occurred_at)).where(
+                    KeyExposure.organization_id == org_id, KeyExposure.closed_at.is_(None)
+                )
+            )
+        for rotation_id, state in waiting:
+            if state == "awaiting_old_key_deletion":
+                await finish_managed_rotation(ctx, org_id, rotation_id)
+        if waiting or last is None or now - last < quiet:
+            continue
+        try:
+            await start_rotation(ctx, org_id, user_id=None, user_label=None, key=None)
+        except ApiError as error:
+            log.warning("automatic rotation not started: %s", error.message)
+            continue
+        started += 1
+    return started
 
 
 async def _fail(
@@ -537,6 +752,7 @@ async def _probe(
         .values(storage_probed_at=now, storage_state="ok" if result.ok else "failing")
     )
     if result.ok:
+        await record_versioning(db, org.id, result)
         rotation.probe_state = "done"
         return
     rotation.probe_state = "failed"

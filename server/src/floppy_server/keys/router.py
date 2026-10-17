@@ -5,8 +5,10 @@ from uuid import UUID
 from fastapi import APIRouter
 
 from floppy_server.api import AdminDep, CtxDep
+from floppy_server.audit.service import AuditActor
 from floppy_server.errors import not_found
-from floppy_server.keys import service
+from floppy_server.infra.juicefs import S3Credentials
+from floppy_server.keys import scoped, service
 from floppy_server.keys.schemas import (
     CloseRotationRequest,
     KeyStatusOut,
@@ -32,11 +34,23 @@ async def get_key(actor: AdminDep, ctx: CtxDep) -> KeyStatusOut:
     return await _status(ctx, actor.organization_id)
 
 
+@router.post("/key/{key_id}/deleted", response_model=KeyStatusOut)
+async def key_deleted(key_id: UUID, actor: AdminDep, ctx: CtxDep) -> KeyStatusOut:
+    """The admin confirms a person's old key is deleted at the provider (manual)."""
+    await scoped.confirm_deleted(
+        ctx, actor.organization_id, key_id, AuditActor.person(actor.user_id, actor.label)
+    )
+    return await _status(ctx, actor.organization_id)
+
+
 @router.post("/key/rotations", response_model=RotationOut, status_code=201)
-async def start_rotation(body: StartRotationRequest, actor: AdminDep, ctx: CtxDep) -> RotationOut:
-    """Starts a rotation to a new key."""
+async def start_rotation(
+    actor: AdminDep, ctx: CtxDep, body: StartRotationRequest | None = None
+) -> RotationOut:
+    """Starts a rotation: a pasted key (manual), or none and the provider makes it (managed)."""
+    key = S3Credentials(body.access_key_id, body.secret_key) if body is not None else None
     rotation = await service.start_rotation(
-        ctx, actor.organization_id, actor.user_id, actor.label, body.access_key_id, body.secret_key
+        ctx, actor.organization_id, user_id=actor.user_id, user_label=actor.label, key=key
     )
     return await service.get_rotation(ctx, actor.organization_id, rotation.id)
 

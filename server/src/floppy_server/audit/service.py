@@ -30,12 +30,15 @@ ACTIONS: dict[str, tuple[str, frozenset[str]]] = {
     "invite_resent": ("people", frozenset({"role"})),
     "invite_accepted": ("people", frozenset()),
     "role_changed": ("people", frozenset({"from", "to"})),
-    "person_removed": ("people", frozenset({"macs"})),
-    "mac_registered": ("macs", frozenset({"appVersion", "macosVersion", "reissued"})),
-    "mac_revoked": ("macs", frozenset({"reason"})),
-    "mac_signed_out": ("macs", frozenset()),
-    "mac_seen_outdated": ("macs", frozenset({"appVersion"})),
-    "key_rotation_started": ("key", frozenset({"newKeyTail", "oldKeyTail"})),
+    "person_removed": ("people", frozenset({"devices"})),
+    "device_registered": ("devices", frozenset({"appVersion", "macosVersion", "reissued"})),
+    "device_revoked": ("devices", frozenset({"reason"})),
+    "device_signed_out": ("devices", frozenset()),
+    "device_seen_outdated": ("devices", frozenset({"appVersion"})),
+    "organization_created": ("settings", frozenset({"storageMode", "provider"})),
+    "key_created": ("key", frozenset({"holder", "accessKeyTail", "for"})),
+    "key_deleted": ("key", frozenset({"holder", "accessKeyTail", "by"})),
+    "key_rotation_started": ("key", frozenset({"newKeyTail", "oldKeyTail", "trigger"})),
     "key_rotated": ("key", frozenset({"disks"})),
     "key_rotation_failed": ("key", frozenset({"step", "code"})),
     "key_window_closed": ("key", frozenset({"oldKeyTail", "reasons"})),
@@ -62,6 +65,10 @@ class AuditActor:
     @staticmethod
     def system() -> AuditActor:
         return AuditActor(kind="system")
+
+    @staticmethod
+    def operator(label: str | None = None) -> AuditActor:
+        return AuditActor(kind="operator", label=label)
 
 
 @dataclass(frozen=True)

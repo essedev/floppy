@@ -71,7 +71,7 @@ async def get_audit(
     ctx: CtxDep,
     since_days: Annotated[int, Query(alias="sinceDays")] = 30,
     category: Annotated[
-        Literal["access", "people", "macs", "key", "disks", "settings"] | None, Query()
+        Literal["access", "people", "devices", "key", "disks", "settings"] | None, Query()
     ] = None,
     q: Annotated[str | None, Query(max_length=100)] = None,
     cursor: Annotated[str | None, Query(max_length=200)] = None,

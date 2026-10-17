@@ -13,6 +13,7 @@ from floppy_server.device.service import (
     HeartbeatResponse,
     RegisterRequest,
     RegisterResponse,
+    S3KeyOut,
 )
 from floppy_server.errors import unauthorized
 
@@ -36,6 +37,12 @@ TokenDep = Annotated[str, Depends(device_token)]
 async def register(body: RegisterRequest, token: TokenDep, ctx: CtxDep) -> RegisterResponse:
     """Creates the Mac's Valkey user; the password comes back once."""
     return await service.register(ctx, token, body)
+
+
+@router.get("/device/key", response_model=S3KeyOut)
+async def mount_key(token: TokenDep, ctx: CtxDep) -> S3KeyOut:
+    """The person's current S3 key (`person` scope), after `s3AccessKeyTail` changed."""
+    return await service.mount_key(ctx, token)
 
 
 @router.get("/device/config", response_model=DeviceConfig)

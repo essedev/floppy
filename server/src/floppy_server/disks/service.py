@@ -319,12 +319,16 @@ async def _format(ctx: Context, db: AsyncSession, volume: Volume) -> None:
     if org is None or key is None:
         _fail(volume, "The organization has no active S3 key")
         return
+    # A team key goes into the format; with person or device keys the format holds none
+    # and the control plane formats with its own (DATABASE_SCHEMA.md, "Storage modes").
+    team = org.storage_key_scope == "team"
     try:
         juicefs_uuid = await ctx.formatter.format(
             ctx.volume_location(org, volume),
             ctx.credentials(key),
             block_size_kb=volume.block_size_kb,
             trash_days=volume.trash_days,
+            store_key=team,
         )
     except FormatError as error:
         log.warning("format of a new disk failed: %s", error)
@@ -332,7 +336,7 @@ async def _format(ctx: Context, db: AsyncSession, volume: Volume) -> None:
         return
     volume.state = "ready"
     volume.juicefs_uuid = juicefs_uuid
-    volume.s3_key_id = key.id
+    volume.s3_key_id = key.id if team else None
 
 
 def _fail(volume: Volume, message: str) -> None:

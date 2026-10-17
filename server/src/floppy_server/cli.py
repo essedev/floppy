@@ -13,6 +13,7 @@ from `FLOPPY_BOOTSTRAP_S3_SECRET_KEY` or, with `--secret-key-stdin`, from standa
 
 import argparse
 import asyncio
+import json
 import logging
 import os
 import sys
@@ -62,7 +63,14 @@ async def _bootstrap(settings: Settings, args: argparse.Namespace) -> int:
         if args.if_needed and await organization_count(ctx) > 0:
             log.info("bootstrap: the organization exists already")
             return 0
-        secret = sys.stdin.readline().strip() if args.secret_key_stdin else _env("S3_SECRET_KEY")
+        mode = _env("STORAGE_MODE", required=False) or "manual"
+        manual = mode == "manual"
+        secret = ""
+        if manual:
+            secret = (
+                sys.stdin.readline().strip() if args.secret_key_stdin else _env("S3_SECRET_KEY")
+            )
+        admin_credentials = _env("STORAGE_ADMIN_CREDENTIALS", required=False)
         data = BootstrapInput(
             organization_name=_env("ORGANIZATION_NAME"),
             slug=_env("ORGANIZATION_SLUG"),
@@ -70,11 +78,16 @@ async def _bootstrap(settings: Settings, args: argparse.Namespace) -> int:
             s3_endpoint=_env("S3_ENDPOINT"),
             s3_region=_env("S3_REGION", required=False),
             s3_bucket=_env("S3_BUCKET"),
-            s3_access_key_id=_env("S3_ACCESS_KEY_ID"),
+            s3_access_key_id=_env("S3_ACCESS_KEY_ID", required=manual),
             s3_secret_key=secret,
             valkey_url=_env("VALKEY_URL"),
             valkey_admin_url=_env("VALKEY_ADMIN_URL", required=False) or None,
             valkey_databases=int(_env("VALKEY_DATABASES", required=False) or 16),
+            mail_language=_env("MAIL_LANGUAGE", required=False) or "it",
+            storage_mode=mode,
+            storage_provider=_env("STORAGE_PROVIDER", required=False) or None,
+            storage_key_scope=_env("KEY_SCOPE", required=False) or "team",
+            storage_admin_credentials=json.loads(admin_credentials) if admin_credentials else None,
         )
         try:
             org_id = await bootstrap(ctx, data)

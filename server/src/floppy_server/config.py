@@ -12,7 +12,7 @@ import binascii
 from datetime import timedelta
 from enum import StrEnum
 from functools import cached_property
-from typing import Self
+from typing import Literal, Self
 
 from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -120,6 +120,9 @@ class Settings(BaseSettings):
     # The JuiceFS binary (the image has it at /usr/local/bin/juicefs), or a command prefix
     # that runs it elsewhere, split like a shell would.
     juicefs_command: str = "juicefs"
+    # The instance's Garage admin API, for managed organizations without their own.
+    garage_admin_url: str | None = None
+    garage_admin_token: SecretStr | None = None
     juicefs_timeout_seconds: float = 120.0
     storage_timeout_seconds: float = 15.0
 
@@ -138,6 +141,10 @@ class Settings(BaseSettings):
     reconcile_interval_seconds: float = 120.0
     status_interval_seconds: float = 30.0
     rotation_poll_seconds: float = 5.0
+
+    # The language of mail to an address in no organization when its Accept-Language
+    # names neither Italian nor English.
+    default_mail_language: Literal["it", "en"] = "it"
 
     # Sign-in: per address and hour, beyond which the latest request is returned unchanged.
     sign_in_hourly_limit: int = Field(default=10, ge=1)

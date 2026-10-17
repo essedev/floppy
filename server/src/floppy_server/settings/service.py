@@ -8,7 +8,7 @@ a live disk exists: a volume's bucket and endpoint are in its format and do not 
 settings (DATABASE_SCHEMA.md, decision 9).
 """
 
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID
 
 from pydantic import Field, StringConstraints
@@ -18,11 +18,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from floppy_server.api import Actor, CamelModel
 from floppy_server.audit.service import AuditActor, Target, record
-from floppy_server.auth.service import mail_failed, mark_mail_state
+from floppy_server.auth.service import mail_failed, mail_language, mark_mail_state
 from floppy_server.context import Context, utcnow
 from floppy_server.errors import ApiError, invalid_state, not_found
 from floppy_server.infra.mail import MailError
-from floppy_server.keys.service import active_key
+from floppy_server.keys.service import active_key, record_versioning
 from floppy_server.mailtext import mail_test
 from floppy_server.models import Organization, OrganizationStatus, Volume
 
@@ -49,12 +49,16 @@ class StorageSettings(CamelModel):
 
 
 class SettingsOut(CamelModel):
-    """The settings page."""
+    """The settings page. Storage mode, provider and key scope are set at creation only."""
 
     organization_name: str
+    mail_language: Literal["it", "en"]
     mail: MailSettings
     storage: StorageSettings
     storage_locked: bool
+    storage_mode: Literal["manual", "managed"]
+    storage_provider: Literal["ovh", "aws", "minio", "garage"] | None
+    storage_key_scope: Literal["team", "person", "device"]
 
 
 class MailSettingsIn(CamelModel):
@@ -82,6 +86,7 @@ class UpdateSettingsRequest(CamelModel):
         Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
         | None
     ) = None
+    mail_language: Literal["it", "en"] | None = None
     mail: MailSettingsIn | None = None
     storage: StorageIn | None = None
 
@@ -113,6 +118,10 @@ async def get_settings(ctx: Context, organization_id: UUID) -> SettingsOut:
         disks = await _live_disks(db, organization_id)
     return SettingsOut(
         organization_name=org.name,
+        mail_language=org.mail_language,
+        storage_mode=org.storage_mode,
+        storage_provider=org.storage_provider,
+        storage_key_scope=org.storage_key_scope,
         mail=MailSettings(
             host=org.smtp_host or "",
             port=org.smtp_port or 0,
@@ -175,6 +184,9 @@ async def update_settings(ctx: Context, actor: Actor, body: UpdateSettingsReques
         if body.organization_name is not None and body.organization_name != org.name:
             org.name = body.organization_name
             fields.append("organizationName")
+        if body.mail_language is not None and body.mail_language != org.mail_language:
+            org.mail_language = body.mail_language
+            fields.append("mailLanguage")
         if body.mail is not None:
             fields.extend(_apply_mail(ctx, org, body.mail))
         if body.storage is not None:
@@ -210,7 +222,10 @@ async def test_mail(ctx: Context, actor: Actor) -> str:
     if org is None:
         raise not_found()
     try:
-        await ctx.mailer.send(mail_test(to=actor.email, organization=org.name), ctx.smtp_for(org))
+        await ctx.mailer.send(
+            mail_test(lang=mail_language(org), to=actor.email, organization=org.name),
+            ctx.smtp_for(org),
+        )
     except MailError as error:
         await mark_mail_state(ctx, org.id, ok=False)
         raise mail_failed(error) from error
@@ -242,6 +257,9 @@ async def probe_storage(ctx: Context, actor: Actor, body: StorageIn) -> None:
             .where(OrganizationStatus.organization_id == actor.organization_id)
             .values(storage_probed_at=utcnow(), storage_state="ok" if result.ok else "failing")
         )
+        org = await db.get(Organization, actor.organization_id)
+        if result.ok and org is not None and body.bucket == org.s3_bucket:
+            await record_versioning(db, actor.organization_id, result)
     if not result.ok:
         raise ApiError(
             422,
