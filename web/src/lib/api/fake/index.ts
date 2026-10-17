@@ -14,13 +14,13 @@
   Deterministic triggers for error states:
     - an access key containing DENIED makes the rotation's probe write fail (AccessDenied);
     - a storage probe on a bucket other than the organization's fails (NoSuchBucket);
-    - a new disk whose name in the bucket contains "fail" fails its format;
+    - a new disk whose name contains "fail" fails its format;
     - ?fake=empty seeds a new organization, ?fake=fail starts with the network down,
       ?fake=default goes back to the full one.
 */
 
 import { ApiError, type Api } from '../client'
-import { DISK_NAME, VOLUME_NAME, type AuditEvent, type AuditQuery, type Disk, type KeyStatus, type Mac, type Person, type Rotation, type Session, type StepState } from '../types'
+import { DISK_NAME, type AuditEvent, type AuditQuery, type Disk, type KeyStatus, type Mac, type Person, type Rotation, type Session, type StepState } from '../types'
 import { DEFAULT_CACHE, INVITE_TTL, LATEST_APP, mountPathOf, seed, type DiskRow, type FakeDb, type MacRow, type PersonRow, type Scenario } from './seed'
 
 const DB_KEY = 'floppy.fake.db.v3'
@@ -178,7 +178,7 @@ function toPerson(p: PersonRow, me: PersonRow): Person {
 }
 
 function toDisk(d: DiskRow): Disk {
-  const { formatDoneAt: _done, formatFails: _fails, ...disk } = d
+  const { formatDoneAt: _done, formatFails: _fails, volumeName: _volume, ...disk } = d
   return structuredClone(disk)
 }
 
@@ -195,7 +195,7 @@ function advanceDisks(): void {
     d.formatDoneAt = null
     if (d.formatFails) {
       d.state = 'failed'
-      d.error = { code: 'format_failed', message: `juicefs format: the bucket refused ${d.volumeName}/` }
+      d.error = { code: 'format_failed', message: 'juicefs format: the bucket refused the new volume' }
       db.disks = db.disks.filter((x) => x.id !== d.id)
       db.failedDisks.push(d)
     } else {
@@ -293,6 +293,24 @@ function filterAudit(q: AuditQuery): AuditEvent[] {
 }
 
 const validEmail = (s: string) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(s)
+/** JuiceFS's volume name pattern, which is also the object prefix. */
+const VOLUME_NAME = /^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/
+
+/**
+ * JuiceFS's name for a new disk, derived once from its display name (DATABASE_SCHEMA.md,
+ * volumes.volume_name): lowercased, every other character a hyphen. The schema asks for "a
+ * short suffix" when the result is taken without fixing its form: the fake appends -2, -3...
+ * Names of failed and deleted disks stay taken forever, their objects are still there.
+ */
+function deriveVolumeName(name: string, taken: Set<string>): string {
+  const base = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 58).replace(/-+$/, '')
+  if (VOLUME_NAME.test(base) && !taken.has(base)) return base
+  for (let n = 2; ; n += 1) {
+    const candidate = `${base || 'disk'}-${n}`
+    if (VOLUME_NAME.test(candidate) && !taken.has(candidate)) return candidate
+  }
+}
+
 const settingsOf = () => ({
   organizationName: db.organizationName,
   mail: { ...db.mail },
@@ -481,12 +499,12 @@ export const fakeApi: Api = {
       if (!disk) throw new ApiError(404, 'not_found', 'No such disk')
       return toDisk(disk)
     },
-    async create({ name, volumeName, trashDays }) {
+    async create({ name, trashDays }) {
       await latency(400, 700)
       const me = requireAdmin()
       advanceDisks()
       const clean = name.trim()
-      if (!DISK_NAME.test(clean) || !VOLUME_NAME.test(volumeName) || !Number.isInteger(trashDays) || trashDays < 0 || trashDays > 365) {
+      if (!DISK_NAME.test(clean) || !Number.isInteger(trashDays) || trashDays < 0 || trashDays > 365) {
         throw new ApiError(422, 'validation', 'Invalid disk')
       }
       if (db.disks.length >= DISK_LIMIT) throw new ApiError(409, 'disk_limit_reached', 'At most 15 disks')
@@ -495,17 +513,15 @@ export const fakeApi: Api = {
       const all = [...db.disks, ...db.failedDisks]
       // macOS compares folder names case-insensitively: "Progetti" and "progetti" collide.
       if (db.disks.some((d) => d.name.toLowerCase() === clean.toLowerCase())) {
-        throw new ApiError(409, 'disk_name_taken', 'Name taken', { field: 'name' })
+        throw new ApiError(409, 'disk_name_taken', 'Name taken')
       }
-      if (all.some((d) => d.volumeName === volumeName)) {
-        throw new ApiError(409, 'disk_name_taken', 'Name in the bucket taken', { field: 'volumeName' })
-      }
+      const volumeName = deriveVolumeName(clean, new Set(all.map((d) => d.volumeName)))
       const disk: DiskRow = {
         id: uid('d'), name: clean, volumeName, mountPath: mountPathOf(clean), state: 'creating', error: null, status: 'online',
         bucket: db.storage.bucket, region: db.storage.region, endpoint: db.storage.endpoint,
         metaDb: Math.max(0, ...all.map((d) => d.metaDb)) + 1, blockSizeKb: 1024, trashDays, trashBytes: 0, usedBytes: 0, fileCount: 0,
         lastWriteAt: null, mountedBy: 0, cache: { ...DEFAULT_CACHE }, createdAt: iso(), createdBy: me.name ?? me.email,
-        formatDoneAt: iso(now() + FORMAT_MS), formatFails: volumeName.includes('fail'),
+        formatDoneAt: iso(now() + FORMAT_MS), formatFails: /fail/i.test(clean),
       }
       db.disks.push(disk)
       log({ actor: actorOf(me), action: 'disk_created', category: 'disks', target: { kind: 'disk', id: disk.id, label: disk.name }, detail: { blockSize: '1 MB' } })

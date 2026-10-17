@@ -27,6 +27,8 @@ export interface MacRow {
 
 /** A disk as the fake stores it: the API's shape plus when its format "finishes". */
 export interface DiskRow extends Disk {
+  /** JuiceFS's name and object prefix: derived from the name, never shown. */
+  volumeName: string
   /** While creating: when the fake format ends, and whether it fails. */
   formatDoneAt: string | null
   formatFails: boolean

@@ -1,6 +1,6 @@
 /*
   Disks (concept-e-admin, "Dischi"): each disk is a JuiceFS volume with its own Valkey
-  database, its objects under <bucket>/<volumeName>/, 1 MB blocks (DECISIONS #15), a trash and
+  database, its objects in the organization's bucket, 1 MB blocks (DECISIONS #15), a trash and
   the cache expiry its Macs get (each Mac sizes its own cache). On a Mac it is a folder,
   /Volumes/Floppy/<name>; names never change, CapCut keeps full paths. Creating one is a state:
   the format runs after the answer, and can fail.
@@ -18,21 +18,11 @@ import { useErrorText } from '@/components/error-text'
 import { EmptyState, PageHeader, QueryView, SkeletonRows } from '@/components/states'
 import { fmt, plural, rich, useI18n } from '@/i18n'
 import { isApiError, type CachePolicy, type Disk } from '@/lib/api'
-import { DISK_NAME, VOLUME_NAME } from '@/lib/api/types'
+import { DISK_NAME } from '@/lib/api/types'
 import { useFormat } from '@/lib/format'
 import { useFlash } from '@/lib/hooks'
 import { DiskState } from './DiskState'
 import { useCreateDisk, useDiskCreation, useDisks, useUpdateDisk } from './hooks'
-
-const slugify = (s: string) =>
-  s
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 63)
-    .replace(/-+$/, '')
 
 /** Where a disk appears on a Mac. */
 const mountPathOf = (name: string) => `/Volumes/Floppy/${name || '...'}`
@@ -48,22 +38,18 @@ function NewDiskDialog({ onClose, onCreated }: { onClose(): void; onCreated(disk
   const errorText = useErrorText()
   const create = useCreateDisk()
   const [name, setName] = useState('')
-  const [volumeName, setVolumeName] = useState('')
-  const [touched, setTouched] = useState(false)
   const [trash, setTrash] = useState('7')
   const [tried, setTried] = useState(false)
   const clean = name.trim()
-  const effectiveVolume = touched ? volumeName : slugify(name)
   const trashDays = intIn(trash, 0, 365)
-  const volumeOk = VOLUME_NAME.test(effectiveVolume)
   const nameOk = DISK_NAME.test(clean)
-  const taken = isApiError(create.error, 'disk_name_taken') ? create.error.details.field : null
+  const taken = isApiError(create.error, 'disk_name_taken')
   const bucket = useDisks().data?.[0]?.bucket ?? 'bucket'
 
   const submit = () => {
     setTried(true)
-    if (!nameOk || !volumeOk || trashDays === null) return
-    create.mutate({ name: clean, volumeName: effectiveVolume, trashDays }, { onSuccess: onCreated })
+    if (!nameOk || trashDays === null) return
+    create.mutate({ name: clean, trashDays }, { onSuccess: onCreated })
   }
 
   return (
@@ -90,14 +76,14 @@ function NewDiskDialog({ onClose, onCreated }: { onClose(): void; onCreated(disk
             {rich(t.disks.nameHint, { path: <span className="num text-ink">{mountPathOf(clean)}</span> })} {t.disks.nameRule}
           </>
         }
-        error={tried && !nameOk ? (clean ? t.disks.nameRule : t.disks.required) : taken === 'name' ? fmt(t.disks.nameTaken, { name: clean }) : null}
+        error={tried && !nameOk ? (clean ? t.disks.nameRule : t.disks.required) : taken ? fmt(t.disks.nameTaken, { name: clean }) : null}
       >
         {(id, describedBy) => <Input
             id={id}
             autoFocus
             maxLength={60}
             value={name}
-            invalid={(tried && !nameOk) || taken === 'name'}
+            invalid={(tried && !nameOk) || taken}
             aria-describedby={describedBy}
             onChange={(e) => {
               setName(e.target.value)
@@ -106,24 +92,7 @@ function NewDiskDialog({ onClose, onCreated }: { onClose(): void; onCreated(disk
             }}
           />}
       </Field>
-      <Field label={t.disks.volumeName} hint={fmt(t.disks.volumeNameHint, { bucket, name: effectiveVolume || '...' })} error={tried && !volumeOk ? fmt(t.disks.volumeNameHint, { bucket, name: effectiveVolume || '...' }) : taken === 'volumeName' ? t.disks.volumeTaken : null}>
-        {(id, describedBy) => (
-          <Input
-            id={id}
-            mono
-            maxLength={63}
-            spellCheck={false}
-            value={effectiveVolume}
-            invalid={(tried && !volumeOk) || taken === 'volumeName'}
-            aria-describedby={describedBy}
-            onChange={(e) => {
-              setTouched(true)
-              setVolumeName(e.target.value)
-              if (create.isError) create.reset()
-            }}
-          />
-        )}
-      </Field>
+      <SlotNote className="text-[13px]">{fmt(t.disks.filesWhere, { bucket })}</SlotNote>
       <div className="grid gap-1.5">
         <span className="text-[13px] font-semibold text-ink">{t.disks.blockSize}</span>
         <span className="num text-ink">1 MB</span>
@@ -228,7 +197,7 @@ function DiskDetail({ disk, onEdit }: { disk: Disk; onEdit(): void }) {
       </div>
       <dl className="m-0 grid grid-cols-[auto_minmax(0,1fr)] gap-x-[18px] gap-y-1.5 text-sm">
         <Row term={t.disks.onMac}><Breakable text={disk.mountPath} /></Row>
-        <Row term={t.disks.bucket}><Breakable text={`${disk.bucket}/${disk.volumeName}/`} /></Row>
+        <Row term={t.disks.bucket}><Breakable text={disk.bucket} /></Row>
         <Row term={t.disks.region}><span className="num">{disk.region}</span></Row>
         <Row term={t.disks.endpoint}><Breakable text={disk.endpoint} /></Row>
         <Row term={t.disks.database}><span className="num">{fmt(t.disks.databaseValue, { n: disk.metaDb })}</span></Row>

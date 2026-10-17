@@ -172,20 +172,17 @@ export type DiskState = 'creating' | 'ready' | 'failed'
  */
 export const DISK_NAME = /^[A-Za-z0-9]([A-Za-z0-9 ._-]{0,58}[A-Za-z0-9])?$/
 
-/** The folder name pattern JuiceFS accepts for a volume, which is also its object prefix. */
-export const VOLUME_NAME = /^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/
-
 /**
  * A disk: a JuiceFS volume, a prefix in the organization's bucket and a Valkey database. On
  * every Mac a team's disks are folders inside the one mounted disk, /Volumes/Floppy/<name>.
+ * JuiceFS's own name (the object prefix) is derived by the server from `name` and never shown,
+ * so it is not here; only the app's /device/config carries it.
  */
 export interface Disk {
   id: string
   /** The name people see, also the folder in /Volumes/Floppy; never renamed, CapCut keeps
    * full paths. */
   name: string
-  /** JuiceFS's name, matching VOLUME_NAME: the objects live under <bucket>/<volumeName>/. */
-  volumeName: string
   /** Where the disk appears on a Mac: /Volumes/Floppy/<name>. */
   mountPath: string
   state: DiskState
@@ -218,8 +215,8 @@ export interface Disk {
  * databases, the first left empty): `disk_limit_reached`.
  */
 export interface CreateDiskRequest {
+  /** Matches DISK_NAME; the server derives JuiceFS's name from it, resolving collisions. */
   name: string
-  volumeName: string
   trashDays: number
 }
 
@@ -407,7 +404,7 @@ export type ErrorCode =
   | 'already_member'
   | 'last_admin'
   | 'cannot_remove_self'
-  /** details.field says which: 'name' (case-insensitive, live disks) or 'volumeName' (ever). */
+  /** A live disk has the same name, compared case-insensitively. */
   | 'disk_name_taken'
   | 'disk_limit_reached'
   | 'storage_in_use'
@@ -466,6 +463,7 @@ export interface DeviceRegisterResponse {
 /** GET /device/config: what the app needs to mount; no secret, the S3 key is in the format. */
 export interface DeviceConfig {
   valkeyUrl: string
+  /** volumeName is JuiceFS's name, `^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$`, the object prefix. */
   disks: { id: string; name: string; volumeName: string; metaDb: number; cacheExpireDays: number; mountPath: string }[]
 }
 
