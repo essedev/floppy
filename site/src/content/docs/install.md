@@ -30,7 +30,7 @@ The app needs no administrator password and installs no kernel extension.
 
 ## Working with the disk
 
-- Open files straight from the Finder or from your editor. A clip you have never opened starts after about a second; one in the cache, at once.
+- Open files straight from the Finder or from your editor. A clip you have never opened starts in under a second; one in the cache, at once. Without a network you can still browse the disk and play what is in the cache, but not save.
 - Before editing a large project, choose **Make available** on its folder in the menu bar panel: the whole project comes into the cache.
 - When the Mac runs low on space, choose **Free up space** on projects you are not editing. The files stay on the disk and download again when opened.
 

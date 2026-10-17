@@ -7,7 +7,7 @@ The menu bar panel shows the state of the disk with its LED and a readout. Most 
 
 ## The disk is not in the Finder
 
-- Open the panel. **Unreachable** means the Mac cannot reach the database or the bucket: check the network. The app retries every 30 seconds on its own, and **Reconnect** retries at once.
+- Open the panel. **Unreachable** means the Mac cannot reach the central Valkey or the bucket: check the network. The app retries every 30 seconds on its own, and **Reconnect** retries at once.
 - **Off** means someone turned it off: choose **Turn on**.
 - If the panel says **Connected** but the Finder shows nothing, look under Locations in the Finder sidebar: the disk is at `%volume%`.
 
@@ -17,9 +17,14 @@ macOS adds `-1` when the folder of a previous mount is still there. Projects tha
 
 TODO: the exact recovery steps depend on the app's first release.
 
+## Saving fails with "read-only file system"
+
+The Mac has lost the central Valkey, which holds the file tree. Until it answers again the disk is read-only: you can browse it from the copy on the Mac and play the clips in the cache, but saving, renaming and deleting fail at once. A slow answer does not cause this; it takes a network error or 10 seconds of silence. Check the network: the disk becomes writable again on its own when the connection is back.
+
 ## A clip stalls or the editor reports a read error
 
-- A clip never opened needs about a second per seek; on a slow line more. Before editing, choose **Make available** on the project so it comes into the cache.
+- A seek in a clip never opened downloads that point first: measured at 0.9 s on average on OVH in Milan with 4 MB blocks, 0.38 s with 1 MB blocks on a simulated 100 Mbps link, more on a slow line. Before editing, choose **Make available** on the project so it comes into the cache.
+- Without a network, a clip that is not in the cache cannot be read: today the read waits instead of failing at once.
 - macOS gives up on an SMB read after 30 seconds. %name% raises that limit for the VM's address only, in a marked block of `~/Library/Preferences/nsmb.conf`; if that block was removed, `~/.%slug%/bin/%slug% setup` writes it again.
 
 ## The Mac is running out of space

@@ -30,7 +30,7 @@ L’app non chiede la password di amministratore e non installa estensioni del k
 
 ## Lavorare con il disco
 
-- Apri i file direttamente dal Finder o dal programma di montaggio. Una clip mai aperta parte dopo circa un secondo; una in cache, subito.
+- Apri i file direttamente dal Finder o dal programma di montaggio. Una clip mai aperta parte in meno di un secondo; una in cache, subito. Senza rete puoi ancora sfogliare il disco e riprodurre quello che è in cache, ma non salvare.
 - Prima di montare un progetto grande, scegli **Rendi disponibile** sulla sua cartella nel pannello della barra dei menu: tutto il progetto entra in cache.
 - Quando il Mac resta senza spazio, scegli **Libera spazio** sui progetti che non stai montando. I file restano sul disco e si riscaricano quando li apri.
 

@@ -21,7 +21,8 @@ TODO: the repository's root `LICENSE` is MIT today; the AGPL-3.0 license file ar
 
 | Software | License |
 |---|---|
-| [JuiceFS](https://github.com/juicedata/juicefs) Community | Apache-2.0 |
+| [JuiceFS](https://github.com/juicedata/juicefs) Community, with %name%'s two patches | Apache-2.0 |
+| [Valkey](https://github.com/valkey-io/valkey), for the file tree | BSD-3-Clause |
 | [Lima](https://github.com/lima-vm/lima) | Apache-2.0 |
 | [Samba](https://www.samba.org) | GPL-3.0 |
 | Debian | mostly free software licenses, per package |
