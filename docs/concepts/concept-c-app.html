@@ -783,7 +783,7 @@ function settingsWindow(sent) {
         <div class="row"><span class="lbl"><b>Versione</b><span>Fluix 0.1.0, aggiornato</span></span><button class="btn btn-soft">Cerca aggiornamenti</button></div>
       </div></section>
       <section><p class="grp-t">Assistenza</p><div class="well">
-        <div class="row"><span class="lbl"><b>Invia diagnostica</b><span>Manda a chi gestisce Fluix lo stato del disco, gli ultimi log di Fluix e della macchina virtuale e la versione di macOS. Nessun file dei progetti, nessuna password.</span></span>${sent ? "" : `<button class="btn btn-soft" data-send>Invia</button>`}</div>
+        <div class="row"><span class="lbl"><b>Invia diagnostica</b><span>Manda a chi gestisce Fluix:</span>${listOf(["lo stato del disco", "gli ultimi log di Fluix e della macchina virtuale", "la versione di macOS"])}<span style="margin-top:6px">Nessun file dei progetti, nessuna password.</span></span>${sent ? "" : `<button class="btn btn-soft" data-send>Invia</button>`}</div>
         ${sent ? `<div class="row"><div class="sent" style="flex:1">${ind("ok")}<span>Inviata alle 10:42. Comunica il codice a chi ti aiuta:</span><span class="code">FX-7Q2K</span></div></div>` : ""}
       </div></section>
     </div>
