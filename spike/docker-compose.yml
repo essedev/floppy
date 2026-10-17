@@ -1,5 +1,6 @@
 # Local S3 for the spike: Garage, plus Toxiproxy in front of it to simulate
-# the latency and bandwidth of a real link to OVH.
+# the latency and bandwidth of a real link to OVH. PostgreSQL stands in for the
+# shared metadata database, also behind Toxiproxy (meta-bench.sh, meta-access.sh).
 services:
   garage:
     image: dxflrs/garage:v2.1.0
@@ -11,6 +12,19 @@ services:
       - garage-data:/var/lib/garage/data
     ports:
       - "127.0.0.1:4500:3900" # S3, direct (no simulated network)
+
+  postgres:
+    image: postgres:17.6-alpine
+    environment:
+      POSTGRES_USER: fluix_admin
+      POSTGRES_PASSWORD: ${PG_PASSWORD:-}
+      POSTGRES_DB: fluix
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "fluix_admin"]
+      interval: 2s
+      retries: 30
 
   toxiproxy:
     image: ghcr.io/shopify/toxiproxy:2.12.0
@@ -24,8 +38,14 @@ services:
     devices:
       - /dev/fuse
     environment:
-      META_URL: sqlite3:///state/meta.db
+      META_URL: ${META_URL:-sqlite3:///state/meta.db}
+      VOLUME_NAME: ${VOLUME_NAME:-spike}
       BUCKET_URL: http://toxiproxy:4501/fluix
+      # Read only by the first `juicefs format`, which stores them in the metadata
+      ACCESS_KEY: ${ACCESS_KEY:-}
+      SECRET_KEY: ${SECRET_KEY:-}
+      # Extra mount flags, e.g. longer metadata caches: --attr-cache 10 --entry-cache 10
+      MOUNT_OPTS: ${MOUNT_OPTS:-}
       SMB_PASSWORD: ${SMB_PASSWORD:?run setup.sh first}
       # Simulated link, in Mbps for the whole mount (0 = unlimited). Toxiproxy
       # only adds latency: its bandwidth limit is per connection, and JuiceFS
@@ -45,6 +65,7 @@ volumes:
   drive-cache:
   garage-meta:
   garage-data:
+  pg-data:
 
 # Explicit subnet: Docker's default address pools can be exhausted on a
 # machine with many compose projects.

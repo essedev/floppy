@@ -1,11 +1,18 @@
 #!/bin/sh
-# Mounts JuiceFS, then serves it over SMB. Both run until the container stops.
+# Formats the volume on first start, mounts JuiceFS, then serves it over SMB.
+# Both run until the container stops.
 set -eu
 
 : "${META_URL:?}" "${BUCKET_URL:?}" "${SMB_PASSWORD:?}"
 mkdir -p /mnt/drive /cache
 
-juicefs mount "$META_URL" /mnt/drive \
+if ! juicefs status "$META_URL" >/dev/null 2>&1; then
+  juicefs format "$META_URL" "${VOLUME_NAME:-spike}" --storage s3 --bucket "$BUCKET_URL" \
+    --trash-days 0
+fi
+
+# shellcheck disable=SC2086 # MOUNT_OPTS is a list of flags
+juicefs mount "$META_URL" /mnt/drive ${MOUNT_OPTS:-} \
   --bucket "$BUCKET_URL" \
   --cache-dir /cache --cache-size "${CACHE_SIZE_MB:-102400}" \
   --prefetch "${PREFETCH:-8}" --buffer-size "${BUFFER_SIZE_MB:-1024}" \

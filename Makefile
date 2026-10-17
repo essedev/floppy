@@ -1,5 +1,5 @@
 SCRIPTS := macos/bin/fluix macos/install.sh macos/vm/guest/guest-install.sh \
-	macos/vm/guest/fluix-mount scripts/package.sh spike/setup.sh spike/bench.sh \
+	macos/vm/guest/fluix-mount scripts/package.sh spike/setup.sh spike/bench.sh spike/meta-bench.sh spike/meta-access.sh \
 	spike/drive/entrypoint.sh
 
 .DEFAULT_GOAL := help
