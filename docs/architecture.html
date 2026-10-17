@@ -195,6 +195,7 @@ figcaption { font-size: 12.5px; color: var(--text-2); margin-top: 8px; max-width
 .legend i { display: inline-block; width: 22px; height: 0; border-top: 3px solid; vertical-align: middle; margin-right: 6px; border-radius: 2px; }
 .legend i.dash { border-top-style: dashed; }
 .legend i.sw { width: 12px; height: 12px; border: 0; border-radius: 3px; }
+.legend i.dot { border-top: 3px dotted; }
 
 /* SVG diagram classes */
 .zone { fill: var(--surface-2); stroke: var(--line-strong); stroke-width: 1; }
@@ -209,6 +210,7 @@ figcaption { font-size: 12.5px; color: var(--text-2); margin-top: 8px; max-width
 .e.data { stroke: var(--data); stroke-width: 4; }
 .e.ctl { stroke: var(--ctl); stroke-dasharray: 6 5; }
 .e.ink { stroke: var(--ink); }
+.e.repl { stroke: var(--meta); stroke-width: 3; stroke-dasharray: 0.5 6; stroke-linecap: round; }
 .el { fill: var(--text-2); font: 12px var(--sans); paint-order: stroke; stroke: var(--raised); stroke-width: 5px; stroke-linejoin: round; }
 .zone ~ .el, .el.onzone { stroke: var(--surface-2); }
 .mk-meta { fill: var(--meta); } .mk-data { fill: var(--data); } .mk-ctl { fill: var(--ctl); } .mk-ink { fill: var(--ink); }
@@ -274,8 +276,10 @@ figcaption { font-size: 12.5px; color: var(--text-2); margin-top: 8px; max-width
 .chart .hit { fill: transparent; cursor: default; }
 .chart .bar { fill: var(--bar); }
 .chart .bar-ext { fill: var(--bar-ext); }
+.chart .bar-ink { fill: var(--ink); }
+.chart .grp-t { fill: var(--text); font: 600 13px var(--sans); }
 .chart .s1 { fill: var(--meta); } .chart .s2 { fill: var(--data); }
-details.data { margin-top: 8px; font-size: 12.5px; color: var(--text-2); }
+details.data { margin-top: 8px; font-size: 12.5px; color: var(--text-2); max-width: 100%; overflow-x: auto; }
 details.data summary { cursor: pointer; }
 details.data table { margin-top: 8px; font-size: 12.5px; }
 #tip {
@@ -292,8 +296,9 @@ details.data table { margin-top: 8px; font-size: 12.5px; }
 .dec p { grid-column: 2; margin: 0; font-size: 13.5px; color: var(--text-2); }
 .dec .rec { grid-column: 2; font-size: 13px; }
 .dec .rec::before { content: "Proposal: "; font-weight: 700; color: var(--text); }
+.dec .rec.closed::before { content: "Closed: "; }
 
-.lic { display: inline-block; font: 11px var(--mono); padding: 2px 8px; border-radius: 99px; background: var(--surface-2); color: var(--text-2); margin-left: 6px; vertical-align: 2px; }
+.lic { display: inline-block; white-space: nowrap; font: 11px var(--mono); padding: 2px 8px; border-radius: 99px; background: var(--surface-2); color: var(--text-2); margin-left: 6px; vertical-align: 2px; }
 .comp h3 { margin: 0 0 4px; display: flex; align-items: center; gap: 6px; font-size: 15px; }
 .comp .where { font-size: 12px; color: var(--text-3); margin-bottom: 8px; }
 .comp ul { margin: 0; padding-left: 18px; font-size: 13px; color: var(--text-2); }
@@ -346,7 +351,7 @@ details.data table { margin-top: 8px; font-size: 12.5px; }
   </ul>
   <div class="side-foot">
     <button class="theme-btn" id="themeBtn" type="button">Toggle theme</button>
-    <span>Draft for review. Measured numbers come from docs/ARCHITECTURE.md; estimates are marked.</span>
+    <span>Draft for review. Measured numbers come from docs/ARCHITECTURE.md and the spike of 17/10/2026; estimates are marked.</span>
   </div>
 </nav>
 
@@ -355,13 +360,13 @@ details.data table { margin-top: 8px; font-size: 12.5px; }
 <section id="overview">
   <p class="eyebrow">01 · Overview</p>
   <h1>From one disk per Mac to one disk per team</h1>
-  <p class="lead">Today every Mac has its own disk, with the metadata in SQLite inside the VM and the S3 keys in a zip. The proposal: one shared disk per team with the metadata in PostgreSQL, personal access through a login, and a menu bar app that installs and drives everything.</p>
+  <p class="lead">Today every Mac has its own disk, with the metadata in SQLite inside the VM and the S3 keys in a zip. The proposal: one shared disk per team, its metadata in a central Valkey with a live copy inside every Mac's VM, personal access through a login, and a menu bar app that installs and drives everything.</p>
 
   <div class="grid g4" style="margin-top:22px">
     <div class="card stat"><div class="v">3<small>ms</small></div><div class="k">Seek in cache, like a local disk</div><div class="src">Measured on OVH Milan</div></div>
     <div class="card stat"><div class="v">0.9<small>s</small></div><div class="k">Seek on a clip never opened (max 1.9 s)</div><div class="src">Measured, 4 MB blocks</div></div>
+    <div class="card stat"><div class="v">0.3<small>s</small></div><div class="k">Listing 300 files another Mac created, against 75 s without the replica</div><div class="src">Measured in the spike, 15 ms link</div></div>
     <div class="card stat"><div class="v">12.1<small>MB/s</small></div><div class="k">Cold playback, against 7.5 a 60 Mbps clip needs</div><div class="src">Measured, 170 Mbps home line</div></div>
-    <div class="card stat"><div class="v">1,035<small>MB</small></div><div class="k">VM RAM on the Mac, down from 2,060</div><div class="src">Measured, 1 GiB VM</div></div>
   </div>
 
   <h3>What changes</h3>
@@ -370,51 +375,54 @@ details.data table { margin-top: 8px; font-size: 12.5px; }
       <thead><tr><th></th><th>Today (test package)</th><th>Proposed</th></tr></thead>
       <tbody>
         <tr><td class="k">Disk</td><td class="then">One per Mac, nobody else sees it</td><td>One per team, the same files on every Mac</td></tr>
-        <tr><td class="k">Metadata</td><td class="then">SQLite inside the VM: lose the VM, lose the files</td><td>PostgreSQL with backups and point-in-time recovery</td></tr>
-        <tr><td class="k">Access</td><td class="then">S3 keys and SMB password inside the zip</td><td>Login in the browser, a personal database role per Mac</td></tr>
-        <tr><td class="k">Someone leaves</td><td class="then">Rotate the keys on every Mac by hand</td><td>One click drops their role, then one key rotation that reaches every Mac on its own</td></tr>
+        <tr><td class="k">Metadata</td><td class="then">SQLite inside the VM: lose the VM, lose the files</td><td>A central Valkey that writes every change to disk, with a replica in the datacenter and a daily dump</td></tr>
+        <tr><td class="k">Browsing</td><td class="then">Local, the tree is in the VM</td><td>Still local: every Mac reads a replica in its own VM; a write costs one round trip to the center</td></tr>
+        <tr><td class="k">Access</td><td class="then">S3 keys and SMB password inside the zip</td><td>Login in the browser, a personal Valkey user per Mac</td></tr>
+        <tr><td class="k">Someone leaves</td><td class="then">Rotate the keys on every Mac by hand</td><td>One click deletes their user, then one key rotation that reaches every Mac on its own</td></tr>
         <tr><td class="k">Install</td><td class="then">Zip plus <code>bash install.sh</code> in the Terminal</td><td><code>brew install --cask fluix</code>, then the app does the rest</td></tr>
-        <tr><td class="k">Interface</td><td class="then">The <code>fluix</code> command</td><td>Menu bar panel (variant B, status first), driving the same command</td></tr>
-        <tr><td class="k">Without network</td><td class="then">Cached files probably readable (not tested)</td><td>Disk unusable: the file tree lives in PostgreSQL</td></tr>
+        <tr><td class="k">Interface</td><td class="then">The <code>fluix</code> command</td><td>Menu bar app from the concepts, driving the same command</td></tr>
+        <tr><td class="k">Without network</td><td class="then">Cached files probably readable (not tested)</td><td>Read only: the whole tree browsable, cached clips play, saving fails at once</td></tr>
       </tbody>
     </table>
   </div>
 
   <div class="grid g3 principles">
-    <div class="principle"><div class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 12h16M14 6l6 6-6 6"/></svg></div><div><b>Control plane off the data path</b><span>It hands out access and configuration. Files flow between the Mac, PostgreSQL and S3 only, so if it goes down mounted disks keep working.</span></div></div>
-    <div class="principle"><div class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v12c0 1.7 3.1 3 7 3s7-1.3 7-3V6"/></svg></div><div><b>Only standard S3 and PostgreSQL</b><span>No provider API in the core. Any S3 and any PostgreSQL work; a provider-specific feature can only be an optional extra.</span></div></div>
+    <div class="principle"><div class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 12h16M14 6l6 6-6 6"/></svg></div><div><b>Control plane off the data path</b><span>It hands out access and configuration. Files flow between the Mac, Valkey and S3 only, so if it goes down mounted disks keep working.</span></div></div>
+    <div class="principle"><div class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v12c0 1.7 3.1 3 7 3s7-1.3 7-3V6"/></svg></div><div><b>Standard parts, one small patch</b><span>Any S3 and a plain Valkey with its native replication, no provider API in the core. The one piece of our own is a JuiceFS patch that reads from the local replica.</span></div></div>
     <div class="principle"><div class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg></div><div><b>One codebase, open source</b><span>Self-hosted by anyone or run as a hosted service: the same code. App and engine MIT, control plane AGPL-3.0.</span></div></div>
   </div>
 </section>
 
 <section id="architecture">
   <p class="eyebrow">02 · Architecture</p>
-  <h2>Three places, three kinds of traffic</h2>
-  <p>Each Mac runs the app, the <code>fluix</code> command and a small Linux VM with JuiceFS. The VM talks to PostgreSQL for the file tree and to S3 for the file contents. The control plane only talks to the app and, as administrator, to PostgreSQL.</p>
+  <h2>Three places, and the file tree on both ends</h2>
+  <p>Each Mac runs the app, the <code>fluix</code> command and a small Linux VM with JuiceFS. The file tree lives in a central Valkey, and the VM keeps a replica of it that the master updates as it changes: JuiceFS reads the tree from that replica, sends its writes to the center, and fetches file contents from S3. The control plane only talks to the app and, as administrator, to Valkey.</p>
   <figure>
     <div class="fig wide">
       <div class="legend">
         <span><i style="border-color:var(--data);border-top-width:4px"></i>File data (4 MB blocks)</span>
         <span><i style="border-color:var(--meta)"></i>Metadata (file tree)</span>
+        <span><i class="dot" style="border-color:var(--meta)"></i>Replication, pushed by the master</span>
         <span><i class="dash" style="border-color:var(--ctl)"></i>Control (HTTPS)</span>
         <span><i style="border-color:var(--ink)"></i>Local, on the Mac</span>
       </div>
-      <svg viewBox="0 0 1000 600" role="img" aria-label="Architecture diagram: Mac with app, command and VM; control plane; PostgreSQL and S3 storage">
+      <svg viewBox="0 0 1000 610" role="img" aria-label="Architecture diagram: Mac with app, command and a VM holding JuiceFS, the cache and a Valkey replica; control plane; central Valkey and S3 storage">
         <defs>
           <marker id="a-meta" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="mk-meta"/></marker>
+          <marker id="a-repl" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="mk-meta"/></marker>
           <marker id="a-data" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="4.5" markerHeight="4.5" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="mk-data"/></marker>
           <marker id="a-ctl" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="mk-ctl"/></marker>
           <marker id="a-ink" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="mk-ink"/></marker>
         </defs>
 
-        <rect class="zone" x="20" y="20" width="440" height="560" rx="14"/>
+        <rect class="zone" x="20" y="20" width="440" height="570" rx="14"/>
         <text class="zlabel" x="40" y="46">Each Mac</text>
         <rect class="zone" x="560" y="20" width="420" height="210" rx="14"/>
         <text class="zlabel" x="580" y="46">Control plane · self-hosted</text>
-        <rect class="zone" x="560" y="290" width="420" height="290" rx="14"/>
-        <text class="zlabel" x="580" y="316">Storage · same region</text>
+        <rect class="zone" x="560" y="290" width="420" height="300" rx="14"/>
+        <text class="zlabel" x="580" y="316">Datacenter · same region</text>
 
-        <rect class="zone-vm" x="40" y="262" width="400" height="298" rx="12"/>
+        <rect class="zone-vm" x="40" y="262" width="400" height="310" rx="12"/>
         <text class="zlabel" x="160" y="288">Lima VM · Debian</text>
 
         <!-- edges first, under the nodes -->
@@ -425,19 +433,24 @@ details.data table { margin-top: 8px; font-size: 12.5px; }
         <text class="el onzone" x="355" y="142">drives</text>
         <path class="e ink" d="M345 216 V300" marker-end="url(#a-ink)"/>
         <text class="el onzone" x="355" y="250">limactl</text>
-        <path class="e ink" d="M222 330 H252" marker-start="url(#a-ink)" marker-end="url(#a-ink)"/>
-        <path class="e ink" d="M335 360 V422" marker-start="url(#a-ink)" marker-end="url(#a-ink)"/>
+        <path class="e ink" d="M222 331 H252" marker-start="url(#a-ink)" marker-end="url(#a-ink)"/>
+        <path class="e ink" d="M266 362 L218 408" marker-start="url(#a-ink)" marker-end="url(#a-ink)"/>
+        <path class="e meta" d="M362 362 V408" marker-start="url(#a-meta)" marker-end="url(#a-meta)"/>
+        <text class="el" x="372" y="390">reads</text>
 
-        <path class="e meta" d="M422 320 C500 320 520 385 590 385" marker-start="url(#a-meta)" marker-end="url(#a-meta)"/>
-        <text class="el" x="470" y="338">metadata</text>
-        <path class="e data" d="M422 345 C500 345 500 505 590 505" marker-start="url(#a-data)" marker-end="url(#a-data)"/>
-        <text class="el" x="478" y="470">data blocks</text>
+        <path class="e data" d="M422 316 C500 316 510 360 590 360" marker-start="url(#a-data)" marker-end="url(#a-data)"/>
+        <text class="el" x="480" y="304">data blocks</text>
+        <path class="e meta" d="M422 346 C510 346 505 470 588 470" marker-end="url(#a-meta)"/>
+        <text class="el" x="470" y="394">writes, one</text>
+        <text class="el" x="470" y="410">round trip</text>
+        <path class="e repl" d="M590 520 C500 520 505 440 426 440" marker-end="url(#a-repl)"/>
+        <text class="el" x="468" y="534">replication</text>
         <path class="e ctl" d="M432 88 H590" marker-start="url(#a-ctl)" marker-end="url(#a-ctl)"/>
         <text class="el" x="452" y="78">login · config · heartbeat</text>
-        <path class="e ctl" d="M675 126 V350" marker-end="url(#a-ctl)"/>
-        <text class="el" x="685" y="260">roles · volumes · key rotation</text>
+        <path class="e ctl" d="M745 126 V256 H905 V438" marker-end="url(#a-ctl)"/>
+        <text class="el" x="762" y="248">ACL users · volumes · key rotation</text>
         <path class="e ink" d="M760 98 H790" marker-start="url(#a-ink)" marker-end="url(#a-ink)"/>
-        <path class="e ink" d="M790 176 C770 176 760 150 742 128" marker-end="url(#a-ink)"/>
+        <path class="e ink" d="M660 152 V128" marker-end="url(#a-ink)"/>
 
         <!-- Mac nodes -->
         <rect class="node" x="50" y="62" width="170" height="56" rx="9"/>
@@ -453,16 +466,23 @@ details.data table { margin-top: 8px; font-size: 12.5px; }
         <rect class="node" x="60" y="302" width="162" height="58" rx="9"/>
         <text class="nt" x="74" y="326">Samba</text>
         <text class="ns" x="74" y="344">share on vzNAT only</text>
-        <rect class="node" x="252" y="302" width="170" height="58" rx="9"/>
-        <text class="nt" x="266" y="326">JuiceFS client</text>
-        <text class="ns" x="266" y="344">mount, prefetch</text>
-        <rect class="node" x="252" y="424" width="170" height="58" rx="9"/>
-        <text class="nt" x="266" y="448">Cache</text>
-        <text class="ns" x="266" y="466">4 MB blocks on the SSD</text>
-        <text class="ns" x="62" y="420">Ceiling computed on the</text>
-        <text class="ns" x="62" y="436">Mac side, not in the VM</text>
-        <text class="ns" x="62" y="520">No ports exposed, no</text>
-        <text class="ns" x="62" y="536">administrator rights</text>
+        <rect class="node hl" x="252" y="302" width="170" height="58" rx="9"/>
+        <text class="nt" x="266" y="326">JuiceFS, patched</text>
+        <text class="ns" x="266" y="344">reads from the replica</text>
+        <rect class="node" x="60" y="410" width="162" height="58" rx="9"/>
+        <text class="nt" x="74" y="434">Cache</text>
+        <text class="ns" x="74" y="452">4 MB blocks on the SSD</text>
+        <rect class="node" x="252" y="410" width="170" height="58" rx="9"/>
+        <text class="nt" x="266" y="434">Valkey replica</text>
+        <text class="ns" x="266" y="452">the file tree, in sync</text>
+        <text class="ns" x="62" y="500">Ceiling computed on the</text>
+        <text class="ns" x="62" y="516">Mac side, not in the VM</text>
+        <text class="ns" x="62" y="540">No ports exposed, no</text>
+        <text class="ns" x="62" y="556">administrator rights</text>
+        <text class="ns" x="262" y="500">Over 2 s behind: reads</text>
+        <text class="ns" x="262" y="516">go to the center</text>
+        <text class="ns" x="262" y="540">Center unreachable:</text>
+        <text class="ns" x="262" y="556">read only</text>
 
         <!-- Control plane nodes -->
         <rect class="node hl" x="590" y="70" width="170" height="56" rx="9"/>
@@ -470,40 +490,41 @@ details.data table { margin-top: 8px; font-size: 12.5px; }
         <text class="ns" x="604" y="112">FastAPI · React</text>
         <rect class="node" x="790" y="70" width="166" height="56" rx="9"/>
         <text class="nt" x="804" y="94">Control DB</text>
-        <text class="ns" x="804" y="112">orgs, people, devices</text>
-        <rect class="node" x="790" y="152" width="166" height="50" rx="9"/>
-        <text class="nt" x="804" y="174">Admin</text>
-        <text class="ns" x="804" y="191">in the browser</text>
-        <rect class="badge-bg" x="590" y="150" width="160" height="24" rx="12"/>
-        <text class="badge-t" x="604" y="166">Not on the data path</text>
+        <text class="ns" x="804" y="112">PostgreSQL: orgs, devices</text>
+        <rect class="node" x="590" y="152" width="140" height="50" rx="9"/>
+        <text class="nt" x="604" y="174">Admin</text>
+        <text class="ns" x="604" y="191">in the browser</text>
+        <rect class="badge-bg" x="790" y="165" width="160" height="24" rx="12"/>
+        <text class="badge-t" x="804" y="181">Not on the data path</text>
 
-        <!-- Storage nodes -->
-        <rect class="node" x="590" y="350" width="366" height="72" rx="9"/>
-        <text class="nt" x="604" y="376">PostgreSQL</text>
-        <text class="ns" x="604" y="396">file tree: one database per volume,</text>
-        <text class="ns" x="604" y="412">one role per Mac</text>
-        <rect class="node" x="590" y="470" width="366" height="72" rx="9"/>
-        <text class="nt" x="604" y="496">S3 bucket</text>
-        <text class="ns" x="604" y="516">file contents as 4 MB blocks,</text>
-        <text class="ns" x="604" y="532">one bucket per organization</text>
+        <!-- Datacenter nodes -->
+        <rect class="node" x="590" y="326" width="290" height="72" rx="9"/>
+        <text class="nt" x="604" y="352">S3 bucket</text>
+        <text class="ns" x="604" y="372">file contents as 4 MB blocks,</text>
+        <text class="ns" x="604" y="388">one bucket per organization</text>
+        <rect class="node" x="590" y="440" width="366" height="96" rx="9"/>
+        <text class="nt" x="604" y="466">Valkey, central</text>
+        <text class="ns" x="604" y="486">the master: a database per volume,</text>
+        <text class="ns" x="604" y="502">an ACL user per Mac,</text>
+        <text class="ns" x="604" y="518">every write on disk, a replica, a daily dump</text>
       </svg>
     </div>
-    <figcaption>The S3 key never travels through the control plane to the Mac: JuiceFS keeps it inside each volume's metadata, so whoever can read the metadata can reach the bucket, and whoever loses the database role loses both.</figcaption>
+    <figcaption>The S3 key never travels through the control plane to the Mac: JuiceFS keeps it inside each volume's metadata, so it sits on the master and in every replica. Whoever can read the metadata can reach the bucket; deleting a Mac's Valkey user stops its writes and its replica's stream, and rotating the S3 key shuts out any copy of the old one.</figcaption>
   </figure>
 </section>
 
 <section id="components">
   <p class="eyebrow">03 · Components</p>
   <h2>What gets built, and where it lives</h2>
-  <div class="grid g3" style="margin-top:16px">
+  <div class="grid g4" style="margin-top:16px">
     <div class="card comp">
       <h3>Fluix.app<span class="lic">MIT</span></h3>
       <div class="where">app/ · Tauri, React · from the Portsage skeleton</div>
       <ul>
-        <li>Menu bar panel, variant B</li>
+        <li>Menu bar panel, settings, first run, as in the concepts</li>
         <li>Login in the browser, token in the Keychain</li>
-        <li>First run: creates the VM with progress</li>
-        <li>Make available / Free up space per project</li>
+        <li>Gets the Mac's Valkey user and configures the replica</li>
+        <li>Shows the read-only state when the center is unreachable</li>
         <li>Heartbeat, Send diagnostics</li>
       </ul>
     </div>
@@ -512,8 +533,8 @@ details.data table { margin-top: 8px; font-size: 12.5px; }
       <div class="where">macos/ · bash · bundled as externalBin</div>
       <ul>
         <li>Stays the engine: setup, start, stop, warmup, free</li>
-        <li>New: <code>status --json</code> for the panel</li>
-        <li>New: <code>META_URL</code> from the app, no keys in a file</li>
+        <li>New: <code>status --json</code> for the panel, replica mode included</li>
+        <li>New: metadata URL from the app, no keys in a file</li>
         <li>SMB password in the Keychain</li>
       </ul>
     </div>
@@ -523,8 +544,28 @@ details.data table { margin-top: 8px; font-size: 12.5px; }
       <ul>
         <li>JuiceFS client and cache</li>
         <li>Samba on the private link</li>
-        <li>Image and packages shipped, no downloads</li>
-        <li>Unchanged except the metadata URL</li>
+        <li>A Valkey replica of the volume's metadata</li>
+        <li>Image and packages shipped, Valkey 8.1.1 from Debian 13 included: no downloads</li>
+      </ul>
+    </div>
+    <div class="card comp">
+      <h3>JuiceFS<span class="lic">Apache-2.0</span></h3>
+      <div class="where">patched: spike/juicefs-replica, on v1.4.1</div>
+      <ul>
+        <li>Lookups, attributes, listings, xattrs and slice lists from the local replica</li>
+        <li>Writes on the master in one round trip: logic on replica reads, then one script that checks them and applies</li>
+        <li>Read-your-writes from a session counter in the same transaction</li>
+        <li>Mode and lag in <code>.stats</code>: replica, master, offline</li>
+      </ul>
+    </div>
+    <div class="card comp">
+      <h3>Valkey replica<span class="lic">BSD</span></h3>
+      <div class="where">inside each VM · 127.0.0.1</div>
+      <ul>
+        <li>Native replication: the master pushes every change</li>
+        <li>Resumes from a 256 MB backlog, or resyncs in full</li>
+        <li>Over 2 s behind or restarted empty: reads go to the master</li>
+        <li>Authenticates with the Mac's Valkey user</li>
       </ul>
     </div>
     <div class="card comp">
@@ -532,19 +573,19 @@ details.data table { margin-top: 8px; font-size: 12.5px; }
       <div class="where">server/ · FastAPI, React, PostgreSQL · Docker Compose</div>
       <ul>
         <li>Accounts, magic link sign-in, invites</li>
-        <li>Organizations, volumes, devices</li>
-        <li>Creates and drops database roles</li>
+        <li>Organizations, volumes, devices, in its own PostgreSQL</li>
+        <li>Creates and deletes the Valkey ACL users</li>
         <li>Creates volumes (<code>juicefs format</code>), rotates the S3 key</li>
         <li>Audit log</li>
       </ul>
     </div>
     <div class="card comp">
-      <h3>PostgreSQL<span class="lic">any</span></h3>
-      <div class="where">managed, same region as the bucket</div>
+      <h3>Valkey, central<span class="lic">BSD</span></h3>
+      <div class="where">a server in the same region as the bucket</div>
       <ul>
-        <li>One database per volume (JuiceFS tables)</li>
-        <li>One role per Mac, with access only to its organization's databases</li>
-        <li>Point-in-time recovery plus a daily <code>juicefs dump</code></li>
+        <li>One database per volume (JuiceFS keys)</li>
+        <li>An ACL user per Mac, for its writes and its replica</li>
+        <li><code>appendfsync always</code>, a replica in the datacenter, a daily <code>juicefs dump</code></li>
       </ul>
     </div>
     <div class="card comp">
@@ -565,26 +606,31 @@ details.data table { margin-top: 8px; font-size: 12.5px; }
   <div class="tabs" role="tablist">
     <button class="tab" role="tab" aria-selected="true" data-panel="f-login">First install and login</button>
     <button class="tab" role="tab" aria-selected="false" data-panel="f-read">Reading a clip</button>
+    <button class="tab" role="tab" aria-selected="false" data-panel="f-write">Saving a file</button>
     <button class="tab" role="tab" aria-selected="false" data-panel="f-revoke">Revocation and key rotation</button>
   </div>
   <div class="panel" id="f-login">
     <figure><div class="fig wide"><svg class="seq" id="seq-login"></svg></div>
-    <figcaption>The magic link is bound to the pending sign-in request, not to a browser cookie: it works even if the mail client opens a different browser. The app never shows a password field.</figcaption></figure>
+    <figcaption>The magic link is bound to the pending sign-in request, not to a browser cookie: it works even if the mail client opens a different browser. The app never shows a password field. The replica starts with a full copy of the volume's metadata, then the master pushes every change as it happens.</figcaption></figure>
   </div>
   <div class="panel" id="f-read" hidden>
     <figure><div class="fig wide"><svg class="seq" id="seq-read"></svg></div>
-    <figcaption>Attribute lookups are cached by JuiceFS for about a second; with remote PostgreSQL every miss is a network round trip. That cost is what step 0 of the plan measures.</figcaption></figure>
+    <figcaption>Every metadata read is local, in the same VM: no network round trip. A read waits only when the replica has not yet received this Mac's own last write. Measured: a folder of 300 files another Mac created lists in 0.20-0.30 s from the Finder, against 74.6 s with every read on the master.</figcaption></figure>
+  </div>
+  <div class="panel" id="f-write" hidden>
+    <figure><div class="fig wide"><svg class="seq" id="seq-write"></svg></div>
+    <figcaption>One script on the master checks that nothing JuiceFS read has changed and applies the writes, so a create, a delete or the commit of written data costs one round trip instead of 3-6. The Finder issues about 9 of them per new file: 100 small files take 13.7-17 s at 15 ms.</figcaption></figure>
   </div>
   <div class="panel" id="f-revoke" hidden>
     <figure><div class="fig wide"><svg class="seq" id="seq-revoke"></svg></div>
-    <figcaption>Dropping the role cuts the file tree at once. The old S3 key stays valid until the admin deletes it at the provider: that window is the risk described under Credentials.</figcaption></figure>
+    <figcaption>Deleting the user stops the Mac's writes and its replica's stream at once. Until the app clears it, the replica still holds the old tree with the S3 key inside: the key rotation closes that window, as described under Credentials.</figcaption></figure>
   </div>
 </section>
 
 <section id="states">
   <p class="eyebrow">05 · App states</p>
   <h2>What the panel can show</h2>
-  <p>The states of variant B, plus the first run and revocation, which the mockup does not cover yet. Every state has one primary action.</p>
+  <p>The states drawn in the app and first run concepts (<code>docs/concepts/</code>). Every state has one primary action. Unreachable is not a dead disk: the replica keeps the whole tree, so the disk stays browsable and cached clips play, read only.</p>
   <figure>
     <div class="fig wide">
       <svg viewBox="0 0 1060 290" role="img" aria-label="App state diagram">
@@ -595,7 +641,7 @@ details.data table { margin-top: 8px; font-size: 12.5px; }
         <g id="stateNodes"></g>
       </svg>
     </div>
-    <figcaption>Dots carry status color and every state is labeled in text. Reconnection is automatic from Unreachable; Off is only entered by the user.</figcaption>
+    <figcaption>Dots carry status color and every state is labeled in text. From Unreachable the app retries every 30 seconds on its own; saving fails at once with "read-only file system" until the center answers. Off is only entered by the user.</figcaption>
   </figure>
 </section>
 
@@ -607,25 +653,25 @@ details.data table { margin-top: 8px; font-size: 12.5px; }
       <thead><tr><th>Credential</th><th>Held by</th><th>Stored</th><th>Gives</th><th>Taken back by</th></tr></thead>
       <tbody>
         <tr><td class="k">Device token</td><td>Each Mac</td><td>Keychain</td><td>Control plane API as that Mac</td><td>Revoking the device <span class="pill good">immediate</span></td></tr>
-        <tr><td class="k">Database role</td><td>Each Mac</td><td>Keychain, passed to the VM</td><td>Read and write the file tree, and through it the S3 key</td><td>Drop role and end its sessions <span class="pill good">immediate</span></td></tr>
-        <tr><td class="k">S3 key</td><td>Every Mac with a role, implicitly</td><td>Volume metadata, obfuscated with the volume's UUID</td><td>Read, write, delete objects in the bucket</td><td>New key pasted, old one deleted at the provider <span class="pill warn">manual</span></td></tr>
+        <tr><td class="k">Valkey user</td><td>Each Mac</td><td>Keychain, passed to the VM for JuiceFS and the replica</td><td>Write the file tree, receive the replication stream, and through them the S3 key</td><td><code>ACL DELUSER</code> and <code>CLIENT KILL</code> <span class="pill good">immediate</span></td></tr>
+        <tr><td class="k">S3 key</td><td>Every Mac with a Valkey user, implicitly</td><td>Volume format in the metadata, on the master and in every replica</td><td>Read, write, delete objects in the bucket</td><td>New key pasted, old one deleted at the provider <span class="pill warn">manual</span></td></tr>
         <tr><td class="k">SMB password</td><td>Mac and its VM</td><td>Keychain (today in the mount URL)</td><td>The share, only on the private Mac-VM link</td><td>Reinstall</td></tr>
-        <tr><td class="k">Database admin</td><td>Control plane</td><td>Server environment</td><td>Create and drop roles and databases</td><td>The operator</td></tr>
+        <tr><td class="k">Valkey admin</td><td>Control plane</td><td>Server environment</td><td>Create and delete ACL users, format volumes</td><td>The operator</td></tr>
         <tr><td class="k">Magic link</td><td>The person's inbox</td><td>Hashed, single use, 15 minutes</td><td>One sign-in</td><td>Expiry</td></tr>
       </tbody>
     </table>
   </div>
-  <div class="callout risk"><b>Residual risk: the window before rotation</b>A revoked person who copied the S3 key can still delete or download raw blocks until the admin deletes that key at the provider. Without metadata the blocks are 4 MB fragments with no names; deletion is the real risk. Mitigations: rotate right after revoking, and bucket versioning as a safety net (an open decision, it bills deleted blocks).</div>
-  <div class="callout info"><b>Permissions stay all or nothing</b>Everyone in an organization sees and can delete every file of its volumes. JuiceFS Community has no per-folder permissions; trash (7 days) and the replica cover mistakes.</div>
+  <div class="callout risk"><b>Residual risk: the window before rotation</b>A revoked Mac keeps the replica it had, S3 key included, until the app clears it at the next heartbeat; whoever copied the key can delete or download raw blocks until the admin deletes it at the provider. Without metadata the blocks are 4 MB fragments with no names; deletion is the real risk. Mitigations: rotate right after revoking, and bucket versioning as a safety net (an open decision, it bills deleted blocks).</div>
+  <div class="callout info"><b>Permissions stay all or nothing</b>Everyone in an organization sees and can delete every file of its volumes. JuiceFS Community has no per-folder permissions; trash (7 days) and the bucket's copy at a second provider cover mistakes. The replicas in the Macs are not a backup: they follow the master, deletions included.</div>
 </section>
 
 <section id="model">
   <p class="eyebrow">07 · Data model</p>
   <h2>The control plane's tables</h2>
-  <p>Soft delete everywhere (<code>deleted_at</code>). The file tree is not here: it lives in each volume's own database, written by JuiceFS.</p>
+  <p>Soft delete everywhere (<code>deleted_at</code>). The control plane keeps its own tables in PostgreSQL. The file tree is not here: it lives in each volume's Valkey database, written by JuiceFS.</p>
   <div class="legend" style="margin-top:12px">
-    <span><i class="sw" style="background:var(--ctl)"></i>Control DB</span>
-    <span><i class="sw" style="background:var(--meta)"></i>Created on the metadata PostgreSQL</span>
+    <span><i class="sw" style="background:var(--ctl)"></i>Control DB (PostgreSQL)</span>
+    <span><i class="sw" style="background:var(--meta)"></i>Created on the central Valkey</span>
   </div>
   <div class="er">
     <div class="ent where-cp"><h4>organizations <span>tenant</span></h4><ul>
@@ -639,25 +685,25 @@ details.data table { margin-top: 8px; font-size: 12.5px; }
       <li>status<em>invited | active | revoked</em></li><li>invited_by<em>fk users</em></li><li>revoked_at<em>timestamp</em></li></ul></div>
     <div class="ent where-cp"><h4>volumes <span>a disk</span></h4><ul>
       <li><span class="pk">id</span><em>uuid</em></li><li><span class="fk">org_id</span><em>fk</em></li>
-      <li>name<em>VOLUME_NAME</em></li><li>meta_database<em>text</em></li><li>block_size_kb, trash_days<em>int</em></li><li>deleted_at<em>timestamp</em></li></ul></div>
+      <li>name<em>VOLUME_NAME</em></li><li>meta_db<em>Valkey db number</em></li><li>block_size_kb, trash_days<em>int</em></li><li>deleted_at<em>timestamp</em></li></ul></div>
     <div class="ent where-cp"><h4>devices <span>a Mac</span></h4><ul>
       <li><span class="pk">id</span><em>uuid</em></li><li><span class="fk">user_id, org_id</span><em>fk</em></li>
       <li>name, macos_version, app_version<em>text</em></li><li>token_hash<em>text</em></li>
       <li>last_seen_at<em>timestamp</em></li><li>revoked_at<em>timestamp</em></li></ul></div>
-    <div class="ent where-db"><h4>device role <span>on PostgreSQL</span></h4><ul>
-      <li><span class="pk">fluix_d_&lt;id&gt;</span><em>role</em></li><li>CONNECT<em>org's volume DBs</em></li>
-      <li>SELECT, INSERT, UPDATE, DELETE<em>JuiceFS tables</em></li><li>password<em>shown once</em></li></ul></div>
+    <div class="ent where-db"><h4>device user <span>Valkey ACL</span></h4><ul>
+      <li><span class="pk">fluix_d_&lt;id&gt;</span><em>ACL user</em></li><li>metadata commands<em>JuiceFS keys</em></li>
+      <li>PSYNC, REPLCONF<em>its replica</em></li><li>password<em>shown once</em></li></ul></div>
     <div class="ent where-cp"><h4>sign_in_requests <span>PKCE</span></h4><ul>
       <li><span class="pk">id</span><em>uuid</em></li><li>code_challenge, redirect_uri<em>text</em></li>
       <li>magic_link_hash<em>text</em></li><li>expires_at, used_at<em>timestamp</em></li></ul></div>
     <div class="ent where-cp"><h4>audit_events <span>append only</span></h4><ul>
       <li><span class="pk">id</span><em>bigint</em></li><li><span class="fk">org_id, actor_id</span><em>fk</em></li>
       <li>action<em>text</em></li><li>target<em>jsonb</em></li><li>created_at<em>timestamp</em></li></ul></div>
-    <div class="ent where-db"><h4>volume database <span>JuiceFS</span></h4><ul>
-      <li>jfs_node, jfs_edge, ...<em>file tree</em></li><li>jfs_setting<em>format + S3 key</em></li>
-      <li>owner<em>admin role</em></li></ul></div>
+    <div class="ent where-db"><h4>volume database <span>Valkey db</span></h4><ul>
+      <li>i*, d*, c*, x*<em>file tree</em></li><li>setting<em>format + S3 key</em></li>
+      <li>ryw&lt;sid&gt;<em>read-your-writes</em></li></ul></div>
   </div>
-  <p class="small muted" style="margin-top:14px">One role per Mac instead of per person: a lost or stolen laptop is revoked alone, and the person keeps working on the others.</p>
+  <p class="small muted" style="margin-top:14px">One Valkey user per Mac instead of per person: a lost or stolen laptop is revoked alone, and the person keeps working on the others. Replication copies a whole Valkey instance, not one database: a replica sees every volume on its master, so organizations never share an instance.</p>
 </section>
 
 <section id="failures">
@@ -668,14 +714,16 @@ details.data table { margin-top: 8px; font-size: 12.5px; }
       <thead><tr><th>Down</th><th>Mounted disks</th><th>What waits</th><th>Mitigation</th></tr></thead>
       <tbody>
         <tr><td class="k">Control plane</td><td><span class="pill good">keep working</span></td><td>Sign-in, new Macs, revocation, rotation</td><td>It holds no file data; restart or redeploy</td></tr>
-        <tr><td class="k">PostgreSQL</td><td><span class="pill bad">stop</span></td><td>Everything, cached files included</td><td>Managed, point-in-time recovery, daily dump, alert</td></tr>
+        <tr><td class="k">Central Valkey</td><td><span class="pill warn">read only</span></td><td>Every change: saving, renaming, deleting. Browsing and reading go on from each replica</td><td>Every write on disk before the answer, a replica in the datacenter, a daily dump, alert</td></tr>
         <tr><td class="k">S3</td><td><span class="pill warn">cache only</span></td><td>Uncached reads and every write</td><td>Writeback off: a saved file is on S3, never only on a Mac</td></tr>
-        <tr><td class="k">The Mac's network</td><td><span class="pill bad">stop</span></td><td>Everything</td><td>None: accepted, the file tree is remote</td></tr>
+        <tr><td class="k">The Mac's network</td><td><span class="pill warn">read only</span></td><td>Saving fails in 0.1 s; uncached clips</td><td>The whole tree stays browsable; back within 0.2 s of the link returning</td></tr>
+        <tr><td class="k">The local replica</td><td><span class="pill good">keep working</span></td><td>Nothing; reads cross the network meanwhile</td><td>Behind over 2 s, stopped or restarted empty: reads go to the master until it catches up</td></tr>
         <tr><td class="k">The VM</td><td><span class="pill warn">brief stop</span></td><td>Until the agent restarts it</td><td>Agent every 2 minutes, health check from inside the VM</td></tr>
         <tr><td class="k">The Mac's disk space</td><td><span class="pill warn">cache freed</span></td><td>Cached clips must download again</td><td>Ceiling and emergency eviction computed on the Mac side</td></tr>
       </tbody>
     </table>
   </div>
+  <div class="callout info"><b>Being refined: slow is not unreachable</b>A master that answers late, for example during a large copy, must not turn the disk read only. Offline will mean unambiguous unreachability, or several failed health checks in a row.</div>
 </section>
 
 <section id="deploy">
@@ -687,7 +735,7 @@ details.data table { margin-top: 8px; font-size: 12.5px; }
       <div class="where">anyone, from the public repo</div>
       <ul>
         <li><code>docker compose up</code> for the control plane</li>
-        <li>Any S3 and any PostgreSQL</li>
+        <li>Any S3, a Valkey server, PostgreSQL for the control plane</li>
         <li>One organization, created at first start</li>
         <li>Mail through plain SMTP</li>
       </ul>
@@ -697,7 +745,7 @@ details.data table { margin-top: 8px; font-size: 12.5px; }
       <div class="where">a self-hosted install, the first real one</div>
       <ul>
         <li>Control plane on a Dokploy server</li>
-        <li>Managed PostgreSQL and S3 in Milan</li>
+        <li>Central Valkey and S3 in Milan</li>
         <li>Replaces the tester's per-Mac disk</li>
         <li>Volume created fresh: the test volume does not migrate</li>
       </ul>
@@ -707,7 +755,7 @@ details.data table { margin-top: 8px; font-size: 12.5px; }
       <div class="where">later, same code</div>
       <ul>
         <li>Many organizations on one instance</li>
-        <li>Isolation by database grants and a bucket per organization, not by application filters</li>
+        <li>Isolation by a Valkey instance and a bucket per organization, not by application filters: replication copies a whole instance</li>
         <li>The key's scope to its bucket is set by the operator in the provider console</li>
       </ul>
     </div>
@@ -716,24 +764,77 @@ details.data table { margin-top: 8px; font-size: 12.5px; }
 
 <section id="performance">
   <p class="eyebrow">10 · Performance</p>
-  <h2>Measured today, and the unknown</h2>
-  <div class="grid g2" style="margin-top:16px">
+  <h2>Measured: shared metadata at local speed</h2>
+  <p>Step 0 ran on 17/10/2026 in a local rig: two JuiceFS clients in containers standing in for two Macs' VMs, each with its local replica, mounted by the Mac over SMB, and the central metadata server behind a simulated 15 ms link, the same footage and the same tests for every option.</p>
+
+  <h3>Why remote metadata failed first</h3>
+  <div class="grid g2">
+    <figure style="margin:0">
+      <div class="fig">
+        <svg class="chart" id="ch-ops" viewBox="0 0 480 200" role="img" aria-label="Metadata operations Samba issues to list 300 files"></svg>
+      </div>
+      <figcaption>Operations Samba sends to JuiceFS to list a folder of 300 files for the Finder, out of about 2,700 in all. Each one was a round trip to the metadata server.</figcaption>
+      <details class="data"><summary>Data</summary><table><tr><th>Operation</th><th>Count</th></tr><tr><td>Lookups of <code>._</code> AppleDouble names</td><td>about 900</td></tr><tr><td>getxattr and listxattr</td><td>about 1,000</td></tr><tr><td>Other lookups</td><td>about 650</td></tr><tr><td>All operations</td><td>about 2,700</td></tr></table></details>
+    </figure>
+    <div class="card small" style="align-self:start">
+      <p>With PostgreSQL across the link, that listing took <b>117 s</b> from the Finder and creating one small file about <b>1.8 s</b>. Inside the VM, without Samba, the same listing took 0.12 s: the database was fine, the number of trips was not.</p>
+      <p style="margin:0">Making Samba ask less (vetoing <code>._</code> files, a local index of Finder attributes) breaks sharing between Macs. What works is making the answers local: a replica of the metadata in every VM, which is what Valkey's native replication gives.</p>
+    </div>
+  </div>
+
+  <h3>The same tests, four ways to hold the metadata</h3>
+  <figure>
+    <div class="fig wide">
+      <div class="legend">
+        <span><i class="sw" style="background:var(--bar)"></i>Valkey with the local replica (chosen)</span>
+        <span><i class="sw" style="background:var(--bar-ext)"></i>Range across runs</span>
+        <span><i class="sw" style="background:var(--ink)"></i>Other options</span>
+      </div>
+      <svg class="chart" id="ch-acc" viewBox="0 0 860 600" role="img" aria-label="Seconds per test for SQLite in the VM, PostgreSQL over the link, Valkey without and with the local replica"></svg>
+    </div>
+    <figcaption>Seconds, from the Mac over SMB at 15 ms; each panel has its own scale. SQLite in the VM is today's single-Mac disk, the floor nothing shared can beat; the other two shared options pay a round trip per read. Creating files stays slower than local because every write still crosses the link: about 9 per file from the Finder, one round trip each, so 100 files cost at least 100 × 9 × 15 ms = 13.5 s. The earlier 10 s target was set before that was known; it is now 20 s, and asynchronous metadata writes, the only way lower, were ruled out.</figcaption>
+    <details class="data"><summary>Data</summary><table><tr><th>Test</th><th>SQLite in the VM</th><th>PostgreSQL over the link</th><th>Valkey, master only</th><th>Valkey with local replica</th></tr><tr><td>Cold listing of 300 files on another Mac</td><td>0.24 s</td><td>117 s</td><td>74.6 s</td><td>0.20-0.30 s</td></tr><tr><td>Creating 100 small files from the Finder</td><td>3.7 s</td><td>174 s</td><td>158 s</td><td>13.7-17 s</td></tr><tr><td>File created on Mac A visible on Mac B</td><td>n/a, one Mac</td><td>n/a</td><td>0.47 s</td><td>0.00-0.01 s</td></tr></table></details>
+  </figure>
+
+  <h3>Acceptance, with the patch</h3>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Test</th><th>Measured</th><th>Threshold</th><th>Result</th></tr></thead>
+      <tbody>
+        <tr><td class="k">Cold listing of 300 files on B</td><td>0.20-0.30 s</td><td>under 0.5 s</td><td><span class="pill good">pass</span></td></tr>
+        <tr><td class="k">100 small files created on A</td><td>13.7-17 s</td><td>under 20 s, revised from 10 s</td><td><span class="pill good">pass</span></td></tr>
+        <tr><td class="k">Cold read of a clip on B (t03)</td><td>5.3-5.5 MB/s</td><td>at least 90% of 5.7 MB/s with local SQLite</td><td><span class="pill warn">pass, data path open</span></td></tr>
+        <tr><td class="k">File created on A visible on B</td><td>0.00-0.01 s</td><td>under 2 s</td><td><span class="pill good">pass</span></td></tr>
+        <tr><td class="k">Read-your-writes</td><td>0 stale reads in 1,000 cycles</td><td>0</td><td><span class="pill good">pass</span></td></tr>
+        <tr><td class="k">Concurrent creates, renames, deletes</td><td><code>fsck</code> clean</td><td>clean</td><td><span class="pill good">pass</span></td></tr>
+        <tr><td class="k">Offline: browsing and reading</td><td>keep working</td><td>keep working</td><td><span class="pill good">pass</span></td></tr>
+        <tr><td class="k">Offline: writes</td><td>fail in 0.1 s</td><td>fail within 20 s</td><td><span class="pill good">pass</span></td></tr>
+        <tr><td class="k">Link back</td><td>0.2 s</td><td>under 5 s</td><td><span class="pill good">pass</span></td></tr>
+        <tr><td class="k">Replica stopped, or rebuilt from scratch</td><td>handled</td><td>no errors</td><td><span class="pill good">pass</span></td></tr>
+        <tr><td class="k">Extended attributes between Macs</td><td>shared</td><td>shared</td><td><span class="pill good">pass</span></td></tr>
+        <tr><td class="k">Revocation</td><td>writes and replication stop</td><td>both stop</td><td><span class="pill good">pass</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>File data</h3>
+  <div class="grid g2">
     <figure style="margin:0">
       <div class="fig">
         <svg class="chart" id="ch-thr" viewBox="0 0 480 220" role="img" aria-label="Throughput on OVH Milan"></svg>
       </div>
-      <figcaption>Throughput on OVH Milan, 170 Mbps home line, MB/s. Every cold figure stays above what a 60 Mbps clip needs. Cached reads (about 540 MB/s) are off this scale.</figcaption>
+      <figcaption>Throughput on OVH Milan, 170 Mbps home line, MB/s, with today's single-Mac disk. Every cold figure stays above what a 60 Mbps clip needs. Cached reads (about 540 MB/s) are off this scale.</figcaption>
       <details class="data"><summary>Data</summary><table><tr><th>Operation</th><th>MB/s</th></tr><tr><td>Copy 2.7 GB to the disk</td><td>23.9</td></tr><tr><td>Warmup of a 434 MB clip</td><td>14.3</td></tr><tr><td>Cold read of a 434 MB clip</td><td>12.1</td></tr><tr><td>Needed by a 60 Mbps clip</td><td>7.5</td></tr></table></details>
     </figure>
     <figure style="margin:0">
       <div class="fig">
-        <svg class="chart" id="ch-rtt" viewBox="0 0 480 220" role="img" aria-label="Time for 200 uncached metadata round trips"></svg>
+        <svg class="chart" id="ch-cold" viewBox="0 0 480 220" role="img" aria-label="Cold read of a clip on a simulated 100 Mbps link"></svg>
       </div>
-      <figcaption>Arithmetic, not a measurement: 200 metadata round trips with no cache at all, by distance to PostgreSQL. JuiceFS caches attributes, so real numbers are lower; step 0 measures them on Finder and CapCut.</figcaption>
-      <details class="data"><summary>Data</summary><table><tr><th>Metadata location</th><th>Round trip</th><th>200 trips</th></tr><tr><td>SQLite in the VM (today)</td><td>about 0</td><td>about 0 s</td></tr><tr><td>PostgreSQL, same datacenter</td><td>2 ms</td><td>0.4 s</td></tr><tr><td>PostgreSQL in Milan</td><td>15 ms</td><td>3 s</td></tr><tr><td>Far region</td><td>30 ms</td><td>6 s</td></tr></table></details>
+      <figcaption>Cold read of a clip in the spike, simulated 100 Mbps link (12.5 MB/s), MB/s. The replica costs little against local metadata; SMB is what takes half the line.</figcaption>
+      <details class="data"><summary>Data</summary><table><tr><th>Metadata</th><th>MB/s</th></tr><tr><td>SQLite in the VM</td><td>5.7</td></tr><tr><td>Valkey with local replica</td><td>5.3-5.5</td></tr><tr><td>The line</td><td>12.5</td></tr></table></details>
     </figure>
   </div>
-  <div class="callout risk"><b>The unknown that can change the design</b>All measurements so far had the metadata next to JuiceFS. With PostgreSQL across the internet, browsing a folder of clips and opening a CapCut project pay a round trip per uncached lookup. If the number is bad, the options are longer metadata cache timeouts or moving PostgreSQL closer, and the plan waits for it.</div>
+  <div class="callout risk"><b>The open limit is the data path, not the metadata</b>Over SMB the Mac gets about half the line on a clip never opened, one read took 15 s, and some cold reads in t03 ended in an I/O error. A separate spike comes before the build, one change at a time against targets set before measuring (cold read at least 80% of the line, cold seek under 0.4 s at 100 Mbps, no single read over 3 s): SMB multichannel, 1 MB blocks, more readahead.</div>
 </section>
 
 <section id="costs">
@@ -742,12 +843,12 @@ details.data table { margin-top: 8px; font-size: 12.5px; }
   <figure>
     <div class="fig">
       <div class="legend">
-        <span><i class="sw" style="background:var(--meta)"></i>Fluix (OVH storage + database), EUR</span>
+        <span><i class="sw" style="background:var(--meta)"></i>Fluix (OVH storage + metadata server), EUR</span>
         <span><i class="sw" style="background:var(--data)"></i>SpaceFS Teams, USD</span>
       </div>
       <svg class="chart" id="ch-cost" viewBox="0 0 760 250" role="img" aria-label="Monthly cost ranges by active terabytes"></svg>
     </div>
-    <figcaption>Estimates from docs/ARCHITECTURE.md, prices checked on 06/10/2026; each bar is a low to high range. Currencies differ as in the sources. Not counted: the time to run Fluix, and the control plane server (an existing Dokploy server in the first instance).</figcaption>
+    <figcaption>Estimates from docs/ARCHITECTURE.md, prices checked on 06/10/2026; each bar is a low to high range. Currencies differ as in the sources. Priced when the metadata was a managed PostgreSQL, not re-estimated for a Valkey server. Not counted: the time to run Fluix, and the control plane server (an existing Dokploy server in the first instance).</figcaption>
     <details class="data"><summary>Data</summary><table><tr><th>Active TB</th><th>Fluix, EUR/month</th><th>SpaceFS Teams, USD/month</th></tr><tr><td>3</td><td>40-55</td><td>90</td></tr><tr><td>5</td><td>55-70</td><td>114-138</td></tr><tr><td>10</td><td>95-110</td><td>174-258</td></tr></table></details>
   </figure>
 </section>
@@ -755,7 +856,7 @@ details.data table { margin-top: 8px; font-size: 12.5px; }
 <section id="plan">
   <p class="eyebrow">12 · Plan</p>
   <h2>Order of work</h2>
-  <p>Engineer days with a coding agent, low and high. A guess, except where step 0 replaces it with a measure.</p>
+  <p>Engineer days with a coding agent, low and high: a guess for everything still to do. Step 0 is done.</p>
   <figure>
     <div class="fig">
       <div class="legend">
@@ -766,12 +867,17 @@ details.data table { margin-top: 8px; font-size: 12.5px; }
     </div>
     <details class="data"><summary>Data</summary><table id="plan-table"><tr><th>Step</th><th>Days</th><th>What</th></tr></table></details>
   </figure>
-  <h3>Step 0, the spike</h3>
+  <h3>Step 0, the metadata spike: done</h3>
   <div class="grid g2">
-    <div class="card small">Finder and CapCut on metadata in a remote PostgreSQL: a folder of clips, opening a project, scrubbing. Round trip to the managed database in Milan.</div>
-    <div class="card small"><code>juicefs config</code> with a new key: mounted clients pick it up within a minute, as the JuiceFS docs say.</div>
-    <div class="card small">A client mounts with a role limited to SELECT, INSERT, UPDATE, DELETE on tables it does not own.</div>
-    <div class="card small">Ending the sessions and dropping the role stops a mounted client cleanly, without corrupting the volume.</div>
+    <div class="card small">The Finder on metadata behind a 15 ms link: PostgreSQL ruled out (117 s for a listing), Valkey with a local replica and the JuiceFS patch accepted. Numbers under Performance.</div>
+    <div class="card small">Revocation: deleting the Mac's Valkey user and killing its connections stops writes and replication, without corrupting the volume.</div>
+    <div class="card small">Offline: browsing and reading go on from the replica, writes fail at once, and the disk comes back 0.2 s after the link.</div>
+    <div class="card small">Still on it: a slow but alive master must not count as offline. Then the acceptance suite all green.</div>
+  </div>
+  <h3>Step 1, the data-path spike</h3>
+  <div class="grid g2">
+    <div class="card small">Targets set before measuring, at 100 Mbps: cold read at least 80% of the line, cold seek under 0.4 s, no single read over 3 s.</div>
+    <div class="card small">One change at a time: SMB multichannel, 1 MB blocks, more JuiceFS readahead. The I/O error seen in some cold reads belongs here.</div>
   </div>
 </section>
 
@@ -779,12 +885,13 @@ details.data table { margin-top: 8px; font-size: 12.5px; }
   <p class="eyebrow">13 · Open decisions</p>
   <h2>To close before or during the build</h2>
   <div class="dec">
-    <div class="card"><b>Role per Mac or per person</b><p>Per Mac lets a stolen laptop be revoked alone; per person is fewer roles.</p><span class="rec">per Mac.</span></div>
-    <div class="card"><b>Cache on revocation</b><p>The cache holds the organization's footage on a Mac that is no longer allowed.</p><span class="rec">the app clears it at the first heartbeat that says revoked.</span></div>
-    <div class="card"><b>Metadata cache timeouts</b><p>Longer timeouts mean fewer round trips but slower visibility of other people's changes.</p><span class="rec">decided on step 0 numbers.</span></div>
+    <div class="card"><b>Cache on revocation</b><p>The cache and the replica hold the organization's footage and file tree on a Mac that is no longer allowed.</p><span class="rec">the app clears both at the first heartbeat that says revoked.</span></div>
+    <div class="card"><b>Metadata cache timeouts</b><p>With reads from the local replica, longer JuiceFS cache timeouts save little and delay other people's changes, which now show up in 0.00-0.01 s.</p><span class="rec">keep the JuiceFS defaults unless the pilot shows otherwise.</span></div>
     <div class="card"><b>Bucket versioning</b><p>A safety net for the rotation window, but deleted and compacted blocks stay billed.</p><span class="rec">on, with a lifecycle rule that expires old versions after a few days.</span></div>
-    <div class="card"><b>Mockup questions</b><p>Text when unreachable, full cache behavior, reconnection interval, "Turn off" or "Eject".</p><span class="rec">with shared PostgreSQL "files will not open until the disk is back" becomes true; the rest at the panel build.</span></div>
+    <div class="card"><b>Where the central Valkey runs</b><p>A VPS next to the bucket in Milan, or a managed Valkey in the same region. It needs <code>appendfsync always</code>, a replica and replication open to the Macs.</p><span class="rec">decided with the first instance, on durability first and price second.</span></div>
+    <div class="card"><b>Keeping the JuiceFS patch</b><p>The read replica and the one-round-trip writes live in a fork of v1.4.1, to rebuild on every JuiceFS release.</p><span class="rec">propose it upstream, and pin the version in the package meanwhile.</span></div>
     <div class="card"><b>Homebrew needs administrator rights</b><p>Installing Homebrew uses sudo; the app itself does not. It bends a "never compromise" rule.</p><span class="rec">accepted for now; a DMG into ~/Applications later if a team has standard accounts.</span></div>
+    <div class="card"><b>Mockup questions</b><p>Text when unreachable, full cache behavior, reconnection interval, "Turn off" or "Eject".</p><span class="rec closed">by the concepts on 17/10/2026: Turn off, a full cache frees the least recently used blocks, automatic reconnection every 30 s, settings in their own window. The Unreachable text, drawn before the replica, still has to say the disk is read only rather than closed.</span></div>
   </div>
 </section>
 
@@ -859,10 +966,10 @@ details.data table { margin-top: 8px; font-size: 12.5px; }
     svg.setAttribute("viewBox", "0 0 " + W + " " + H);
     svg.setAttribute("role", "img");
     var defs = el("defs", {}, svg);
-    ["meta", "data", "ctl", "ink"].forEach(function (c) {
-      var sz = c === "data" ? 4 : 7;
+    ["meta", "data", "ctl", "ink", "repl"].forEach(function (c) {
+      var sz = c === "data" ? 4 : c === "repl" ? 5 : 7;
       var m = el("marker", { id: id + "-" + c, viewBox: "0 0 10 10", refX: 9, refY: 5, markerWidth: sz, markerHeight: sz, orient: "auto-start-reverse" }, defs);
-      el("path", { d: "M0 0L10 5L0 10z", "class": "mk-" + c }, m);
+      el("path", { d: "M0 0L10 5L0 10z", "class": "mk-" + (c === "repl" ? "meta" : c) }, m);
     });
     var X = {};
     parts.forEach(function (p, i) { X[p.id] = x0 + i * colW; });
@@ -904,7 +1011,7 @@ details.data table { margin-top: 8px; font-size: 12.5px; }
   seq("seq-login",
     [{ id: "u", label: "Person", sub: "edits video" }, { id: "app", label: "Fluix.app", sub: "menu bar" },
      { id: "br", label: "Browser", sub: "same Mac" }, { id: "cp", label: "Control plane", sub: "API + web" },
-     { id: "pg", label: "PostgreSQL", sub: "metadata" }, { id: "vm", label: "VM", sub: "JuiceFS + Samba" }],
+     { id: "vk", label: "Valkey", sub: "central master" }, { id: "vm", label: "VM", sub: "JuiceFS + replica" }],
     [
       { f: "u", t: "app", l: "brew install --cask fluix, opens the app", c: "ink" },
       { f: "app", t: "br", l: "open sign-in page (PKCE, loopback port)", c: "ctl" },
@@ -915,23 +1022,24 @@ details.data table { margin-top: 8px; font-size: 12.5px; }
       { f: "app", t: "cp", l: "code + verifier, gets device token", c: "ctl" },
       { k: "note", f: "app", l: "token saved in the Keychain" },
       { f: "app", t: "cp", l: "register this Mac", c: "ctl" },
-      { f: "cp", t: "pg", l: "CREATE ROLE, GRANT on the org's volumes", c: "meta" },
-      { f: "cp", t: "app", l: "META_URL per volume, shown once", c: "ctl" },
-      { f: "app", t: "vm", l: "fluix setup: create VM, mount", c: "ink" },
-      { f: "vm", t: "pg", l: "read the volume format, S3 key included", c: "meta" },
+      { f: "cp", t: "vk", l: "ACL user for this Mac", c: "meta" },
+      { f: "cp", t: "app", l: "Valkey user and URLs, shown once", c: "ctl" },
+      { f: "app", t: "vm", l: "fluix setup: create VM, set up the replica", c: "ink" },
+      { f: "vk", t: "vm", l: "full sync, then live", c: "repl" },
+      { k: "note", f: "vk", t: "vm", l: "mount: S3 key read from the replica" },
       { k: "note", f: "u", t: "vm", l: "Fluix appears in the Finder at /Volumes/Fluix" }
     ]);
 
   seq("seq-read",
     [{ id: "cc", label: "CapCut", sub: "timeline" }, { id: "smb", label: "macOS", sub: "SMB client" },
      { id: "sb", label: "Samba", sub: "in the VM" }, { id: "jf", label: "JuiceFS", sub: "in the VM" },
-     { id: "ca", label: "Cache", sub: "VM disk" }, { id: "pg", label: "PostgreSQL", sub: "metadata" },
+     { id: "rp", label: "Replica", sub: "Valkey, in the VM" }, { id: "ca", label: "Cache", sub: "VM disk" },
      { id: "s3", label: "S3", sub: "blocks" }],
     [
       { f: "cc", t: "smb", l: "read 1 MB at 02:14", c: "ink" },
       { f: "smb", t: "sb", l: "SMB read", c: "ink" },
       { f: "sb", t: "jf", l: "FUSE read", c: "ink" },
-      { f: "jf", t: "pg", l: "which chunk, which block (cached about 1 s)", c: "meta" },
+      { f: "jf", t: "rp", l: "which block: local", c: "meta" },
       { k: "group", l: "Block already cached" },
       { f: "jf", t: "ca", l: "read the 4 MB block", c: "ink" },
       { k: "note", f: "cc", t: "jf", l: "0-3 ms, like a local disk" },
@@ -942,23 +1050,42 @@ details.data table { margin-top: 8px; font-size: 12.5px; }
       { k: "note", f: "cc", t: "jf", l: "about 0.9 s per cold seek on OVH Milan" }
     ]);
 
+  seq("seq-write",
+    [{ id: "fi", label: "Finder", sub: "save or copy" }, { id: "sb", label: "Samba", sub: "in the VM" },
+     { id: "jf", label: "JuiceFS", sub: "patched" }, { id: "rp", label: "Replica", sub: "Valkey, in the VM" },
+     { id: "vk", label: "Valkey", sub: "central master" }, { id: "s3", label: "S3", sub: "blocks" }],
+    [
+      { f: "fi", t: "sb", l: "create clip.mov", c: "ink" },
+      { f: "sb", t: "jf", l: "FUSE create", c: "ink" },
+      { f: "jf", t: "rp", l: "folder and name: local", c: "meta" },
+      { f: "jf", t: "vk", l: "one script: check those reads, apply, count", c: "meta" },
+      { k: "note", f: "jf", t: "vk", l: "one round trip; a conflict retries with WATCH" },
+      { f: "vk", t: "rp", l: "change pushed", c: "repl" },
+      { k: "group", l: "Writing the contents" },
+      { f: "jf", t: "s3", l: "PUT 4 MB blocks", c: "data" },
+      { f: "jf", t: "vk", l: "commit the slices, one round trip", c: "meta" },
+      { f: "jf", t: "rp", l: "reads wait for my count", c: "meta" },
+      { k: "note", f: "fi", t: "jf", l: "about 9 round trips per new file from the Finder" }
+    ]);
+
   seq("seq-revoke",
     [{ id: "ad", label: "Admin", sub: "in the browser" }, { id: "cp", label: "Control plane", sub: "API" },
-     { id: "pg", label: "PostgreSQL", sub: "metadata" }, { id: "rm", label: "Revoked Mac", sub: "" },
-     { id: "om", label: "Other Macs", sub: "" }, { id: "s3", label: "S3 provider", sub: "console" }],
+     { id: "vk", label: "Valkey", sub: "central master" }, { id: "rm", label: "Revoked Mac", sub: "VM + replica" },
+     { id: "om", label: "Other Macs", sub: "replicas" }, { id: "s3", label: "S3 provider", sub: "console" }],
     [
       { k: "group", l: "Revoke" },
       { f: "ad", t: "cp", l: "revoke Mac or member", c: "ctl" },
-      { f: "cp", t: "pg", l: "end sessions, DROP ROLE", c: "meta" },
-      { k: "note", f: "pg", t: "rm", l: "file tree gone: the disk stops" },
+      { f: "cp", t: "vk", l: "DELUSER, CLIENT KILL", c: "meta" },
+      { k: "note", f: "vk", t: "rm", l: "writes refused, replica cut off" },
       { f: "rm", t: "cp", l: "next heartbeat: revoked", c: "ctl" },
-      { f: "rm", t: "rm", l: "stop disk, clear cache, delete token", c: "ink" },
+      { f: "rm", t: "rm", l: "stop disk, clear cache and replica, delete token", c: "ink" },
       { k: "group", l: "Rotate the S3 key" },
       { f: "ad", t: "s3", l: "create a new key", c: "ink" },
       { f: "ad", t: "cp", l: "paste the new key", c: "ctl" },
       { f: "cp", t: "s3", l: "test write with the new key", c: "data" },
-      { f: "cp", t: "pg", l: "juicefs config, every volume", c: "meta" },
-      { f: "om", t: "pg", l: "pick up the new key within a minute", c: "meta" },
+      { f: "cp", t: "vk", l: "juicefs config", c: "meta" },
+      { f: "vk", t: "om", l: "new format reaches every replica", c: "repl" },
+      { f: "om", t: "om", l: "use the new key", c: "ink" },
       { f: "ad", t: "s3", l: "delete the old key: window closed", c: "ink" }
     ]);
 
@@ -974,7 +1101,7 @@ details.data table { margin-top: 8px; font-size: 12.5px; }
       re: { x: 700, y: 40, l: "Ready", a: "Open in Finder", st: "good" },
       dl: { x: 890, y: 40, l: "Downloading", a: "Pause", st: "busy" },
       of: { x: 530, y: 200, l: "Off", a: "Turn on", st: "idle" },
-      un: { x: 700, y: 200, l: "Unreachable", a: "Reconnect", st: "serious" },
+      un: { x: 700, y: 200, l: "Unreachable", a: "Read only, retrying", st: "serious" },
       rv: { x: 890, y: 200, l: "Revoked", a: "Sign in again", st: "critical" }
     };
     var col = { idle: "var(--text-3)", busy: "var(--meta)", good: "var(--good)", serious: "var(--serious)", critical: "var(--critical)" };
@@ -1028,10 +1155,13 @@ details.data table { margin-top: 8px; font-size: 12.5px; }
     rows.forEach(function (r, i) {
       var y = top + i * rowH + rowH / 2;
       el("text", { x: left - 10, y: y + 4, "text-anchor": "end", "class": "row-t" }, svg, r.l);
-      var w = Math.max(sx(r.v) - left, 2);
-      if (w > 4) el("path", { d: "M" + left + " " + (y - barH / 2) + " h" + (w - 4) + " a4 4 0 0 1 4 4 v" + (barH - 8) + " a4 4 0 0 1 -4 4 h" + (-(w - 4)) + "z", "class": "bar" }, svg);
-      else el("rect", { x: left, y: y - barH / 2, width: 2, height: barH, "class": "bar" }, svg);
-      el("text", { x: left + w + 6, y: y + 4, "class": "val-t" }, svg, r.t);
+      var w = Math.max(sx(r.v) - left, 2), cls = r.cls || "bar";
+      // A range draws the low value solid and the rest up to the high value in the lighter step.
+      var wh = r.hi != null ? Math.max(sx(r.hi) - left, w) : w;
+      if (wh > w + 1) el("rect", { x: left + w - 2, y: y - barH / 2, width: wh - w + 2, height: barH, rx: 4, "class": "bar-ext" }, svg);
+      if (w > 4) el("path", { d: "M" + left + " " + (y - barH / 2) + " h" + (w - 4) + " a4 4 0 0 1 4 4 v" + (barH - 8) + " a4 4 0 0 1 -4 4 h" + (-(w - 4)) + "z", "class": cls }, svg);
+      else el("rect", { x: left, y: y - barH / 2, width: 2, height: barH, "class": cls }, svg);
+      el("text", { x: left + wh + 6, y: y + 4, "class": "val-t" }, svg, r.t);
       el("rect", { x: 0, y: y - rowH / 2, width: W, height: rowH, "class": "hit", "data-tip": r.tip }, svg);
     });
     if (o.ref) {
@@ -1047,12 +1177,68 @@ details.data table { margin-top: 8px; font-size: 12.5px; }
     { l: "Cold read (playback)", v: 12.1, t: "12.1", tip: "<b>Reading a 434 MB clip not in cache</b><br>38 s, 12.1 MB/s" }
   ], { max: 30, ticks: [0, 10, 20, 30], ref: { v: 7.5, l: "7.5 needed by a 60 Mbps clip" } });
 
-  hbar("ch-rtt", [
-    { l: "SQLite in the VM", v: 0, t: "about 0 s", tip: "<b>Today</b><br>Local file, no network" },
-    { l: "Same datacenter, 2 ms", v: 0.4, t: "0.4 s", tip: "200 × 2 ms = 0.4 s" },
-    { l: "Milan, 15 ms", v: 3, t: "3 s", tip: "200 × 15 ms = 3 s<br>15 ms is the measured round trip to OVH S3 in Milan" },
-    { l: "Far region, 30 ms", v: 6, t: "6 s", tip: "200 × 30 ms = 6 s" }
-  ], { max: 7, ticks: [0, 2, 4, 6], unit: " s", left: 160 });
+  hbar("ch-ops", [
+    { l: "._ name lookups", v: 900, t: "about 900", tip: "<b>Lookups of ._ AppleDouble names</b><br>The Finder asks for a ._ companion of every file" },
+    { l: "getxattr, listxattr", v: 1000, t: "about 1,000", tip: "<b>Extended attributes</b><br>Finder metadata through Samba's fruit module" },
+    { l: "Other lookups", v: 650, t: "about 650", tip: "<b>Lookups of the files themselves</b>" }
+  ], { max: 1200, ticks: [0, 400, 800, 1200], left: 150 });
+
+  hbar("ch-cold", [
+    { l: "SQLite in the VM", v: 5.7, t: "5.7", cls: "bar-ink", tip: "<b>Local metadata, one Mac</b><br>5.7 MB/s, the t03 baseline" },
+    { l: "Valkey replica", v: 5.3, hi: 5.5, t: "5.3-5.5", tip: "<b>Valkey with the local replica</b><br>5.3-5.5 MB/s across runs" }
+  ], { max: 14, ticks: [0, 4, 8, 12], ref: { v: 12.5, l: "12.5, the line" }, left: 150 });
+
+  // Acceptance tests as small multiples: one panel per test, each with its own scale.
+  (function () {
+    var svg = document.getElementById("ch-acc");
+    var W = 860, left = 190, right = 150, rowH = 24, barH = 12;
+    var panels = [
+      { t: "Cold listing of 300 files on another Mac", max: 120, ticks: [0, 30, 60, 90, 120], rows: [
+        { l: "SQLite in the VM", v: 0.24, t: "0.24 s", note: "one Mac only" },
+        { l: "PostgreSQL over the link", v: 117, t: "117 s" },
+        { l: "Valkey, master only", v: 74.6, t: "74.6 s" },
+        { l: "Valkey with local replica", v: 0.2, hi: 0.3, t: "0.20-0.30 s", on: true }] },
+      { t: "Creating 100 small files from the Finder", max: 180, ticks: [0, 45, 90, 135, 180], ref: { v: 20, l: "20 s target" }, rows: [
+        { l: "SQLite in the VM", v: 3.7, t: "3.7 s", note: "one Mac only" },
+        { l: "PostgreSQL over the link", v: 174, t: "174 s" },
+        { l: "Valkey, master only", v: 158, t: "158 s" },
+        { l: "Valkey with local replica", v: 13.7, hi: 17, t: "13.7-17 s", on: true }] },
+      { t: "File created on Mac A, visible on Mac B", max: 0.5, ticks: [0, 0.1, 0.2, 0.3, 0.4, 0.5], rows: [
+        { l: "Valkey, master only", v: 0.47, t: "0.47 s" },
+        { l: "Valkey with local replica", v: 0, hi: 0.01, t: "0.00-0.01 s", on: true }] }
+    ];
+    var y0 = 0;
+    panels.forEach(function (p) {
+      var sx = function (v) { return left + (v / p.max) * (W - left - right); };
+      el("text", { x: 0, y: y0 + 16, "class": "grp-t" }, svg, p.t);
+      var top = y0 + 30, bot = top + p.rows.length * rowH;
+      p.ticks.forEach(function (t) {
+        el("line", { x1: sx(t), x2: sx(t), y1: top - 2, y2: bot, "class": "grid-l" }, svg);
+        el("text", { x: sx(t), y: bot + 15, "text-anchor": "middle", "class": "axis-t" }, svg, t + " s");
+      });
+      p.rows.forEach(function (r, i) {
+        var y = top + i * rowH + rowH / 2;
+        el("text", { x: left - 10, y: y + 4, "text-anchor": "end", "class": "row-t" }, svg, r.l);
+        var w = Math.max(sx(r.v) - left, 2), wh = r.hi != null ? Math.max(sx(r.hi) - left, w) : w;
+        var cls = r.on ? "bar" : "bar-ink";
+        if (wh > w + 1) el("rect", { x: left + w - 2, y: y - barH / 2, width: wh - w + 2, height: barH, rx: 4, "class": "bar-ext" }, svg);
+        if (w > 4) el("path", { d: "M" + left + " " + (y - barH / 2) + " h" + (w - 4) + " a4 4 0 0 1 4 4 v" + (barH - 8) + " a4 4 0 0 1 -4 4 h" + (-(w - 4)) + "z", "class": cls }, svg);
+        else el("rect", { x: left, y: y - barH / 2, width: 2, height: barH, "class": cls }, svg);
+        // Keep a value label clear of the panel's reference line.
+        var lx = left + wh + 6;
+        if (p.ref && lx < sx(p.ref.v) + 6 && left + wh < sx(p.ref.v)) lx = sx(p.ref.v) + 6;
+        el("text", { x: lx, y: y + 4, "class": "val-t" }, svg, r.t + (r.note ? ", " + r.note : ""));
+        el("rect", { x: 0, y: y - rowH / 2, width: W, height: rowH, "class": "hit", "data-tip": "<b>" + p.t + "</b><br>" + r.l + ": " + r.t + (r.note ? " (" + r.note + ")" : "") }, svg);
+      });
+      if (p.ref) {
+        var rx = sx(p.ref.v);
+        el("line", { x1: rx, x2: rx, y1: top - 4, y2: bot, "class": "refl" }, svg);
+        el("text", { x: rx + 4, y: bot + 30, "class": "ref-t" }, svg, p.ref.l);
+      }
+      y0 = bot + (p.ref ? 58 : 44);
+    });
+    svg.setAttribute("viewBox", "0 0 " + W + " " + (y0 - 16));
+  })();
 
   // Cost ranges
   (function () {
@@ -1088,13 +1274,13 @@ details.data table { margin-top: 8px; font-size: 12.5px; }
   // Plan timeline
   (function () {
     var steps = [
-      { l: "0. Spike", lo: 0.5, hi: 1, after: [], what: "Remote metadata latency, key rotation, limited role, revocation" },
-      { l: "1. Design docs", lo: 0.5, hi: 1, after: [0], what: "ARCHITECTURE, DATABASE_SCHEMA, decisions" },
-      { l: "2. Control plane", lo: 4, hi: 6, after: [1], what: "Auth, orgs, devices, roles, volumes, rotation, admin web" },
-      { l: "3. Engine changes", lo: 1, hi: 2, after: [1], what: "status --json, META_URL from the app, Keychain, revocation" },
-      { l: "4. Mac app", lo: 6, hi: 7, after: [3], what: "Tauri from Portsage, login, first run, panel B, diagnostics" },
-      { l: "5. Distribution", lo: 1, hi: 1, after: [2, 4], what: "Cask in its own tap, release with VM assets" },
-      { l: "6. First instance", lo: 1, hi: 1, after: [5], what: "Deploy, create the organization, move the tester" }
+      { l: "1. Data-path spike", lo: 1, hi: 2, after: [], what: "SMB multichannel, 1 MB blocks, readahead, against targets set first" },
+      { l: "2. Design docs", lo: 0.5, hi: 1, after: [0], what: "ARCHITECTURE, DATABASE_SCHEMA, decisions" },
+      { l: "3. Control plane", lo: 4, hi: 6, after: [1], what: "Auth, orgs, devices, Valkey users, volumes, rotation, admin web" },
+      { l: "4. Engine changes", lo: 2, hi: 3, after: [1], what: "Patched JuiceFS and Valkey replica in the VM, status --json, metadata URL from the app, Keychain, revocation" },
+      { l: "5. Mac app", lo: 6, hi: 7, after: [3], what: "Tauri from Portsage, login, first run, panel, settings, diagnostics" },
+      { l: "6. Distribution", lo: 1, hi: 1, after: [2, 4], what: "Cask in its own tap, release with VM assets" },
+      { l: "7. First instance", lo: 1, hi: 1, after: [5], what: "Deploy with a central Valkey, create the organization, move the tester" }
     ];
     steps.forEach(function (s, i) {
       s.slo = s.after.reduce(function (m, j) { return Math.max(m, steps[j].slo + steps[j].lo); }, 0);
@@ -1125,7 +1311,7 @@ details.data table { margin-top: 8px; font-size: 12.5px; }
       table.appendChild(tr);
     });
     el("text", { x: left, y: top + steps.length * rowH + 36, "class": "ref-t" }, svg,
-      "Total " + endLo + "-" + endHi + " days; control plane and engine run in parallel");
+      "Total " + endLo + "-" + endHi + " days after step 0; control plane and engine run in parallel");
   })();
 })();
 </script>

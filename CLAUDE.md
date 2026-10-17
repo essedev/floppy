@@ -86,7 +86,7 @@ cd site && pnpm dev            # pnpm build, pnpm check
 
 **The spike needs the SMB timeout too.** The real install raises `max_resp_timeout` for the VM's address; the spike talks to `localhost` and `127.0.0.1`, so the same block (`# fluix-spike begin/end` in `~/Library/Preferences/nsmb.conf`) has to be there, or cold reads fail after 30 s.
 
-**The per-Mac Valkey user needs more than reads and writes**: INFO, INCR and DEL on `ryw*`, EVAL and EVALSHA for the optimistic writes, and PSYNC, REPLCONF, PING for its replica. A missing INCR aborts every write transaction.
+**The per-Mac Valkey user needs more than reads and writes**: INFO, HINCRBY and DEL on `ryw*` on the master and HGET on the replica, EVAL and EVALSHA for the optimistic writes, and PSYNC, REPLCONF, PING for its replica. A missing HINCRBY aborts every write transaction.
 
 ## Secrets
 

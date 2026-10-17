@@ -10,6 +10,7 @@ Decisions that bind the future, each with the alternative it ruled out. Cite the
 ## 2. One codebase, self-hosted or hosted, control plane off the data path
 
 **Active, 16/10/2026.** The same code runs as a self-hosted instance with one organization or as a hosted service with many. The control plane hands out access and configuration only; files flow between the Mac, the metadata server and S3, so mounted disks keep working when it is down.
+A Valkey replica copies its whole instance, so the hosted service gives each organization its own Valkey instance; otherwise every Mac would receive every customer's metadata.
 **Ruled out:** a single central server as the only way to run it, a control plane that proxies data.
 
 ## 3. Licenses: MIT for the app and the command, AGPL-3.0 for the control plane
@@ -69,5 +70,5 @@ Decisions that bind the future, each with the alternative it ruled out. Cite the
 
 ## 14. Rename the product
 
-**Proposed, 17/10/2026.** "Fluix" collides with Fluix Limited (fluix.io, document workflow software, US filing 97697627 in class 9). The name ends up in `/Volumes/<Name>`, which CapCut projects reference, so it must change before the pilot. Candidates are being checked against domains and trademarks.
+**Proposed, 17/10/2026.** "Fluix" collides with Fluix Limited (fluix.io, document workflow software, US filing 97697627 in class 9). The name ends up in `/Volumes/<Name>`, which CapCut projects reference, so it must change before the pilot. Candidates are being checked against domains and trademarks. Criteria: an English-sounding name for an international product (no Italian words), no negative meaning in Italian, registrable in classes 9 and 42, at least `.app` or `.io` free, no Minecraft terms (Mojang/Microsoft) even if the "chest you open anywhere" idea stays.
 **Ruled out:** keeping the name for a commercial product.
