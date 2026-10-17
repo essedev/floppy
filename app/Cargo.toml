@@ -1,0 +1,18 @@
+[workspace]
+resolver = "2"
+members = ["src-tauri"]
+
+# The app's version. The bundle version is tracked in src-tauri/tauri.conf.json
+# and package.json: bump the three together.
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+authors = ["Simone Salerno"]
+license = "MIT"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3
+panic = "abort"
+strip = true
