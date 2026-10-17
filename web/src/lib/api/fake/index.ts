@@ -20,7 +20,7 @@
 */
 
 import { ApiError, type Api } from '../client'
-import { VOLUME_NAME, type AuditEvent, type AuditQuery, type Disk, type KeyStatus, type Mac, type Person, type Rotation, type Session, type StepState } from '../types'
+import { DISK_NAME, VOLUME_NAME, type AuditEvent, type AuditQuery, type Disk, type KeyStatus, type Mac, type Person, type Rotation, type Session, type StepState } from '../types'
 import { DEFAULT_CACHE, INVITE_TTL, LATEST_APP, mountPathOf, seed, type DiskRow, type FakeDb, type MacRow, type PersonRow, type Scenario } from './seed'
 
 const DB_KEY = 'floppy.fake.db.v3'
@@ -293,8 +293,6 @@ function filterAudit(q: AuditQuery): AuditEvent[] {
 }
 
 const validEmail = (s: string) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(s)
-/** A name that can be a folder in the Finder: no slash or colon, not hidden. */
-const validDiskName = (s: string) => s.length >= 1 && s.length <= 60 && !/[/:]/.test(s) && !s.startsWith('.')
 const settingsOf = () => ({
   organizationName: db.organizationName,
   mail: { ...db.mail },
@@ -488,15 +486,19 @@ export const fakeApi: Api = {
       const me = requireAdmin()
       advanceDisks()
       const clean = name.trim()
-      if (!validDiskName(clean) || !VOLUME_NAME.test(volumeName) || !Number.isInteger(trashDays) || trashDays < 0 || trashDays > 365) {
+      if (!DISK_NAME.test(clean) || !VOLUME_NAME.test(volumeName) || !Number.isInteger(trashDays) || trashDays < 0 || trashDays > 365) {
         throw new ApiError(422, 'validation', 'Invalid disk')
       }
       if (db.disks.length >= DISK_LIMIT) throw new ApiError(409, 'disk_limit_reached', 'At most 15 disks')
       // Names are unique among live disks; the name in the bucket and the database number are
       // burned forever, failed and deleted disks included.
       const all = [...db.disks, ...db.failedDisks]
-      if (db.disks.some((d) => d.name.toLowerCase() === clean.toLowerCase()) || all.some((d) => d.volumeName === volumeName)) {
-        throw new ApiError(409, 'disk_name_taken', 'Name taken')
+      // macOS compares folder names case-insensitively: "Progetti" and "progetti" collide.
+      if (db.disks.some((d) => d.name.toLowerCase() === clean.toLowerCase())) {
+        throw new ApiError(409, 'disk_name_taken', 'Name taken', { field: 'name' })
+      }
+      if (all.some((d) => d.volumeName === volumeName)) {
+        throw new ApiError(409, 'disk_name_taken', 'Name in the bucket taken', { field: 'volumeName' })
       }
       const disk: DiskRow = {
         id: uid('d'), name: clean, volumeName, mountPath: mountPathOf(clean), state: 'creating', error: null, status: 'online',

@@ -164,6 +164,14 @@ export interface CachePolicy {
  * GET /disks/{id} still returns it. */
 export type DiskState = 'creating' | 'ready' | 'failed'
 
+/**
+ * A disk's display name, which is its folder in /Volumes/Floppy (DATABASE_SCHEMA.md, "Disks on
+ * a Mac"): ASCII letters, digits, spaces, dots, hyphens and underscores, starting and ending
+ * with a letter or digit, at most 60. No accents: the Mac could receive them in another Unicode
+ * normalization, and CapCut's paths would break. Unique case-insensitively, as macOS compares.
+ */
+export const DISK_NAME = /^[A-Za-z0-9]([A-Za-z0-9 ._-]{0,58}[A-Za-z0-9])?$/
+
 /** The folder name pattern JuiceFS accepts for a volume, which is also its object prefix. */
 export const VOLUME_NAME = /^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/
 
@@ -399,6 +407,7 @@ export type ErrorCode =
   | 'already_member'
   | 'last_admin'
   | 'cannot_remove_self'
+  /** details.field says which: 'name' (case-insensitive, live disks) or 'volumeName' (ever). */
   | 'disk_name_taken'
   | 'disk_limit_reached'
   | 'storage_in_use'

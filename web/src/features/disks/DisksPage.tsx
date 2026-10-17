@@ -17,8 +17,8 @@ import { Faceplate } from '@/components/marks'
 import { useErrorText } from '@/components/error-text'
 import { EmptyState, PageHeader, QueryView, SkeletonRows } from '@/components/states'
 import { fmt, plural, rich, useI18n } from '@/i18n'
-import type { CachePolicy, Disk } from '@/lib/api'
-import { VOLUME_NAME } from '@/lib/api/types'
+import { isApiError, type CachePolicy, type Disk } from '@/lib/api'
+import { DISK_NAME, VOLUME_NAME } from '@/lib/api/types'
 import { useFormat } from '@/lib/format'
 import { useFlash } from '@/lib/hooks'
 import { DiskState } from './DiskState'
@@ -34,8 +34,6 @@ const slugify = (s: string) =>
     .slice(0, 63)
     .replace(/-+$/, '')
 
-/** A name that can be a folder in the Finder: no slash or colon, not hidden, up to 60. */
-const folderOk = (s: string) => s.length >= 1 && s.length <= 60 && !/[/:]/.test(s) && !s.startsWith('.')
 /** Where a disk appears on a Mac. */
 const mountPathOf = (name: string) => `/Volumes/Floppy/${name || '...'}`
 
@@ -58,7 +56,8 @@ function NewDiskDialog({ onClose, onCreated }: { onClose(): void; onCreated(disk
   const effectiveVolume = touched ? volumeName : slugify(name)
   const trashDays = intIn(trash, 0, 365)
   const volumeOk = VOLUME_NAME.test(effectiveVolume)
-  const nameOk = folderOk(clean)
+  const nameOk = DISK_NAME.test(clean)
+  const taken = isApiError(create.error, 'disk_name_taken') ? create.error.details.field : null
   const bucket = useDisks().data?.[0]?.bucket ?? 'bucket'
 
   const submit = () => {
@@ -86,12 +85,28 @@ function NewDiskDialog({ onClose, onCreated }: { onClose(): void; onCreated(disk
     >
       <Field
         label={t.disks.name}
-        hint={rich(t.disks.nameHint, { path: <span className="num text-ink">{mountPathOf(clean)}</span> })}
-        error={tried && !nameOk ? (clean ? t.disks.nameRule : t.disks.required) : null}
+        hint={
+          <>
+            {rich(t.disks.nameHint, { path: <span className="num text-ink">{mountPathOf(clean)}</span> })} {t.disks.nameRule}
+          </>
+        }
+        error={tried && !nameOk ? (clean ? t.disks.nameRule : t.disks.required) : taken === 'name' ? fmt(t.disks.nameTaken, { name: clean }) : null}
       >
-        {(id, describedBy) => <Input id={id} autoFocus maxLength={60} value={name} invalid={tried && !nameOk} aria-describedby={describedBy} onChange={(e) => setName(e.target.value)} />}
+        {(id, describedBy) => <Input
+            id={id}
+            autoFocus
+            maxLength={60}
+            value={name}
+            invalid={(tried && !nameOk) || taken === 'name'}
+            aria-describedby={describedBy}
+            onChange={(e) => {
+              setName(e.target.value)
+              // A "name taken" answer is about the old name.
+              if (create.isError) create.reset()
+            }}
+          />}
       </Field>
-      <Field label={t.disks.volumeName} hint={fmt(t.disks.volumeNameHint, { bucket, name: effectiveVolume || '...' })} error={tried && !volumeOk ? fmt(t.disks.volumeNameHint, { bucket, name: effectiveVolume || '...' }) : null}>
+      <Field label={t.disks.volumeName} hint={fmt(t.disks.volumeNameHint, { bucket, name: effectiveVolume || '...' })} error={tried && !volumeOk ? fmt(t.disks.volumeNameHint, { bucket, name: effectiveVolume || '...' }) : taken === 'volumeName' ? t.disks.volumeTaken : null}>
         {(id, describedBy) => (
           <Input
             id={id}
@@ -99,11 +114,12 @@ function NewDiskDialog({ onClose, onCreated }: { onClose(): void; onCreated(disk
             maxLength={63}
             spellCheck={false}
             value={effectiveVolume}
-            invalid={tried && !volumeOk}
+            invalid={(tried && !volumeOk) || taken === 'volumeName'}
             aria-describedby={describedBy}
             onChange={(e) => {
               setTouched(true)
               setVolumeName(e.target.value)
+              if (create.isError) create.reset()
             }}
           />
         )}
@@ -116,7 +132,7 @@ function NewDiskDialog({ onClose, onCreated }: { onClose(): void; onCreated(disk
       <Field label={t.disks.trashDays} error={tried && trashDays === null ? fmt(t.disks.numberRange, { min: 0, max: 365 }) : null}>
         {(id, describedBy) => <Input id={id} mono inputMode="numeric" className="!w-[110px]" value={trash} invalid={tried && trashDays === null} aria-describedby={describedBy} onChange={(e) => setTrash(e.target.value)} />}
       </Field>
-      {create.isError && (
+      {create.isError && !taken && (
         <p className="text-[13px] text-bad-text" role="alert">
           {errorText(create.error)}
         </p>
