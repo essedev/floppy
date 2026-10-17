@@ -169,6 +169,10 @@ p { margin: 0 0 12px; max-width: 72ch; }
 .stat .src { font-size: 11.5px; color: var(--text-3); margin-top: 8px; }
 
 .principles { margin-top: 18px; }
+.uses { margin-top: 16px; }
+.uses .card p { margin: 0; font-size: 13.5px; color: var(--text-2); }
+/* The blocks figure is drawn as the panel's faceplate, dark in both themes */
+.fig.plate-fig { padding: 0; background: none; box-shadow: none; border-radius: 12px; }
 .principle { display: flex; gap: 12px; align-items: flex-start; }
 .principle .ic {
   flex: none; width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center;
@@ -380,18 +384,20 @@ ul.slots li b { font-weight: 650; }
   </div>
   <ul class="toc">
     <li><a href="#overview"><span class="n">01</span>Overview</a></li>
-    <li><a href="#architecture"><span class="n">02</span>Architecture</a></li>
-    <li><a href="#components"><span class="n">03</span>Components</a></li>
-    <li><a href="#flows"><span class="n">04</span>Flows</a></li>
-    <li><a href="#states"><span class="n">05</span>App states</a></li>
-    <li><a href="#security"><span class="n">06</span>Credentials</a></li>
-    <li><a href="#model"><span class="n">07</span>Data model</a></li>
-    <li><a href="#failures"><span class="n">08</span>Failure modes</a></li>
-    <li><a href="#deploy"><span class="n">09</span>Deployments</a></li>
-    <li><a href="#performance"><span class="n">10</span>Performance</a></li>
-    <li><a href="#costs"><span class="n">11</span>Costs</a></li>
-    <li><a href="#plan"><span class="n">12</span>Plan</a></li>
-    <li><a href="#decisions"><span class="n">13</span>Decisions</a></li>
+    <li><a href="#plain"><span class="n">02</span>How it works</a></li>
+    <li><a href="#architecture"><span class="n">03</span>Architecture</a></li>
+    <li><a href="#components"><span class="n">04</span>Components</a></li>
+    <li><a href="#patches"><span class="n">05</span>JuiceFS patches</a></li>
+    <li><a href="#flows"><span class="n">06</span>Flows</a></li>
+    <li><a href="#states"><span class="n">07</span>App states</a></li>
+    <li><a href="#security"><span class="n">08</span>Credentials</a></li>
+    <li><a href="#model"><span class="n">09</span>Data model</a></li>
+    <li><a href="#failures"><span class="n">10</span>Failure modes</a></li>
+    <li><a href="#deploy"><span class="n">11</span>Deployments</a></li>
+    <li><a href="#performance"><span class="n">12</span>Performance</a></li>
+    <li><a href="#costs"><span class="n">13</span>Costs</a></li>
+    <li><a href="#plan"><span class="n">14</span>Plan</a></li>
+    <li><a href="#decisions"><span class="n">15</span>Open decisions</a></li>
   </ul>
   <div class="side-foot">
     <button class="theme-btn" id="themeBtn" type="button">Toggle theme</button>
@@ -403,29 +409,28 @@ ul.slots li b { font-weight: 650; }
 
 <section id="overview">
   <p class="eyebrow">01 · Overview</p>
-  <h1>From one disk per Mac to one disk per team</h1>
-  <p class="lead">Today every Mac has its own disk, with the metadata in SQLite inside the VM and the S3 keys in a zip. The proposal: one shared disk per team, its metadata in a central Valkey with a live copy inside every Mac's VM, personal access through a login, and a menu bar app that installs and drives everything.</p>
+  <h1>One disk, shared by the whole team</h1>
+  <p class="lead">Floppy shows up in the Finder as a disk. The files live as blocks on S3 object storage; the file tree lives in a central Valkey, with a live copy inside a small Linux VM on every Mac; each person signs in, and a menu bar app installs and drives everything. This page describes that target. Why this design and not another, and how it came about, are in <a href="ARCHITECTURE.md">ARCHITECTURE.md</a>, <a href="DECISIONS.md">DECISIONS.md</a> and <a href="CYCLES.md">CYCLES.md</a>.</p>
 
   <div class="grid g4" style="margin-top:22px">
-    <div class="card stat"><div class="v">3<small>ms</small></div><div class="k">Seek in cache, like a local disk</div><div class="src">Measured on OVH Milan</div></div>
-    <div class="card stat"><div class="v">0.38<small>s</small></div><div class="k">Seek on a clip never opened, 1 MB blocks (0.9 s on OVH with 4 MB)</div><div class="src">Measured in the spike, 100 Mbps link</div></div>
-    <div class="card stat"><div class="v">0.3<small>s</small></div><div class="k">Listing 300 files another Mac created, against 75 s without the replica</div><div class="src">Measured in the spike, 15 ms link</div></div>
-    <div class="card stat"><div class="v">93<small>%</small></div><div class="k">Of the line on a cold read from the Mac over SMB (86% for a whole clip)</div><div class="src">Measured in the spike, 100 Mbps link</div></div>
+    <div class="card stat"><div class="v">3<small>ms</small></div><div class="k">Seek in a clip already on the Mac, like a local disk</div><div class="src">Measured on OVH Milan</div></div>
+    <div class="card stat"><div class="v">0.38<small>s</small></div><div class="k">Seek in a clip never opened, 1 MB blocks</div><div class="src">Simulated 100 Mbps link, OVH to confirm</div></div>
+    <div class="card stat"><div class="v">0.3<small>s</small></div><div class="k">Listing 300 files another Mac just created</div><div class="src">Simulated 15 ms link</div></div>
+    <div class="card stat"><div class="v">93<small>%</small></div><div class="k">Of the line used reading a clip never opened, from the Mac over SMB</div><div class="src">Simulated 100 Mbps link, OVH to confirm</div></div>
   </div>
 
-  <h3>What changes</h3>
+  <h3>What a team gets</h3>
   <div class="table-wrap">
     <table>
-      <thead><tr><th></th><th>Today (test package)</th><th>Proposed</th></tr></thead>
       <tbody>
-        <tr><td class="k">Disk</td><td class="then">One per Mac, nobody else sees it</td><td>One per team, the same files on every Mac</td></tr>
-        <tr><td class="k">Metadata</td><td class="then">SQLite inside the VM: lose the VM, lose the files</td><td>A central Valkey that writes every change to disk, with a replica in the datacenter and a daily dump</td></tr>
-        <tr><td class="k">Browsing</td><td class="then">Local, the tree is in the VM</td><td>Still local: every Mac reads a replica in its own VM; a write costs one round trip to the center</td></tr>
-        <tr><td class="k">Access</td><td class="then">S3 keys and SMB password inside the zip</td><td>Login in the browser, a personal Valkey user per Mac</td></tr>
-        <tr><td class="k">Someone leaves</td><td class="then">Rotate the keys on every Mac by hand</td><td>One click deletes their user, then one key rotation that reaches every Mac on its own</td></tr>
-        <tr><td class="k">Install</td><td class="then">Zip plus <code>bash install.sh</code> in the Terminal</td><td><code>brew install --cask floppy</code>, then the app does the rest</td></tr>
-        <tr><td class="k">Interface</td><td class="then">The <code>floppy</code> command</td><td>Menu bar app from the concepts, driving the same command</td></tr>
-        <tr><td class="k">Without network</td><td class="then">Cached files probably readable (not tested)</td><td>Read only: the whole tree browsable, cached clips play, saving fails at once</td></tr>
+        <tr><td class="k">Disk</td><td>One per team, the same files on every Mac, at <code>/Volumes/Floppy</code></td></tr>
+        <tr><td class="k">File tree</td><td>A central Valkey that writes every change to disk, with a replica in the datacenter and a daily dump</td></tr>
+        <tr><td class="k">Browsing</td><td>Local: every Mac reads a replica in its own VM; a write costs one round trip to the center</td></tr>
+        <tr><td class="k">Access</td><td>Sign-in in the browser, a Valkey user per Mac</td></tr>
+        <tr><td class="k">Someone leaves</td><td>One click deletes their user, then one key rotation that reaches every Mac on its own</td></tr>
+        <tr><td class="k">Install</td><td><code>brew install --cask floppy</code>, then the app does the rest</td></tr>
+        <tr><td class="k">Interface</td><td>A menu bar app driving the <code>floppy</code> command</td></tr>
+        <tr><td class="k">Without network</td><td>Read only: the whole tree browsable, cached clips play, saving fails at once</td></tr>
       </tbody>
     </table>
   </div>
@@ -437,8 +442,37 @@ ul.slots li b { font-weight: 650; }
   </div>
 </section>
 
+<section id="plain">
+  <p class="eyebrow">02 · How it works</p>
+  <h2>How it works, in plain words</h2>
+  <p>Floppy looks like a disk, but nothing is copied to the Mac until someone needs it. Two things travel apart: the list of files and folders, the file tree, which is small and kept on every Mac; and the contents of the files, which stay on S3 and arrive in pieces.</p>
+  <div class="grid g3 uses">
+    <div class="card small"><div class="notice-h"><span class="slot-mark"></span><b>Opening a folder</b></div><p>To show a folder the Finder asks thousands of small questions: names, sizes, icons. The copy of the file tree inside the Mac answers them, so a folder of 300 files appears in a fraction of a second, even one a colleague has just filled.</p></div>
+    <div class="card small"><div class="notice-h"><span class="slot-mark"></span><b>Playing a clip</b></div><p>Only the part being watched is downloaded, in blocks of 1 MB, a little ahead of the playhead. What arrives stays on the Mac's disk: the second time, the clip plays as from a local disk.</p></div>
+    <div class="card small"><div class="notice-h"><span class="slot-mark"></span><b>Scrubbing the timeline</b></div><p>A jump lands on a block that may not be on the Mac yet. Floppy fetches that one block first, then the next few: about 0.4 s on a 100 Mbps line, without waiting for the rest of the file.</p></div>
+    <div class="card small"><div class="notice-h"><span class="slot-mark"></span><b>Copying footage in</b></div><p>The file is cut into blocks and uploaded; it counts as saved only once all of it is on S3. The blocks also stay on the Mac that copied them, so whoever loads the footage can start editing at once.</p></div>
+    <div class="card small"><div class="notice-h"><span class="slot-mark"></span><b>A colleague sees it</b></div><p>Every change goes to the central server, which passes it on to every Mac's copy of the file tree as it happens. The new file shows up on the other Macs within a hundredth of a second; its contents download when someone opens it.</p></div>
+    <div class="card small"><div class="notice-h"><span class="slot-mark"></span><b>The line drops</b></div><p>The copy of the file tree stays: folders can still be browsed and clips already on the Mac still play. Saving fails at once with a clear message instead of hanging, and the disk comes back on its own within a second of the line returning.</p></div>
+  </div>
+
+  <h3>Blocks, and why they keep video smooth</h3>
+  <figure>
+    <div class="fig wide plate-fig">
+      <svg id="blocks" viewBox="0 0 900 352" role="img" aria-label="A stretch of a clip as 32 blocks of 1 MB: while playing, after a jump, and after Make available"></svg>
+    </div>
+    <figcaption>A stretch of a clip as 32 blocks of 1 MB, drawn on the faceplate of the Floppy panel: the slot fills with what is already on the Mac.</figcaption>
+  </figure>
+  <ul class="slots" style="margin-top:16px">
+    <li>A file is cut into blocks of 1 MB on S3. A phone clip of 434 MB at 60 Mbps is 434 blocks, and playing it uses about 7 or 8 of them a second.</li>
+    <li>Playing downloads only the blocks it needs, plus 4 MB ahead, and keeps them in the cache on the Mac's disk.</li>
+    <li>A jump in the timeline costs one small block, not the whole file: on a 100 Mbps line the first picture after a jump comes in about 0.4 s.</li>
+    <li><b>Make available</b> downloads every block of a project ahead of time, to edit with no wait, or without a network.</li>
+    <li>The cache has a ceiling worked out from the Mac's free space. When it is full, the blocks used least recently make room first; <b>Free up space</b> empties it for one project. Nothing leaves S3.</li>
+  </ul>
+</section>
+
 <section id="architecture">
-  <p class="eyebrow">02 · Architecture</p>
+  <p class="eyebrow">03 · Architecture</p>
   <h2>Three places, and the file tree on both ends</h2>
   <p>Each Mac runs the app, the <code>floppy</code> command and a small Linux VM with JuiceFS. The file tree lives in a central Valkey, and the VM keeps a replica of it that the master updates as it changes: JuiceFS reads the tree from that replica, sends its writes to the center, and fetches file contents from S3. The control plane only talks to the app and, as administrator, to Valkey.</p>
   <figure>
@@ -558,7 +592,7 @@ ul.slots li b { font-weight: 650; }
 </section>
 
 <section id="components">
-  <p class="eyebrow">03 · Components</p>
+  <p class="eyebrow">04 · Components</p>
   <h2>What gets built, and where it lives</h2>
   <div class="grid g4" style="margin-top:16px">
     <div class="card comp">
@@ -645,9 +679,100 @@ ul.slots li b { font-weight: 650; }
   </div>
 </section>
 
+<section id="patches">
+  <p class="eyebrow">05 · The JuiceFS patches</p>
+  <h2>Two patches on JuiceFS, and why</h2>
+  <p>JuiceFS Community does the file system: data as blocks on S3, metadata in a Redis-compatible server, a cache on each client. Floppy runs it at v1.4.1 with two patches of its own, kept in <code>spike/juicefs-replica/</code> and applied in order when the binary is built. They change where JuiceFS reads its metadata, how it commits a write and how it groups a reader's pieces into block downloads; the volume format, the layout on S3 and the metadata keys stay JuiceFS's own, plus one counter per session. Without the replica option a patched JuiceFS behaves like upstream.</p>
+
+  <h3>Why upstream JuiceFS does not fit</h3>
+  <div class="grid g2">
+    <figure style="margin:0">
+      <div class="fig">
+        <svg class="chart" id="ch-ops" viewBox="0 0 480 200" role="img" aria-label="Metadata operations Samba issues to list 300 files"></svg>
+      </div>
+      <figcaption>Operations Samba sends to JuiceFS to list a folder of 300 files for the Finder, out of about 2,700 in all.</figcaption>
+      <details class="data"><summary>Data</summary><table><tr><th>Operation</th><th>Count</th></tr><tr><td>Lookups of <code>._</code> AppleDouble names</td><td>about 900</td></tr><tr><td>getxattr and listxattr</td><td>about 1,000</td></tr><tr><td>Other lookups</td><td>about 650</td></tr><tr><td>All operations</td><td>about 2,700</td></tr></table></details>
+    </figure>
+    <ul class="slots" style="align-self:start;margin-top:0">
+      <li><b>Samba asks a lot.</b> To list 300 files for the Finder it asks JuiceFS about 2,700 questions: <code>._</code> names that do not exist, extended attributes. With the metadata across a 15 ms link each one is a round trip, about 75 s for one listing.</li>
+      <li><b>No local replica for a read-write mount.</b> Upstream reads from Redis replicas only on read-only mounts, through Sentinel or Cluster and <code>route-read=replica</code>, and has no way to read from a replica and still see its own writes.</li>
+      <li><b>A write is several round trips.</b> WATCH, the reads, MULTI/EXEC and UNWATCH: 3 to 6 trips across the link for every create, rename or save.</li>
+      <li><b>The Mac reads out of order.</b> Through its cache the macOS SMB client sends 128 KB pieces out of order, up to 40 MB ahead. JuiceFS turned each piece into a range load, which it does not cache, and downloaded the same block again moments later.</li>
+      <li><b>The client-side cache of JuiceFS 1.4 is not enough.</b> It caches attributes and lookups of existing names, not listings, extended attributes or missing names, and leaves writes as they are (DECISIONS #5).</li>
+    </ul>
+  </div>
+
+  <h3>0001: metadata from a local replica</h3>
+  <p class="readout" style="margin:-4px 0 12px">pkg/meta · about 1,100 lines of Go, 970 of tests</p>
+  <p>A Valkey replica of the central master runs inside each Mac's VM. The patch lets a read-write mount read from it, keeps every read consistent with the Mac's own writes, and commits each write in one round trip. It is switched on in the metadata URL:</p>
+  <p><code>redis://master:6379/1?read-replica=redis://127.0.0.1:6380&amp;max-lag=2s&amp;master-timeout=10s</code></p>
+  <div class="grid g2" style="margin-top:14px">
+    <div class="card small">
+      <div class="notice-h"><span class="slot-mark"></span><b>Reads, and seeing your own writes</b></div>
+      <ul class="slots">
+        <li>The replica serves the reads made outside a transaction: lookups, attributes, directory listings, extended attributes, the slice lists of a file, the counters behind <code>statfs</code>. Locks, sessions, quotas and directory stats, gc, fsck, dump and load stay on the master.</li>
+        <li>Read-your-writes with no extra round trip: a hook adds <code>HINCRBY ryw&lt;sid&gt; &lt;field&gt;</code> as the first command of every MULTI/EXEC, and the client keeps the highest value returned.</li>
+        <li>A read goes to the replica only once the replica holds that value. Otherwise it waits up to one master round trip, then reads from the master.</li>
+        <li>The field is random for each client and each reset, so a replica holding an earlier life of the same session never counts as fresh.</li>
+      </ul>
+    </div>
+    <div class="card small">
+      <div class="notice-h"><span class="slot-mark"></span><b>Writes as optimistic transactions</b></div>
+      <ul class="slots">
+        <li>The first attempt of each transaction runs JuiceFS's own Go function unchanged, with its reads served by the replica and recorded.</li>
+        <li>MULTI/EXEC becomes one EVALSHA of a generic Lua script: it compares every recorded read with the master's current value, and only then applies the writes and the read-your-writes counter.</li>
+        <li>A changed value is a conflict, and the transaction runs again the classic way, with WATCH on the master. So does anything the script cannot check or replay: SCAN and HSCAN, a write outside MULTI/EXEC, a command over 4,000 arguments.</li>
+        <li>One generic script rather than Lua per operation: permissions, ACLs, trash and quotas keep a single implementation, in Go.</li>
+      </ul>
+    </div>
+  </div>
+  <div class="table-wrap" style="margin-top:14px">
+    <table>
+      <thead><tr><th>Mode</th><th>When</th><th>Reads</th><th>Writes</th></tr></thead>
+      <tbody>
+        <tr><td><span class="st"><span class="led" data-state="ok"></span><span class="readout">Replica</span></span></td><td>The replica's link is up, it carries the master's replication id, and it is at most <code>max-lag</code> (2 s) behind</td><td>From the replica</td><td>On the master, one round trip</td></tr>
+        <tr><td><span class="st"><span class="led"></span><span class="readout">Master</span></span></td><td>The replica is down, behind, cut off, or not a copy of this master (restarted empty, promoted)</td><td>From the master</td><td>On the master</td></tr>
+        <tr><td><span class="st"><span class="led" data-state="err"></span><span class="readout">Offline</span></span></td><td>The master is unreachable while the replica still answers: at once when the connection is refused, has no route or the name does not resolve; or after <code>master-timeout</code> (10 s) without a single byte from the master while a probe asks every 500 ms</td><td>From the replica, however stale</td><td>Fail at once: read-only file system</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="small muted" style="margin-top:12px">Freshness comes from a probe that reads <code>master_repl_offset</code> on the master every 500 ms, matched against the replica's offset. A timeout alone never makes the mount offline: a slow master only makes writes slow. The first answer to the probe ends offline. Every mode change is logged, and the mount's <code>.stats</code> exports <code>juicefs_meta_replica_mode</code> and <code>juicefs_meta_replica_lag_seconds</code>. The patch refuses to run together with the client-side cache.</p>
+  <div class="table-wrap" style="margin-top:14px">
+    <table>
+      <thead><tr><th>Round trips to the master, per operation</th><th>create</th><th>mkdir</th><th>setattr</th><th>truncate</th><th>setxattr</th><th>removexattr</th><th>write commit</th><th>unlink</th></tr></thead>
+      <tbody>
+        <tr><td class="k">JuiceFS v1.4.1</td><td>5</td><td>5</td><td>4</td><td>4</td><td>3</td><td>3</td><td>4</td><td>6</td></tr>
+        <tr><td class="k">With 0001 and the replica</td><td>1</td><td>1</td><td>1</td><td>1</td><td>1</td><td>1</td><td>1</td><td>1</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>0002: whole blocks for out-of-order readers</h3>
+  <p class="readout" style="margin:-4px 0 12px">pkg/vfs/reader.go · 14 lines changed, a 119-line test</p>
+  <p>When a read falls inside a sequential session, the patch widens the slice JuiceFS creates for it to the whole block that holds it: one slice per block. The small pieces the Mac sends out of order then join that slice instead of each loading a range of its own. Range loads are not cached, so the stream used to download the same block again moments later, and the extra slices pushed JuiceFS's request cleanup into cancelling downloads halfway. Random reads are untouched. On a clip, the download beyond what it plays stays at 4-6%.</p>
+
+  <h3>How they are tested</h3>
+  <ul class="slots">
+    <li><code>spike/juicefs-replica/test.sh</code> runs the Go integration tests of 0001 against a real Valkey master and replica in Docker: read-your-writes, concurrent writers, a link that drops, lag, a master that goes down or answers slowly, writes while offline, round trips per operation, optimistic transactions and their conflicts, and JuiceFS's whole metadata test suite with reads on the replica, also with replication delayed by 5 ms.</li>
+    <li>The same script runs the <code>pkg/vfs</code> tests with 0002's own: small pieces sent out of order inside a sequential stream must load whole blocks.</li>
+    <li>Then a mount check: format, mount with a replica, create and list 200 files, rename one, remove them all, and the replica must have served reads.</li>
+    <li><code>spike/acceptance.py</code> runs the 17 checks under <a href="#performance">Performance</a>: two clients, the Mac over SMB, a shaped link.</li>
+  </ul>
+
+  <h3>Keeping them alive</h3>
+  <ul class="slots">
+    <li>JuiceFS stays pinned at v1.4.1 and moves only when a release brings something needed (a security or bug fix, performance), not with every Floppy release.</li>
+    <li>The patches move to a branch of a fork (<code>essedev/juicefs</code>), one commit per change, so an update is a rebase.</li>
+    <li>A scheduled GitHub Actions job applies them to each new JuiceFS release and runs the Go tests, so a break shows up before the update is needed.</li>
+    <li>An update ships only after the Go tests, JuiceFS's own Redis metadata tests, the acceptance suite and a run with mixed versions (some Macs on the old JuiceFS, some on the new, one Valkey); if mixed versions do not hold, the control plane enforces a minimum version.</li>
+    <li>Checked on 17/10/2026: against JuiceFS <code>main</code>, 25 of 0001's 27 hunks in <code>redis.go</code> apply; <code>doCleanStaleSession</code> and <code>doRemoveXattr</code> conflict.</li>
+    <li>Alongside, the read replica and the optimistic transactions are to be proposed upstream, so the fork does not have to live forever.</li>
+  </ul>
+</section>
+
 <section id="flows">
-  <p class="eyebrow">04 · Flows</p>
-  <h2>How it works, step by step</h2>
+  <p class="eyebrow">06 · Flows</p>
+  <h2>Step by step, between the parts</h2>
   <div class="tabs" role="tablist">
     <button class="tab" role="tab" aria-selected="true" data-panel="f-login">First install and login</button>
     <button class="tab" role="tab" aria-selected="false" data-panel="f-read">Reading a clip</button>
@@ -660,11 +785,11 @@ ul.slots li b { font-weight: 650; }
   </div>
   <div class="panel" id="f-read" hidden>
     <figure><div class="fig wide"><svg class="seq" id="seq-read"></svg></div>
-    <figcaption>Every metadata read is local, in the same VM: no network round trip. A read waits only when the replica has not yet received this Mac's own last write. Measured: a folder of 300 files another Mac created lists in 0.20-0.30 s from the Finder, against 74.6 s with every read on the master. Through its cache the macOS SMB client asks for 128 KB pieces, out of order and up to 40 MB ahead; stock JuiceFS turned them into range requests and downloaded blocks twice, the second patch reads whole blocks inside a sequential stream (DECISIONS #15).</figcaption></figure>
+    <figcaption>Every metadata read is local, in the same VM: no network round trip. A read waits only when the replica has not yet received this Mac's own last write. Measured: a folder of 300 files another Mac created lists in 0.20-0.30 s from the Finder. Through its cache the macOS SMB client asks for 128 KB pieces, out of order and up to 40 MB ahead; the second patch makes each of them join a whole-block download, so every block is fetched once.</figcaption></figure>
   </div>
   <div class="panel" id="f-write" hidden>
     <figure><div class="fig wide"><svg class="seq" id="seq-write"></svg></div>
-    <figcaption>One script on the master checks that nothing JuiceFS read has changed and applies the writes, so a create, a delete or the commit of written data costs one round trip instead of 3-6. The Finder issues about 9 of them per new file: 100 small files take 13.7-17 s at 15 ms.</figcaption></figure>
+    <figcaption>One script on the master checks that nothing JuiceFS read has changed and applies the writes, so a create, a delete or the commit of written data costs one round trip. The Finder issues about 9 of them per new file: 100 small files take 13.7-17 s at 15 ms.</figcaption></figure>
   </div>
   <div class="panel" id="f-revoke" hidden>
     <figure><div class="fig wide"><svg class="seq" id="seq-revoke"></svg></div>
@@ -673,7 +798,7 @@ ul.slots li b { font-weight: 650; }
 </section>
 
 <section id="states">
-  <p class="eyebrow">05 · App states</p>
+  <p class="eyebrow">07 · App states</p>
   <h2>What the panel can show</h2>
   <p>The states drawn in the app and first run concepts (<code>docs/concepts/</code>). Every state has one primary action. Unreachable is not a dead disk: the replica keeps the whole tree, so the disk stays browsable and cached clips play, read only.</p>
   <figure>
@@ -691,7 +816,7 @@ ul.slots li b { font-weight: 650; }
 </section>
 
 <section id="security">
-  <p class="eyebrow">06 · Credentials</p>
+  <p class="eyebrow">08 · Credentials</p>
   <h2>Who holds what, and how it is taken back</h2>
   <div class="table-wrap" style="margin-top:14px">
     <table>
@@ -700,7 +825,7 @@ ul.slots li b { font-weight: 650; }
         <tr><td class="k">Device token</td><td>Each Mac</td><td>Keychain</td><td>Control plane API as that Mac</td><td>Revoking the device <span class="st"><span class="led" data-state="ok"></span><span class="readout">Immediate</span></span></td></tr>
         <tr><td class="k">Valkey user</td><td>Each Mac</td><td>Keychain, passed to the VM for JuiceFS and the replica</td><td>Write the file tree, receive the replication stream, and through them the S3 key</td><td><code>ACL DELUSER</code> and <code>CLIENT KILL</code> <span class="st"><span class="led" data-state="ok"></span><span class="readout">Immediate</span></span></td></tr>
         <tr><td class="k">S3 key</td><td>Every Mac with a Valkey user, implicitly</td><td>Volume format in the metadata, on the master and in every replica</td><td>Read, write, delete objects in the bucket</td><td>New key pasted, old one deleted at the provider <span class="st"><span class="led" data-state="dl"></span><span class="readout">Manual</span></span></td></tr>
-        <tr><td class="k">SMB password</td><td>Mac and its VM</td><td>Keychain (today in the mount URL)</td><td>The share, only on the private Mac-VM link</td><td>Reinstall</td></tr>
+        <tr><td class="k">SMB password</td><td>Mac and its VM</td><td>Keychain</td><td>The share, only on the private Mac-VM link</td><td>Reinstall</td></tr>
         <tr><td class="k">Valkey admin</td><td>Control plane</td><td>Server environment</td><td>Create and delete ACL users, format volumes</td><td>The operator</td></tr>
         <tr><td class="k">Magic link</td><td>The person's inbox</td><td>Hashed, single use, 15 minutes</td><td>One sign-in</td><td>Expiry</td></tr>
       </tbody>
@@ -711,7 +836,7 @@ ul.slots li b { font-weight: 650; }
 </section>
 
 <section id="model">
-  <p class="eyebrow">07 · Data model</p>
+  <p class="eyebrow">09 · Data model</p>
   <h2>The control plane's tables</h2>
   <p>Soft delete everywhere (<code>deleted_at</code>). The control plane keeps its own tables in PostgreSQL. The file tree is not here: it lives in each volume's Valkey database, written by JuiceFS.</p>
   <div class="legend" style="margin-top:12px">
@@ -752,7 +877,7 @@ ul.slots li b { font-weight: 650; }
 </section>
 
 <section id="failures">
-  <p class="eyebrow">08 · Failure modes</p>
+  <p class="eyebrow">10 · Failure modes</p>
   <h2>What breaks when a piece is missing</h2>
   <div class="table-wrap" style="margin-top:14px">
     <table>
@@ -768,11 +893,11 @@ ul.slots li b { font-weight: 650; }
       </tbody>
     </table>
   </div>
-  <div class="notice"><div class="notice-h"><span class="st"><span class="led" data-state="ok"></span><span class="readout">Closed</span></span><b>Slow is not unreachable</b></div><p>A master that answers late, for example during a large copy, must not turn the disk read only. The patch goes offline only on unambiguous unreachability, or after 10 s without any answer from the master. Measured (<code>t13</code>): with the master answering in 1.2 s, give or take 0.6 s, 20 writes went through with no read-only error.</p></div>
+  <div class="notice"><div class="notice-h"><span class="slot-mark"></span><b>Slow is not unreachable</b></div><p>A master that answers late, for example while a large copy fills the uplink, does not turn the disk read only: writes only get slower. The disk goes read only when the master is unreachable beyond doubt, or after 10 s without a single byte from it (see <a href="#patches">The JuiceFS patches</a>). Measured (<code>t13</code>): with the master answering in 1.2 s, give or take 0.6 s, 20 writes went through with no read-only error.</p></div>
 </section>
 
 <section id="deploy">
-  <p class="eyebrow">09 · Deployments</p>
+  <p class="eyebrow">11 · Deployments</p>
   <h2>One codebase, three ways to run it</h2>
   <div class="grid g3" style="margin-top:16px">
     <div class="card comp">
@@ -808,47 +933,18 @@ ul.slots li b { font-weight: 650; }
 </section>
 
 <section id="performance">
-  <p class="eyebrow">10 · Performance</p>
-  <h2>Measured: metadata at local speed, data close to the line</h2>
-  <p>Two spikes ran on 17/10/2026 in a local rig: two JuiceFS clients in containers standing in for two Macs' VMs, each with its local replica, mounted by the Mac over SMB. The metadata spike put the central server behind a simulated 15 ms link, with the same footage and the same tests for every option; the data-path spike shaped the link to S3 and changed one thing at a time. Both are closed; the data path still has to be confirmed on OVH Milan.</p>
-
-  <h3>Why remote metadata failed first</h3>
-  <div class="grid g2">
-    <figure style="margin:0">
-      <div class="fig">
-        <svg class="chart" id="ch-ops" viewBox="0 0 480 200" role="img" aria-label="Metadata operations Samba issues to list 300 files"></svg>
-      </div>
-      <figcaption>Operations Samba sends to JuiceFS to list a folder of 300 files for the Finder, out of about 2,700 in all. Each one was a round trip to the metadata server.</figcaption>
-      <details class="data"><summary>Data</summary><table><tr><th>Operation</th><th>Count</th></tr><tr><td>Lookups of <code>._</code> AppleDouble names</td><td>about 900</td></tr><tr><td>getxattr and listxattr</td><td>about 1,000</td></tr><tr><td>Other lookups</td><td>about 650</td></tr><tr><td>All operations</td><td>about 2,700</td></tr></table></details>
-    </figure>
-    <div class="card small" style="align-self:start">
-      <p>With PostgreSQL across the link, that listing took <b>117 s</b> from the Finder and creating one small file about <b>1.8 s</b>. Inside the VM, without Samba, the same listing took 0.12 s: the database was fine, the number of trips was not.</p>
-      <p style="margin:0">Making Samba ask less (vetoing <code>._</code> files, a local index of Finder attributes) breaks sharing between Macs. What works is making the answers local: a replica of the metadata in every VM, which is what Valkey's native replication gives.</p>
-    </div>
-  </div>
-
-  <h3>The same tests, four ways to hold the metadata</h3>
-  <figure>
-    <div class="fig wide">
-      <div class="legend">
-        <span><i class="sw" style="background:var(--bar)"></i>Valkey with the local replica (chosen)</span>
-        <span><i class="sw" style="background:var(--bar-ext)"></i>Range across runs</span>
-        <span><i class="sw" style="background:var(--neutral)"></i>Other options</span>
-      </div>
-      <svg class="chart" id="ch-acc" viewBox="0 0 860 600" role="img" aria-label="Seconds per test for SQLite in the VM, PostgreSQL over the link, Valkey without and with the local replica"></svg>
-    </div>
-    <figcaption>Seconds, from the Mac over SMB at 15 ms; each panel has its own scale. SQLite in the VM is today's single-Mac disk, the floor nothing shared can beat; the other two shared options pay a round trip per read. Creating files stays slower than local because every write still crosses the link: about 9 per file from the Finder, one round trip each, so 100 files cost at least 100 × 9 × 15 ms = 13.5 s. The earlier 10 s target was set before that was known; it is now 20 s, and asynchronous metadata writes, the only way lower, were ruled out.</figcaption>
-    <details class="data"><summary>Data</summary><table><tr><th>Test</th><th>SQLite in the VM</th><th>PostgreSQL over the link</th><th>Valkey, master only</th><th>Valkey with local replica</th></tr><tr><td>Cold listing of 300 files on another Mac</td><td>0.24 s</td><td>117 s</td><td>74.6 s</td><td>0.20-0.30 s</td></tr><tr><td>Creating 100 small files from the Finder</td><td>3.7 s</td><td>174 s</td><td>158 s</td><td>13.7-17 s</td></tr><tr><td>File created on Mac A visible on Mac B</td><td>n/a, one Mac</td><td>n/a</td><td>0.47 s</td><td>0.00-0.01 s</td></tr></table></details>
-  </figure>
+  <p class="eyebrow">12 · Performance</p>
+  <h2>What the target achieves, measured</h2>
+  <p>Every number here comes from a local rig on 17/10/2026: two JuiceFS clients in containers standing in for two Macs' VMs, each with its local replica, mounted by the Mac over SMB, both JuiceFS patches, 1 MB blocks and a 4 MB readahead. The central Valkey sits behind a simulated 15 ms link; S3 (Garage in Docker) behind one shaped link with 25 ms of latency. A simulation isolates latency and bandwidth, not the real service: the same run on OVH Milan is still to do.</p>
 
   <h3>Acceptance: 17 of 17</h3>
-  <p>Two clients, the Mac over SMB, the patched JuiceFS with both patches, the data path as the product runs it (<code>spike/acceptance.py</code>).</p>
+  <p>Two Macs, A and B, against thresholds set before measuring (<code>spike/acceptance.py</code>).</p>
   <div class="table-wrap">
     <table>
       <thead><tr><th>Check</th><th>Measured</th><th>Threshold</th><th>Result</th></tr></thead>
       <tbody>
         <tr><td class="k"><code>t01</code> Cold listing of 300 files on B</td><td>0.20-0.30 s</td><td>under 0.5 s</td><td><span class="st"><span class="led" data-state="ok"></span><span class="readout">Pass</span></span></td></tr>
-        <tr><td class="k"><code>t02</code> 100 small files created on A</td><td>13.7-17 s</td><td>under 20 s, revised from 10 s</td><td><span class="st"><span class="led" data-state="ok"></span><span class="readout">Pass</span></span></td></tr>
+        <tr><td class="k"><code>t02</code> 100 small files created on A</td><td>13.7-17 s</td><td>under 20 s</td><td><span class="st"><span class="led" data-state="ok"></span><span class="readout">Pass</span></span></td></tr>
         <tr><td class="k"><code>t03</code> Cold read of a clip on B</td><td>10.8 MB/s, 86% of the line</td><td>at least 80% of the 12.5 MB/s line</td><td><span class="st"><span class="led" data-state="ok"></span><span class="readout">Pass</span></span></td></tr>
         <tr><td class="k"><code>t04</code> File created on A visible on B</td><td>0.00-0.01 s</td><td>under 2 s, worst of 20</td><td><span class="st"><span class="led" data-state="ok"></span><span class="readout">Pass</span></span></td></tr>
         <tr><td class="k"><code>t05</code> Read-your-writes</td><td>0 stale reads in 1,000 cycles</td><td>0</td><td><span class="st"><span class="led" data-state="ok"></span><span class="readout">Pass</span></span></td></tr>
@@ -856,7 +952,7 @@ ul.slots li b { font-weight: 650; }
         <tr><td class="k"><code>t07</code> B reads a file that A rewrites and deletes</td><td>no read errors</td><td>0</td><td><span class="st"><span class="led" data-state="ok"></span><span class="readout">Pass</span></span></td></tr>
         <tr><td class="k"><code>t08a</code> Offline: browsing and reading</td><td>keep working</td><td>keep working</td><td><span class="st"><span class="led" data-state="ok"></span><span class="readout">Pass</span></span></td></tr>
         <tr><td class="k"><code>t08b</code> Offline: writes</td><td>fail in 0.1 s</td><td>fail within 20 s</td><td><span class="st"><span class="led" data-state="ok"></span><span class="readout">Pass</span></span></td></tr>
-        <tr><td class="k"><code>t09</code> Link back: B sees new files</td><td>0.9 s, 34 s without the replica</td><td>under 5 s</td><td><span class="st"><span class="led" data-state="ok"></span><span class="readout">Pass</span></span></td></tr>
+        <tr><td class="k"><code>t09</code> Link back: B sees new files</td><td>0.9 s</td><td>under 5 s</td><td><span class="st"><span class="led" data-state="ok"></span><span class="readout">Pass</span></span></td></tr>
         <tr><td class="k"><code>t10a</code> Replica down: new files through the master</td><td>seen</td><td>seen</td><td><span class="st"><span class="led" data-state="ok"></span><span class="readout">Pass</span></span></td></tr>
         <tr><td class="k"><code>t10b</code> Replica restarted empty resyncs</td><td>link up</td><td>on its own</td><td><span class="st"><span class="led" data-state="ok"></span><span class="readout">Pass</span></span></td></tr>
         <tr><td class="k"><code>t11a</code> Extended attribute set on A, read on B</td><td>shared</td><td>shared</td><td><span class="st"><span class="led" data-state="ok"></span><span class="readout">Pass</span></span></td></tr>
@@ -867,28 +963,29 @@ ul.slots li b { font-weight: 650; }
       </tbody>
     </table>
   </div>
+  <p class="small muted" style="margin-top:12px">Creating files stays slower than listing them because every write crosses the link: the Finder makes about 9 metadata writes per new file, one round trip each, so 100 files cost at least 100 × 9 × 15 ms = 13.5 s.</p>
 
-  <h3>File data: the data path</h3>
-  <p>The data-path spike (DECISIONS #15): 1 MB blocks instead of 4 MB, a 4 MB readahead instead of JuiceFS's default, and the second patch, which reads whole blocks when the Mac's SMB client sends its 128 KB pieces out of order. The link is one token bucket on everything Toxiproxy sends, 25 ms to S3, clips of 455 MB. Targets were set before measuring: a cold read at 80% of the line, a cold seek under 0.4 s at 100 Mbps, no single read over 3 s.</p>
+  <h3>File data</h3>
+  <p>Targets set before measuring, at 100 Mbps: a cold read at 80% of the line, a cold seek under 0.4 s, no single read over 3 s. Clips of 455 MB.</p>
   <div class="grid g2">
     <figure style="margin:0">
       <div class="fig">
-        <svg class="chart" id="ch-cold" viewBox="0 0 480 220" role="img" aria-label="Cold read from the Mac over SMB on a simulated 100 Mbps link, before and after the data-path spike"></svg>
+        <svg class="chart" id="ch-cold" viewBox="0 0 480 180" role="img" aria-label="Cold read from the Mac over SMB on a simulated 100 Mbps link"></svg>
       </div>
-      <figcaption>Cold read from the Mac over SMB, simulated 100 Mbps link (12.5 MB/s), MB/s. "SMB costs half the line" was mostly the simulation: JuiceFS's own download limit lets a megabyte through and then stalls, and 4 MB blocks made every out-of-order piece expensive. SMB multichannel is not needed.</figcaption>
-      <details class="data"><summary>Data</summary><table><tr><th>Read</th><th>MB/s</th></tr><tr><td>Before: 4 MB blocks, JuiceFS's download limit as the link (<code>t03</code>)</td><td>5.3-5.5</td></tr><tr><td>Now: a whole clip with <code>dd</code> (<code>t03</code>)</td><td>10.8 (86%)</td></tr><tr><td>Now: 1 MB reads</td><td>11.6 (93%)</td></tr><tr><td>Target, 80% of the line</td><td>10</td></tr><tr><td>The line</td><td>12.5</td></tr></table></details>
+      <figcaption>Cold read from the Mac over SMB, simulated 100 Mbps link (12.5 MB/s), MB/s. A 60 Mbps clip needs 7.5.</figcaption>
+      <details class="data"><summary>Data</summary><table><tr><th>Read</th><th>MB/s</th></tr><tr><td>A whole clip with <code>dd</code> (<code>t03</code>)</td><td>10.8 (86%)</td></tr><tr><td>1 MB reads</td><td>11.6 (93%)</td></tr><tr><td>Target, 80% of the line</td><td>10</td></tr><tr><td>The line</td><td>12.5</td></tr></table></details>
     </figure>
     <figure style="margin:0">
       <div class="fig">
-        <svg class="chart" id="ch-seek" viewBox="0 0 480 260" role="img" aria-label="Cold seek and first read after a jump on a simulated 100 Mbps link"></svg>
+        <svg class="chart" id="ch-seek" viewBox="0 0 480 220" role="img" aria-label="Cold seek and first read after a jump, at 100 Mbps and 1 Gbps"></svg>
       </div>
-      <figcaption>Seconds at 100 Mbps, means. A cold read downloads the whole block that holds it, so 1 MB blocks halve a cold seek. After a jump, the readahead of the position just left keeps the line busy, so a short readahead keeps scrubbing fast. No read over 1.5 s in any run.</figcaption>
-      <details class="data"><summary>Data</summary><table><tr><th>Read</th><th>Mean</th></tr><tr><td>Cold seek, 4 MB blocks</td><td>0.68 s</td></tr><tr><td>Cold seek, 1 MB blocks</td><td>0.38 s, max 0.66 s</td></tr><tr><td>First read after a jump, JuiceFS's default readahead</td><td>0.78 s</td></tr><tr><td>First read after a jump, 16 MB readahead</td><td>0.55 s</td></tr><tr><td>First read after a jump, 4 MB readahead</td><td>0.40 s, max 0.64 s</td></tr></table></details>
+      <figcaption>Seconds, means; the lighter part reaches the worst read. No read over 1.5 s in any run.</figcaption>
+      <details class="data"><summary>Data</summary><table><tr><th>Read</th><th>Mean</th><th>Max</th></tr><tr><td>Cold seek, 100 Mbps</td><td>0.38 s</td><td>0.66 s</td></tr><tr><td>First read after a jump, 100 Mbps</td><td>0.40 s</td><td>0.64 s</td></tr><tr><td>Cold seek, 1 Gbps</td><td>0.09 s</td><td>not recorded</td></tr><tr><td>First read after a jump, 1 Gbps</td><td>0.08 s</td><td>not recorded</td></tr></table></details>
     </figure>
   </div>
   <div class="table-wrap" style="margin-top:18px">
     <table>
-      <thead><tr><th>Operation, 1 MB blocks, 4 MB readahead</th><th>100 Mbps link</th><th>1 Gbps link</th></tr></thead>
+      <thead><tr><th>Operation</th><th>100 Mbps link</th><th>1 Gbps link</th></tr></thead>
       <tbody>
         <tr><td class="k">Cold read from the Mac, 1 MB reads</td><td>11.6 MB/s, 93% of the line</td><td>103 MB/s, 82%</td></tr>
         <tr><td class="k">Cold read of a clip with <code>dd</code> (<code>t03</code>)</td><td>10.8 MB/s, 86%</td><td class="then">not measured</td></tr>
@@ -896,30 +993,16 @@ ul.slots li b { font-weight: 650; }
         <tr><td class="k">Scrubbing: first read after a jump</td><td>mean 0.40 s, max 0.64 s</td><td>mean 0.08 s</td></tr>
         <tr><td class="k">Warmup of a clip</td><td>38 s, 95% of the line</td><td class="then">not measured</td></tr>
         <tr><td class="k">Copying a clip to the disk, 300 Mbps upload</td><td>31.7 MB/s</td><td class="then">not measured</td></tr>
+        <tr><td class="k">Seek in cache</td><td colspan="2">0-3 ms, like a local disk (measured on OVH Milan)</td></tr>
       </tbody>
     </table>
   </div>
-  <p class="small muted" style="margin-top:12px">At 1 Gbps the short readahead costs some sequential speed (82% of the line against 90%), still 13 times what a 60 Mbps clip needs. Whole-block reads cut the extra download from 12-13% to 4-6%, and the GETs for a clip from 722 to about 550; OVH bills neither requests nor traffic, so four times the requests of 4 MB blocks cost nothing.</p>
-
-  <h3>File data: on OVH Milan</h3>
-  <div class="grid g2">
-    <figure style="margin:0">
-      <div class="fig">
-        <svg class="chart" id="ch-thr" viewBox="0 0 480 220" role="img" aria-label="Throughput on OVH Milan"></svg>
-      </div>
-      <figcaption>Throughput on OVH Milan on 06/10/2026, 170 Mbps home line, MB/s, with today's single-Mac disk and 4 MB blocks. Every cold figure stays above what a 60 Mbps clip needs. Cached reads (about 540 MB/s) are off this scale.</figcaption>
-      <details class="data"><summary>Data</summary><table><tr><th>Operation</th><th>MB/s</th></tr><tr><td>Copy 2.7 GB to the disk</td><td>23.9</td></tr><tr><td>Warmup of a 434 MB clip</td><td>14.3</td></tr><tr><td>Cold read of a 434 MB clip</td><td>12.1</td></tr><tr><td>Needed by a 60 Mbps clip</td><td>7.5</td></tr></table></details>
-    </figure>
-    <div class="card small" style="align-self:start">
-      <p>The same package on the real service, before the data-path spike: a seek in cache 0-3 ms, like a local disk; a cold seek 0.9 s on average, 1.9 s at worst, because each one downloaded a 4 MB block.</p>
-      <p style="margin:0">Local Garage in Docker is not OVH: the spike isolates latency and bandwidth, not the real service. Its numbers become the product's only once the same run passes on OVH Milan.</p>
-    </div>
-  </div>
-  <div class="notice"><div class="notice-h"><span class="st"><span class="led" data-state="dl"></span><span class="readout">Next</span></span><b>The same numbers on OVH Milan</b></div><p>The data-path spike is closed; what is left is the same measures on OVH Milan with a zip that formats 1 MB blocks, the same run as the tester's new zip. During a large copy it also checks whether the file's mtime changes at every stat, which JuiceMount found stalls the macOS client for about 73 s on the file's lock.</p></div>
+  <p class="small muted" style="margin-top:12px">At 1 Gbps a cold read reaches 82% of the line, 13 times what a 60 Mbps clip needs. The download that goes beyond what the clip uses stays at 4-6%, about 550 GETs for a clip; OVH bills neither requests nor traffic.</p>
+  <div class="notice"><div class="notice-h"><span class="st"><span class="led" data-state="dl"></span><span class="readout">To confirm</span></span><b>The same numbers on OVH Milan</b></div><p>The next run measures the same on OVH Milan with a zip that formats 1 MB blocks. During a large copy it also checks whether the file's mtime changes at every stat, which <a href="https://github.com/lelanddutcher/juicemount">JuiceMount</a> found stalls the macOS client for about 73 s on the file's lock.</p></div>
 </section>
 
 <section id="costs">
-  <p class="eyebrow">11 · Costs</p>
+  <p class="eyebrow">13 · Costs</p>
   <h2>Cost grows with terabytes, not people</h2>
   <p>Floppy has no per-person price. Self-hosted, a team pays the storage (about 7.5 EUR/TB on OVH) and a fixed 20-30 EUR for the metadata server, the central Valkey and its replica in the datacenter (an estimate: the host is not chosen yet). Adding a person costs nothing; adding a terabyte costs the storage. The commercial products charge per person.</p>
   <figure>
@@ -952,9 +1035,9 @@ ul.slots li b { font-weight: 650; }
 </section>
 
 <section id="plan">
-  <p class="eyebrow">12 · Plan</p>
+  <p class="eyebrow">14 · Plan</p>
   <h2>Order of work</h2>
-  <p>Both spikes are done, the metadata and the data path. Engineer days with a coding agent, low and high: a guess for everything still to do, in the order of docs/ROADMAP.md. The pilot follows the first instance: one shared disk, one or two weeks of real work in CapCut.</p>
+  <p>Engineer days with a coding agent, low and high: a guess for everything still to do, in the order of <a href="ROADMAP.md">ROADMAP.md</a>. The pilot follows the first instance: one shared disk, one or two weeks of real work in CapCut.</p>
   <figure>
     <div class="fig">
       <div class="legend">
@@ -965,28 +1048,6 @@ ul.slots li b { font-weight: 650; }
     </div>
     <details class="data"><summary>Data</summary><table id="plan-table"><tr><th>Step</th><th>Days</th><th>What</th></tr></table></details>
   </figure>
-
-  <h3>Done</h3>
-  <div class="grid g2">
-    <div class="card small">
-      <div class="notice-h"><span class="st"><span class="led" data-state="ok"></span><span class="readout">Done</span></span><b>Metadata spike</b></div>
-      <ul class="slots">
-        <li>The Finder on metadata behind a 15 ms link: PostgreSQL ruled out (117 s for a listing), Valkey with a local replica and the first JuiceFS patch accepted.</li>
-        <li>Revocation: deleting the Mac's Valkey user and killing its connections stops writes and replication, without corrupting the volume.</li>
-        <li>Offline: browsing and reading go on from the replica, writes fail at once, and the disk comes back 0.9 s after the link.</li>
-        <li>A slow but alive master never turns the disk read only.</li>
-      </ul>
-    </div>
-    <div class="card small">
-      <div class="notice-h"><span class="st"><span class="led" data-state="ok"></span><span class="readout">Done</span></span><b>Data-path spike</b></div>
-      <ul class="slots">
-        <li>Every target met at 100 Mbps: cold reads over SMB at 86-93% of the line, a cold seek in 0.38 s, no read over 1.5 s.</li>
-        <li>1 MB blocks and a 4 MB readahead in <code>floppy-mount</code> for new volumes; the second JuiceFS patch reads whole blocks.</li>
-        <li>The old <code>t03</code> I/O error does not come back: the acceptance suite passes 17 of 17.</li>
-        <li>SMB multichannel is not needed.</li>
-      </ul>
-    </div>
-  </div>
 
   <h3>Next</h3>
   <div class="grid g2">
@@ -1014,36 +1075,20 @@ ul.slots li b { font-weight: 650; }
     <li><span><b>The Mac stays awake while data moves.</b> <code>caffeinate -i</code> during a copy, an upload or a warmup, released a couple of minutes after the traffic stops, so sleep does not cut a transfer halfway. No administrator rights.</span></li>
     <li><span><b>Control plane.</b> FastAPI and React, accounts with magic link sign-in, organizations, disks, one Valkey user per Mac, key rotation, audit log, Docker Compose for self-hosting.</span></li>
     <li><span><b>App.</b> Tauri from the Portsage skeleton, built from the concepts: panel, settings, first run.</span></li>
+    <li><span><b>Keeping the JuiceFS patches alive.</b> The fork branch and the scheduled job described under <a href="#patches">The JuiceFS patches</a>.</span></li>
     <li><span><b>Distribution and first instance.</b> The Homebrew cask, then the first self-hosted instance on Dokploy with a central Valkey and S3 in Milan.</span></li>
   </ul>
-
-  <h3>Keeping the JuiceFS patches alive</h3>
-  <div class="card small">
-    <ul class="slots">
-      <li>JuiceFS stays pinned at v1.4.1 and moves only when a release brings something needed (a security or bug fix, performance), not with every Floppy release.</li>
-      <li>The patches move from <code>spike/juicefs-replica/</code> to a branch of a fork (<code>essedev/juicefs</code>), one commit per change, so an update is a rebase.</li>
-      <li>A scheduled GitHub Actions job applies them to each new JuiceFS release and runs the Go tests, so a break shows up before the update is needed.</li>
-      <li>An update ships only after the Go tests, JuiceFS's own Redis metadata tests, the acceptance suite and a run with mixed versions (some Macs on the old JuiceFS, some on the new, one Valkey); if mixed versions do not hold, the control plane enforces a minimum version.</li>
-      <li>Checked on 17/10/2026: no JuiceFS release after v1.4.1 yet; against <code>main</code>, 212 commits later, 25 of the first patch's 27 hunks in <code>redis.go</code> apply, and <code>doCleanStaleSession</code> and <code>doRemoveXattr</code> conflict.</li>
-      <li>Alongside: propose the read replica and the optimistic transactions upstream, so the fork does not have to live forever.</li>
-    </ul>
-  </div>
 </section>
 
 <section id="decisions">
-  <p class="eyebrow">13 · Decisions</p>
-  <h2>Still open, and closed since the proposal</h2>
-  <p>Closed decisions are recorded in docs/DECISIONS.md and cited by number.</p>
+  <p class="eyebrow">15 · Open decisions</p>
+  <h2>Still to close before or during the build</h2>
+  <p>Everything already decided, with the alternative it ruled out, is in <a href="DECISIONS.md">DECISIONS.md</a>.</p>
   <div class="dec">
     <div class="card"><b>Cache on revocation</b><p>The cache and the replica hold the organization's footage and file tree on a Mac that is no longer allowed.</p><span class="rec"><span class="st"><span class="led"></span><span class="readout">Proposal</span></span><span>The app clears both at the first heartbeat that says revoked.</span></span></div>
     <div class="card"><b>Bucket versioning</b><p>A safety net for the rotation window, but deleted and compacted blocks stay billed.</p><span class="rec"><span class="st"><span class="led"></span><span class="readout">Proposal</span></span><span>On, with a lifecycle rule that expires old versions after a few days.</span></span></div>
     <div class="card"><b>Where the central Valkey runs</b><p>A VPS next to the bucket in Milan, or a managed Valkey in the same region. It needs <code>appendfsync always</code>, a replica and replication open to the Macs.</p><span class="rec"><span class="st"><span class="led"></span><span class="readout">Proposal</span></span><span>Decided with the first instance, on durability first and price second.</span></span></div>
-    <div class="card"><b>Block size and readahead</b><p>A cold seek downloads the whole block that holds it, and after a jump the readahead of the position just left keeps the line busy.</p><span class="rec"><span class="st"><span class="led" data-state="ok"></span><span class="readout">Closed</span></span><span>1 MB blocks, a fixed 4 MB readahead, whole-block reads in the second patch (DECISIONS #15).</span></span></div>
-    <div class="card"><b>Metadata cache timeouts</b><p>With reads from the local replica, longer JuiceFS cache timeouts save little and delay other people's changes, which now show up in 0.00-0.01 s.</p><span class="rec"><span class="st"><span class="led" data-state="ok"></span><span class="readout">Closed</span></span><span>JuiceFS defaults. JuiceFS 1.4's Redis client-side cache stays off: it caches neither listings nor the missing <code>._</code> names, and the patch refuses to run with it (DECISIONS #5).</span></span></div>
-    <div class="card"><b>Keeping the JuiceFS patches</b><p>The read replica, the one-round-trip writes and the whole-block reads live on top of v1.4.1, to carry across JuiceFS releases.</p><span class="rec"><span class="st"><span class="led" data-state="ok"></span><span class="readout">Closed</span></span><span>Pinned, a fork branch with one commit per change and a scheduled job against each release (ROADMAP 3); proposed upstream meanwhile.</span></span></div>
-    <div class="card"><b>Homebrew needs administrator rights</b><p>Installing Homebrew uses sudo; the app itself does not. It bends a "never compromise" rule.</p><span class="rec"><span class="st"><span class="led" data-state="ok"></span><span class="readout">Closed</span></span><span>Accepted once, for Homebrew itself (DECISIONS #10); a DMG in ~/Applications stays the fallback if a team has standard accounts.</span></span></div>
-    <div class="card"><b>The name</b><p>"Fluix" collided with Fluix Limited in software, and the name ends up in <code>/Volumes/&lt;Name&gt;</code>, which CapCut projects reference.</p><span class="rec"><span class="st"><span class="led" data-state="ok"></span><span class="readout">Closed</span></span><span>Floppy (DECISIONS #14). EUIPO and UIBM are still to check.</span></span></div>
-    <div class="card"><b>Mockup questions</b><p>Text when unreachable, full cache behavior, reconnection interval, "Turn off" or "Eject".</p><span class="rec"><span class="st"><span class="led" data-state="ok"></span><span class="readout">Closed</span></span><span>By the concepts on 17/10/2026 (DECISIONS #12): Turn off, a full cache frees the least recently used blocks, automatic reconnection every 30 s, settings in their own window. The Unreachable text, drawn before the replica, still has to say the disk is read only rather than closed.</span></span></div>
+    <div class="card"><b>The Unreachable text</b><p>When the center does not answer, the disk stays browsable and cached clips play: the panel must not read as if the disk were gone.</p><span class="rec"><span class="st"><span class="led"></span><span class="readout">Proposal</span></span><span>Say that the disk is read only until the line is back, and that saving will work again on its own.</span></span></div>
   </div>
 </section>
 
@@ -1200,7 +1245,7 @@ ul.slots li b { font-weight: 650; }
       { f: "jf", t: "ca", l: "keep a copy", c: "ink" },
       { f: "jf", t: "s3", l: "readahead: the next 4 MB", c: "data" },
       { k: "note", f: "jf", t: "s3", l: "pieces out of order: each block loaded once, whole (patch 0002)" },
-      { k: "note", f: "cc", t: "jf", l: "0.38 s per cold seek at 100 Mbps in the spike; 0.9 s on OVH with 4 MB blocks" }
+      { k: "note", f: "cc", t: "jf", l: "about 0.4 s per cold seek on a simulated 100 Mbps link" }
     ]);
 
   seq("seq-write",
@@ -1339,12 +1384,6 @@ ul.slots li b { font-weight: 650; }
     });
   }
 
-  hbar("ch-thr", [
-    { l: "Copy to the disk", v: 23.9, t: "23.9", tip: "<b>Copy 2.7 GB to the disk</b><br>113 s, 23.9 MB/s, the line's upload limit" },
-    { l: "Warmup of a clip", v: 14.3, t: "14.3", tip: "<b>Warmup of a 434 MB clip</b><br>30 s, 14.3 MB/s" },
-    { l: "Cold read (playback)", v: 12.1, t: "12.1", tip: "<b>Reading a 434 MB clip not in cache</b><br>38 s, 12.1 MB/s" }
-  ], { max: 30, ticks: [0, 10, 20, 30], ref: { v: 7.5, l: "7.5 needed by a 60 Mbps clip" } });
-
   hbar("ch-ops", [
     { l: "._ name lookups", v: 900, t: "about 900", tip: "<b>Lookups of ._ AppleDouble names</b><br>The Finder asks for a ._ companion of every file" },
     { l: "getxattr, listxattr", v: 1000, t: "about 1,000", tip: "<b>Extended attributes</b><br>Finder metadata through Samba's fruit module" },
@@ -1352,69 +1391,75 @@ ul.slots li b { font-weight: 650; }
   ], { max: 1200, ticks: [0, 400, 800, 1200], left: 150 });
 
   hbar("ch-cold", [
-    { l: "Before, 4 MB blocks", v: 5.3, hi: 5.5, t: "5.3-5.5", cls: "bar-ink", tip: "<b>Before the data-path spike</b><br>4 MB blocks, the link simulated with JuiceFS's download limit, t03: 5.3-5.5 MB/s" },
-    { l: "Now, a whole clip", v: 10.8, t: "10.8", tip: "<b>A whole clip with dd, t03</b><br>10.8 MB/s, 86% of the line" },
-    { l: "Now, 1 MB reads", v: 11.6, t: "11.6", tip: "<b>1 MB reads from the Mac</b><br>11.6 MB/s, 93% of the line" }
+    { l: "A whole clip (t03)", v: 10.8, t: "10.8", tip: "<b>A whole clip with dd, t03</b><br>10.8 MB/s, 86% of the line" },
+    { l: "1 MB reads", v: 11.6, t: "11.6", tip: "<b>1 MB reads from the Mac</b><br>11.6 MB/s, 93% of the line" }
   ], { max: 14, ticks: [0, 4, 8, 12], refs: [{ v: 10, l: "10, the 80% target", anchor: "end" }, { v: 12.5, l: "12.5, the line", anchor: "end" }], left: 130 });
 
   hbar("ch-seek", [
-    { l: "Cold seek, 4 MB blocks", v: 0.68, t: "0.68", cls: "bar-ink", tip: "<b>Cold seek, 4 MB blocks</b><br>0.68 s, same link and readahead" },
-    { l: "Cold seek, 1 MB blocks", v: 0.38, t: "0.38", tip: "<b>Cold seek, 1 MB blocks</b><br>mean 0.38 s, max 0.66 s" },
-    { l: "Jump, default readahead", v: 0.78, t: "0.78", cls: "bar-ink", tip: "<b>First read after a jump</b><br>JuiceFS's default readahead (8 blocks): 0.78 s" },
-    { l: "Jump, 16 MB readahead", v: 0.55, t: "0.55", cls: "bar-ink", tip: "<b>First read after a jump</b><br>16 MB readahead: 0.55 s" },
-    { l: "Jump, 4 MB readahead", v: 0.40, t: "0.40", tip: "<b>First read after a jump</b><br>4 MB readahead: mean 0.40 s, max 0.64 s" }
-  ], { max: 1, ticks: [0, 0.25, 0.5, 0.75, 1], unit: " s", rowH: 34, refs: [{ v: 0.4, l: "0.4 s target" }], left: 160 });
+    { l: "Cold seek, 100 Mbps", v: 0.38, hi: 0.66, t: "0.38", tip: "<b>Cold seek at 100 Mbps</b><br>mean 0.38 s, max 0.66 s" },
+    { l: "After a jump, 100 Mbps", v: 0.40, hi: 0.64, t: "0.40", tip: "<b>First read after a jump at 100 Mbps</b><br>mean 0.40 s, max 0.64 s" },
+    { l: "Cold seek, 1 Gbps", v: 0.09, t: "0.09", tip: "<b>Cold seek at 1 Gbps</b><br>mean 0.09 s" },
+    { l: "After a jump, 1 Gbps", v: 0.08, t: "0.08", tip: "<b>First read after a jump at 1 Gbps</b><br>mean 0.08 s" }
+  ], { max: 0.8, ticks: [0, 0.2, 0.4, 0.6, 0.8], unit: " s", rowH: 34, refs: [{ v: 0.4, l: "0.4 s target at 100 Mbps", anchor: "end" }], left: 160 });
 
-  // Acceptance tests as small multiples: one panel per test, each with its own scale.
+  // A clip as a strip of 1 MB blocks, drawn as the panel's faceplate (concept-c-app): a dark
+  // plate in both themes, the slot filling with the cache, the activity colour of the LED for
+  // blocks on their way. Literal colours, as in design/mark/faceplate.svg.
   (function () {
-    var svg = document.getElementById("ch-acc");
-    var W = 860, left = 190, right = 150, rowH = 24, barH = 12;
-    var panels = [
-      { t: "Cold listing of 300 files on another Mac", max: 120, ticks: [0, 30, 60, 90, 120], rows: [
-        { l: "SQLite in the VM", v: 0.24, t: "0.24 s", note: "one Mac only" },
-        { l: "PostgreSQL over the link", v: 117, t: "117 s" },
-        { l: "Valkey, master only", v: 74.6, t: "74.6 s" },
-        { l: "Valkey with local replica", v: 0.2, hi: 0.3, t: "0.20-0.30 s", on: true }] },
-      { t: "Creating 100 small files from the Finder", max: 180, ticks: [0, 45, 90, 135, 180], ref: { v: 20, l: "20 s target" }, rows: [
-        { l: "SQLite in the VM", v: 3.7, t: "3.7 s", note: "one Mac only" },
-        { l: "PostgreSQL over the link", v: 174, t: "174 s" },
-        { l: "Valkey, master only", v: 158, t: "158 s" },
-        { l: "Valkey with local replica", v: 13.7, hi: 17, t: "13.7-17 s", on: true }] },
-      { t: "File created on Mac A, visible on Mac B", max: 0.5, ticks: [0, 0.1, 0.2, 0.3, 0.4, 0.5], rows: [
-        { l: "Valkey, master only", v: 0.47, t: "0.47 s" },
-        { l: "Valkey with local replica", v: 0, hi: 0.01, t: "0.00-0.01 s", on: true }] }
+    var svg = document.getElementById("blocks");
+    var W = 900, H = 352, N = 32, x0 = 250, bw = 16, gap = 3, step = bw + gap;
+    var C = { cached: "#d9d4c8", dl: "#ff6a2e", empty: "#2c2a27", groove: "#0b0b0a", head: "#efece5", ro: "#b3aea5", sub: "#8f8b83" };
+    var defs = el("defs", {}, svg);
+    var g = el("linearGradient", { id: "fx-plate", x1: 0, y1: 0, x2: 0, y2: 1 }, defs);
+    el("stop", { offset: 0, "stop-color": "#3a3835" }, g);
+    el("stop", { offset: 1, "stop-color": "#1c1b19" }, g);
+    var m = el("marker", { id: "blk-arrow", viewBox: "0 0 10 10", refX: 8, refY: 5, markerWidth: 6, markerHeight: 6, orient: "auto" }, defs);
+    el("path", { d: "M0 0L10 5L0 10z", fill: C.sub }, m);
+    el("rect", { x: 0.5, y: 0.5, width: W - 1, height: H - 1, rx: 12, fill: "url(#fx-plate)", stroke: "#0f0f0e" }, svg);
+    el("rect", { x: 1.5, y: 1.5, width: W - 3, height: H - 3, rx: 11, fill: "none", stroke: "#fff", "stroke-opacity": 0.08 }, svg);
+    function ro(x, y, text, anchor) {
+      return el("text", { x: x, y: y, fill: C.ro, "font-family": "Departure Mono, ui-monospace, monospace", "font-size": 11, "letter-spacing": 0.5, "text-anchor": anchor || "start" }, svg, text.toUpperCase());
+    }
+    function sub(x, y, text) {
+      return el("text", { x: x, y: y, fill: C.sub, "font-family": "Schibsted Grotesk, sans-serif", "font-size": 12.5 }, svg, text);
+    }
+    function bx(i) { return x0 + i * step; }
+    function head(at, ry) {
+      var x = bx(at);
+      el("line", { x1: x, x2: x, y1: ry - 9, y2: ry + 33, stroke: C.head, "stroke-width": 2 }, svg);
+      el("path", { d: "M" + (x - 5) + " " + (ry - 15) + " h10 l-5 6 z", fill: C.head }, svg);
+    }
+    var rows = [
+      { y: 62, t: "Playing", s: ["the blocks it needs,", "plus 4 MB ahead"], cached: [0, 9], dl: [9, 13], head: 8.6 },
+      { y: 162, t: "After a jump", s: ["one block first,", "then 4 MB ahead"], cached: [0, 13], dl: [22, 27], head: 22.3, from: 12.4 },
+      { y: 262, t: "Made available", s: ["every block on the Mac,", "before editing starts"], cached: [0, N] }
     ];
-    var y0 = 0;
-    panels.forEach(function (p) {
-      var sx = function (v) { return left + (v / p.max) * (W - left - right); };
-      el("text", { x: 0, y: y0 + 16, "class": "grp-t" }, svg, p.t);
-      var top = y0 + 30, bot = top + p.rows.length * rowH;
-      p.ticks.forEach(function (t) {
-        el("line", { x1: sx(t), x2: sx(t), y1: top - 2, y2: bot, "class": "grid-l" }, svg);
-        el("text", { x: sx(t), y: bot + 15, "text-anchor": "middle", "class": "axis-t" }, svg, t + " s");
-      });
-      p.rows.forEach(function (r, i) {
-        var y = top + i * rowH + rowH / 2;
-        el("text", { x: left - 10, y: y + 4, "text-anchor": "end", "class": "row-t" }, svg, r.l);
-        var w = Math.max(sx(r.v) - left, 2), wh = r.hi != null ? Math.max(sx(r.hi) - left, w) : w;
-        var cls = r.on ? "bar" : "bar-ink";
-        if (wh > w + 1) el("rect", { x: left + w - 2, y: y - barH / 2, width: wh - w + 2, height: barH, rx: 4, "class": "bar-ext" }, svg);
-        if (w > 4) el("path", { d: "M" + left + " " + (y - barH / 2) + " h" + (w - 4) + " a4 4 0 0 1 4 4 v" + (barH - 8) + " a4 4 0 0 1 -4 4 h" + (-(w - 4)) + "z", "class": cls }, svg);
-        else el("rect", { x: left, y: y - barH / 2, width: 2, height: barH, "class": cls }, svg);
-        // Keep a value label clear of the panel's reference line.
-        var lx = left + wh + 6;
-        if (p.ref && lx < sx(p.ref.v) + 6 && left + wh < sx(p.ref.v)) lx = sx(p.ref.v) + 6;
-        el("text", { x: lx, y: y + 4, "class": "val-t" }, svg, r.t + (r.note ? ", " + r.note : ""));
-        el("rect", { x: 0, y: y - rowH / 2, width: W, height: rowH, "class": "hit", "data-tip": "<b>" + p.t + "</b><br>" + r.l + ": " + r.t + (r.note ? " (" + r.note + ")" : "") }, svg);
-      });
-      if (p.ref) {
-        var rx = sx(p.ref.v);
-        el("line", { x1: rx, x2: rx, y1: top - 4, y2: bot, "class": "refl" }, svg);
-        el("text", { x: rx + 4, y: bot + 30, "class": "ref-t" }, svg, p.ref.l);
+    rows.forEach(function (r) {
+      ro(28, r.y + 6, r.t);
+      sub(28, r.y + 26, r.s[0]);
+      sub(28, r.y + 42, r.s[1]);
+      el("rect", { x: x0 - 6, y: r.y, width: N * step - gap + 12, height: 24, rx: 12, fill: C.groove }, svg);
+      for (var i = 0; i < N; i++) {
+        var state = i >= r.cached[0] && i < r.cached[1] ? "cached" : r.dl && i >= r.dl[0] && i < r.dl[1] ? "dl" : "empty";
+        el("rect", { x: bx(i), y: r.y + 6, width: bw, height: 12, rx: 3, fill: C[state] }, svg);
       }
-      y0 = bot + (p.ref ? 58 : 44);
+      if (r.from != null) {
+        var xa = bx(r.from), xb = bx(r.head);
+        el("path", { d: "M" + xa + " " + (r.y - 18) + " C" + xa + " " + (r.y - 44) + " " + xb + " " + (r.y - 44) + " " + (xb - 2) + " " + (r.y - 20), fill: "none", stroke: C.sub, "stroke-width": 1.5, "stroke-dasharray": "3 3", "marker-end": "url(#blk-arrow)" }, svg);
+        ro((xa + xb) / 2, r.y - 46, "jump", "middle");
+      }
+      if (r.head != null) head(r.head, r.y);
     });
-    svg.setAttribute("viewBox", "0 0 " + W + " " + (y0 - 16));
+    // Legend, inside the plate
+    var ly = 326, lx = x0;
+    [["cached", "On the Mac"], ["dl", "Downloading"], ["empty", "Only on S3"]].forEach(function (k) {
+      el("rect", { x: lx - 3, y: ly - 13, width: 22, height: 16, rx: 8, fill: C.groove }, svg);
+      el("rect", { x: lx, y: ly - 10, width: bw, height: 10, rx: 3, fill: C[k[0]] }, svg);
+      ro(lx + 28, ly - 1, k[1]);
+      lx += 150;
+    });
+    el("line", { x1: lx + 8, x2: lx + 8, y1: ly - 15, y2: ly + 3, stroke: C.head, "stroke-width": 2 }, svg);
+    ro(lx + 22, ly - 1, "Playhead");
   })();
 
   // Cost ranges
