@@ -1,0 +1,36 @@
+# What Floppy needs in the host's Traefik static configuration (in Dokploy: Web Server ->
+# Traefik -> Edit Traefik config, /etc/dokploy/traefik/traefik.yml), merged into the blocks
+# that file already has, then Reload. The rest of Dokploy's file stays as it is.
+#
+# Replace the three placeholders: the routes token (FLOPPY_META_ROUTES_TOKEN, which can read
+# the routes and nothing else), the e-mail for Let's Encrypt, and the DNS provider. The
+# provider's credentials go in Traefik's environment (Web Server -> Traefik -> Modify
+# Environment), never here:
+#   cloudflare  CF_DNS_API_TOKEN (a token with Zone:DNS:Edit and Zone:Zone:Read on the zone)
+#   ovh         OVH_ENDPOINT=ovh-eu, OVH_APPLICATION_KEY, OVH_APPLICATION_SECRET,
+#               OVH_CONSUMER_KEY (rules POST and DELETE on /domain/zone/*)
+
+entryPoints:
+  websecure:
+    transport:
+      respondingTimeouts:
+        # Traefik's 60 s default also closes idle TCP connections: a JuiceFS connection
+        # pool or a quiet replication link (spike/metatls.py, DECISIONS #25).
+        readTimeout: 0
+
+certificatesResolvers:
+  # The wildcard *.meta.<domain>: only a DNS challenge can obtain one.
+  floppy-dns:
+    acme:
+      email: admin@example.com
+      storage: /etc/dokploy/traefik/dynamic/acme-floppy-dns.json
+      dnsChallenge:
+        provider: cloudflare
+
+providers:
+  # The meta service's routes: one TCP router per disk's instance, polled every 5 s.
+  http:
+    endpoint: http://floppy-meta:8080/v1/traefik
+    pollInterval: 5s
+    headers:
+      Authorization: Bearer REPLACE_WITH_FLOPPY_META_ROUTES_TOKEN

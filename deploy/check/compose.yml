@@ -1,0 +1,51 @@
+# The local check of deploy/docker-compose.yml (deploy/check/check.py drives it): the same
+# stack, plus what a Dokploy host would provide and a device would bring. Relative paths are
+# from deploy/, the first file's directory.
+#
+# - traefik: Dokploy's Traefik as Dokploy configures it (its own static file, the Docker
+#   provider reading this project's labels, read-only socket) plus deploy/traefik/traefik.yml's
+#   blocks, with a self-signed wildcard instead of the DNS challenge. Ports 4570 (443) and
+#   4571 (80) from the fluix-deploy Portsage range.
+# - garage: an S3 for the patched JuiceFS's format and mount.
+# - device: a device stand-in, a Valkey replica and the patched JuiceFS on FUSE, reaching the
+#   instances only through Traefik by name.
+services:
+  traefik:
+    image: traefik:${CHECK_TRAEFIK_VERSION:-v3.6.25}
+    command: ["--configFile=/etc/traefik/traefik.yml"]
+    volumes:
+      - ./check/traefik.yml:/etc/traefik/traefik.yml:ro
+      - ./check/.state/dynamic:/etc/traefik/dynamic:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    ports:
+      - "127.0.0.1:4570:443"
+      - "127.0.0.1:4571:80"
+    networks:
+      proxy:
+        ipv4_address: 10.250.50.240
+
+  garage:
+    image: dxflrs/garage:v2.1.0
+    environment:
+      GARAGE_RPC_SECRET: ${CHECK_GARAGE_RPC_SECRET:?run deploy/check/check.py}
+    volumes:
+      - ../server/docker/garage.toml:/etc/garage.toml:ro
+    networks: [proxy]
+
+  device:
+    build:
+      context: ./check
+      dockerfile: device.Dockerfile
+      additional_contexts:
+        juicefs: ${FLOPPY_JUICEFS_DIST:-service:juicefs}
+    privileged: true # FUSE inside the container
+    devices:
+      - /dev/fuse
+    command: ["sleep", "infinity"]
+    init: true
+    volumes:
+      - ./check/.state/tls:/certs:ro
+    networks: [proxy]
+    # The disks' names resolve to Traefik; check.py adds each label as it creates one.
+    extra_hosts:
+      - "floppy.test:10.250.50.240"

@@ -1,0 +1,186 @@
+# A self-hosted Floppy instance, for Dokploy (or any host whose Traefik reads Docker labels):
+# the control plane, the admin web, PostgreSQL 18 and the meta service, on one domain.
+#
+#   https://<FLOPPY_DOMAIN>            the admin web; /api/ goes to the control plane (same origin)
+#   <label>.meta.<FLOPPY_DOMAIN>:443   each disk's Valkey, routed by name in the TLS handshake
+#
+# Traefik is the host's own (Dokploy's), never a second one: it needs the blocks of
+# deploy/traefik/traefik.yml (the meta routes, a DNS-01 resolver for the wildcard, no read
+# timeout on 443), see docs/ARCHITECTURE.md, "Deploy". Variables in deploy/.env.example; in
+# Dokploy they go in the compose's Environment tab. Nothing here has the Docker socket.
+#
+#   docker compose -f deploy/docker-compose.yml --env-file deploy/.env up -d --build
+#   docker compose -f deploy/docker-compose.yml exec server floppy-server bootstrap --from-env
+
+services:
+  db:
+    build:
+      context: ..
+      dockerfile: deploy/db.Dockerfile
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: floppy_owner
+      POSTGRES_PASSWORD: ${FLOPPY_DB_OWNER_PASSWORD:?set FLOPPY_DB_OWNER_PASSWORD}
+      POSTGRES_DB: floppy
+      FLOPPY_DB_APP_PASSWORD: ${FLOPPY_DB_APP_PASSWORD:?set FLOPPY_DB_APP_PASSWORD}
+    volumes:
+      - db-data:/var/lib/postgresql
+    networks: [internal]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U floppy_owner -d floppy"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  # One valkey-server per disk, data on its volume (DECISIONS #25). Traefik reaches it by its
+  # alias on the proxy network: the instances' ports and the routes it polls (/v1/traefik).
+  meta:
+    build: ../meta
+    restart: unless-stopped
+    init: true
+    # Each instance saves its ACL users and flushes its AOF before the container stops.
+    stop_grace_period: 60s
+    environment:
+      FLOPPY_META_TOKEN: ${FLOPPY_META_TOKEN:?set FLOPPY_META_TOKEN}
+      FLOPPY_META_ROUTES_TOKEN: ${FLOPPY_META_ROUTES_TOKEN:?set FLOPPY_META_ROUTES_TOKEN}
+      FLOPPY_META_DOMAIN: meta.${FLOPPY_DOMAIN:?set FLOPPY_DOMAIN}
+      FLOPPY_META_UPSTREAM_HOST: ${FLOPPY_META_ALIAS:-floppy-meta}
+      FLOPPY_META_ROUTER_PREFIX: ${FLOPPY_META_ALIAS:-floppy-meta}
+      FLOPPY_META_ENTRYPOINT: ${FLOPPY_TRAEFIK_ENTRYPOINT:-websecure}
+      FLOPPY_META_CERT_RESOLVER: ${FLOPPY_META_CERT_RESOLVER-floppy-dns}
+      FLOPPY_META_APPENDFSYNC: ${FLOPPY_META_APPENDFSYNC:-always}
+    volumes:
+      - meta-data:/data
+    networks:
+      internal:
+        aliases: [meta]
+      proxy:
+        aliases: ["${FLOPPY_META_ALIAS:-floppy-meta}"]
+
+  # The control plane: migrates, creates the first organization from FLOPPY_BOOTSTRAP_* when
+  # none exists, and serves /api/v1. Its image carries the patched JuiceFS, built from
+  # spike/juicefs-replica by the two build-only services below unless FLOPPY_JUICEFS_DIST
+  # names a directory with the binaries already built (spike/juicefs-replica/build.sh).
+  server:
+    build:
+      context: ../server
+      additional_contexts:
+        juicefs: ${FLOPPY_JUICEFS_DIST:-service:juicefs}
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      meta:
+        condition: service_healthy
+    environment:
+      FLOPPY_ENV: production
+      FLOPPY_SECRET_KEY: ${FLOPPY_SECRET_KEY:?set FLOPPY_SECRET_KEY}
+      FLOPPY_DATABASE_URL: postgresql+asyncpg://floppy_app:${FLOPPY_DB_APP_PASSWORD}@db:5432/floppy
+      FLOPPY_MIGRATION_DATABASE_URL: postgresql+asyncpg://floppy_owner:${FLOPPY_DB_OWNER_PASSWORD}@db:5432/floppy
+      FLOPPY_PUBLIC_URL: https://${FLOPPY_DOMAIN}
+      FLOPPY_COOKIE_SECURE: "true"
+      FLOPPY_TRUSTED_PROXIES: ${FLOPPY_TRUSTED_PROXIES:?set FLOPPY_TRUSTED_PROXIES to the proxy network's subnet}
+      FLOPPY_META_BACKEND: service
+      FLOPPY_META_URL: http://meta:8080
+      FLOPPY_META_TOKEN: ${FLOPPY_META_TOKEN}
+      FLOPPY_MAIL_BACKEND: smtp
+      FLOPPY_SMTP_HOST: ${FLOPPY_SMTP_HOST:?set FLOPPY_SMTP_HOST}
+      FLOPPY_SMTP_PORT: ${FLOPPY_SMTP_PORT:-587}
+      FLOPPY_SMTP_USERNAME: ${FLOPPY_SMTP_USERNAME:-}
+      FLOPPY_SMTP_PASSWORD: ${FLOPPY_SMTP_PASSWORD:-}
+      FLOPPY_SMTP_SENDER: ${FLOPPY_SMTP_SENDER:?set FLOPPY_SMTP_SENDER}
+      FLOPPY_SMTP_STARTTLS: ${FLOPPY_SMTP_STARTTLS:-true}
+      FLOPPY_BOOTSTRAP_ORGANIZATION_NAME: ${FLOPPY_BOOTSTRAP_ORGANIZATION_NAME:-}
+      FLOPPY_BOOTSTRAP_ORGANIZATION_SLUG: ${FLOPPY_BOOTSTRAP_ORGANIZATION_SLUG:-}
+      FLOPPY_BOOTSTRAP_ADMIN_EMAIL: ${FLOPPY_BOOTSTRAP_ADMIN_EMAIL:-}
+      FLOPPY_BOOTSTRAP_S3_ENDPOINT: ${FLOPPY_BOOTSTRAP_S3_ENDPOINT:-}
+      FLOPPY_BOOTSTRAP_S3_REGION: ${FLOPPY_BOOTSTRAP_S3_REGION:-}
+      FLOPPY_BOOTSTRAP_MAIL_LANGUAGE: ${FLOPPY_BOOTSTRAP_MAIL_LANGUAGE:-it}
+      FLOPPY_BOOTSTRAP_STORAGE_MODE: ${FLOPPY_BOOTSTRAP_STORAGE_MODE:-manual}
+      FLOPPY_BOOTSTRAP_STORAGE_PROVIDER: ${FLOPPY_BOOTSTRAP_STORAGE_PROVIDER:-}
+      FLOPPY_BOOTSTRAP_STORAGE_ADMIN_CREDENTIALS: ${FLOPPY_BOOTSTRAP_STORAGE_ADMIN_CREDENTIALS:-}
+    networks: [internal, proxy]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/healthz', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 30
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=${FLOPPY_PROXY_NETWORK:-dokploy-network}
+      - traefik.http.routers.${FLOPPY_ROUTER_PREFIX:-floppy}-api.rule=Host(`${FLOPPY_DOMAIN}`) && PathPrefix(`/api/`)
+      - traefik.http.routers.${FLOPPY_ROUTER_PREFIX:-floppy}-api.entrypoints=${FLOPPY_TRAEFIK_ENTRYPOINT:-websecure}
+      - traefik.http.routers.${FLOPPY_ROUTER_PREFIX:-floppy}-api.tls=true
+      - traefik.http.routers.${FLOPPY_ROUTER_PREFIX:-floppy}-api.tls.certresolver=${FLOPPY_WEB_CERT_RESOLVER:-letsencrypt}
+      - traefik.http.routers.${FLOPPY_ROUTER_PREFIX:-floppy}-api.service=${FLOPPY_ROUTER_PREFIX:-floppy}-api
+      - traefik.http.routers.${FLOPPY_ROUTER_PREFIX:-floppy}-api.middlewares=${FLOPPY_ROUTER_PREFIX:-floppy}-api-headers
+      - traefik.http.services.${FLOPPY_ROUTER_PREFIX:-floppy}-api.loadbalancer.server.port=8000
+      # The API's own pages carry their own CSP; here only what every answer needs.
+      - traefik.http.middlewares.${FLOPPY_ROUTER_PREFIX:-floppy}-api-headers.headers.stsSeconds=63072000
+      - traefik.http.middlewares.${FLOPPY_ROUTER_PREFIX:-floppy}-api-headers.headers.stsIncludeSubdomains=true
+      - traefik.http.middlewares.${FLOPPY_ROUTER_PREFIX:-floppy}-api-headers.headers.contentTypeNosniff=true
+      - traefik.http.middlewares.${FLOPPY_ROUTER_PREFIX:-floppy}-api-headers.headers.frameDeny=true
+      - traefik.http.middlewares.${FLOPPY_ROUTER_PREFIX:-floppy}-api-headers.headers.referrerPolicy=no-referrer
+
+  # The admin web: the static build, served with its security headers by Caddy (deploy/web).
+  web:
+    build:
+      context: ..
+      dockerfile: deploy/web.Dockerfile
+    restart: unless-stopped
+    networks: [proxy]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=${FLOPPY_PROXY_NETWORK:-dokploy-network}
+      - traefik.http.routers.${FLOPPY_ROUTER_PREFIX:-floppy}-web.rule=Host(`${FLOPPY_DOMAIN}`)
+      - traefik.http.routers.${FLOPPY_ROUTER_PREFIX:-floppy}-web.entrypoints=${FLOPPY_TRAEFIK_ENTRYPOINT:-websecure}
+      - traefik.http.routers.${FLOPPY_ROUTER_PREFIX:-floppy}-web.tls=true
+      - traefik.http.routers.${FLOPPY_ROUTER_PREFIX:-floppy}-web.tls.certresolver=${FLOPPY_WEB_CERT_RESOLVER:-letsencrypt}
+      - traefik.http.routers.${FLOPPY_ROUTER_PREFIX:-floppy}-web.service=${FLOPPY_ROUTER_PREFIX:-floppy}-web
+      - traefik.http.services.${FLOPPY_ROUTER_PREFIX:-floppy}-web.loadbalancer.server.port=8080
+      # Plain HTTP only redirects.
+      - traefik.http.routers.${FLOPPY_ROUTER_PREFIX:-floppy}-http.rule=Host(`${FLOPPY_DOMAIN}`)
+      - traefik.http.routers.${FLOPPY_ROUTER_PREFIX:-floppy}-http.entrypoints=${FLOPPY_TRAEFIK_HTTP_ENTRYPOINT:-web}
+      - traefik.http.routers.${FLOPPY_ROUTER_PREFIX:-floppy}-http.service=${FLOPPY_ROUTER_PREFIX:-floppy}-web
+      - traefik.http.routers.${FLOPPY_ROUTER_PREFIX:-floppy}-http.middlewares=${FLOPPY_ROUTER_PREFIX:-floppy}-https
+      - traefik.http.middlewares.${FLOPPY_ROUTER_PREFIX:-floppy}-https.redirectscheme.scheme=https
+      - traefik.http.middlewares.${FLOPPY_ROUTER_PREFIX:-floppy}-https.redirectscheme.permanent=true
+
+  # Build-only: the patched JuiceFS (spike/juicefs-replica), then laid out as the server's
+  # image expects it. Scale 0: built by `up --build`, never run.
+  juicefs-build:
+    build:
+      context: ../spike/juicefs-replica
+      target: out
+    scale: 0
+    network_mode: none
+  juicefs:
+    build:
+      context: .
+      dockerfile: juicefs.Dockerfile
+      additional_contexts:
+        juicefs-out: service:juicefs-build
+    scale: 0
+    network_mode: none
+
+volumes:
+  db-data:
+  meta-data:
+
+networks:
+  # The database and the meta service's API never leave this network. An explicit subnet:
+  # Docker's default address pools run out on hosts with many projects.
+  internal:
+    internal: true
+    ipam:
+      config:
+        - subnet: ${FLOPPY_INTERNAL_SUBNET:-10.250.49.0/24}
+  # Traefik's network: Dokploy's dokploy-network.
+  proxy:
+    name: ${FLOPPY_PROXY_NETWORK:-dokploy-network}
+    external: true
