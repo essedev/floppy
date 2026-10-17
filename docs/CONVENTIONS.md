@@ -21,8 +21,8 @@ Public repository: code, comments, docs and commits are in English.
 
 | Term | Meaning |
 |---|---|
-| Disk, Floppy | What the user sees in the Finder, mounted at `/Volumes/Floppy`. |
-| Volume | The JuiceFS filesystem behind the disk, with a name (`VOLUME_NAME`) and its metadata. One per Mac in the test, one shared with PostgreSQL later. |
+| Disk, Floppy | What the user sees in the Finder, mounted at `/Volumes/Floppy`. A team's disks are its folders, `/Volumes/Floppy/<disk>` (DECISIONS #20). |
+| Volume | The JuiceFS filesystem behind a disk, with a slug name (`VOLUME_NAME`) never shown to the user. One per Mac in the test package; in the team version one per disk, its metadata in its own database of the organization's Valkey. |
 | Metadata | JuiceFS's tree of files and folders. In the test it lives in SQLite inside the VM. |
 | Cache | Blocks already downloaded, on the VM's disk. |
 | Warmup, "Make available" | Preloading a folder into the cache (`floppy warmup`). "Rendi disponibile" in the Italian UI. |
