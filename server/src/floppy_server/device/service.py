@@ -92,13 +92,15 @@ class RegisterResponse(CamelModel):
     """
     The bootstrap, returned once: the device's Valkey user and password (the same on every
     disk's instance), its own S3 key in managed mode (null in manual mode, where the key is
-    in each disk's format), and the disks it may see.
+    in each disk's format), the private CA of the disks' metadata TLS (`metaCa`, null when
+    the certificate is public, as in the configuration), and the disks it may see.
     """
 
     valkey_username: str
     valkey_password: str
     storage_mode: StorageMode
     s3: S3KeyOut | None
+    meta_ca: str | None
     organization: OrganizationRef
     user: UserRef
     disks: list[DiskConfig]
@@ -300,6 +302,7 @@ async def _register(
             valkey_password=password,
             storage_mode=org.storage_mode,
             s3=s3,
+            meta_ca=ctx.settings.meta_ca,
             organization=organization,
             user=user,
             disks=await _disks(db, device),

@@ -81,6 +81,7 @@ async def test_the_bootstrap_registers_a_user_on_each_visible_disk(
     }
     registered = await app.post("/device/register", json=BEAT, headers=device.auth)
     body = registered.json()
+    assert body["metaCa"] is None
     assert (body["organization"], body["user"], body["storageMode"], body["s3"]) == (
         config["organization"],
         config["user"],
@@ -531,6 +532,8 @@ async def test_the_configuration_carries_the_metadata_ca_when_private(
     ctx.settings = make_settings(meta_ca_pem=CA_PEM.replace("\n", "\\n"))
     config = (await app.get("/device/config", headers=device.auth)).json()
     assert config["metaCa"] == CA_PEM + "\n"
+    registered = (await app.post("/device/register", json=BEAT, headers=device.auth)).json()
+    assert registered["metaCa"] == CA_PEM + "\n"
     assert config["valkeyUsername"] == device.valkey_user
     path = tmp_path / "meta-ca.pem"
     path.write_text(CA_PEM + "\n")
