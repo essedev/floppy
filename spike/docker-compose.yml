@@ -230,11 +230,10 @@ services:
   traefik:
     image: traefik:v3.7.15
     profiles: [metatls]
-    # readTimeout 0: Traefik's default (60 s) also closes idle TCP connections,
-    # such as a JuiceFS pool connection or a quiet replication link.
+    # Traefik's default readTimeout bounds only the wait for the ClientHello and is
+    # cleared before the TCP router, so idle connections stay open (deploy/check).
     command: >-
       --entrypoints.meta.address=:6443
-      --entrypoints.meta.transport.respondingTimeouts.readTimeout=0
       --providers.file.filename=/etc/traefik/meta.yml --log.level=INFO
     volumes:
       - ./traefik-meta.yml:/etc/traefik/meta.yml:ro
