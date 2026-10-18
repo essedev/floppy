@@ -65,6 +65,9 @@ check_disks() {
            (if has("bucket_url") | not then empty
             elif $d.bucket_url != null and (($d.bucket_url | type) != "string" or ($d.bucket_url | test("^https?://[^\\s@]+$") | not))
              then bad("disk \($id): bucket_url: an http(s) URL without credentials, or null") else empty end),
+           (if has("bucket_region") | not then empty
+            elif $d.bucket_region != null and (($d.bucket_region | type) != "string" or ($d.bucket_region | test("^[A-Za-z0-9_-]{1,64}$") | not))
+             then bad("disk \($id): bucket_region: 1-64 letters, digits, hyphens, underscores, or null") else empty end),
            (if $d | has("cache_expire_days") | not then empty
             elif ($d.cache_expire_days | type) != "number" or $d.cache_expire_days < 0
              then bad("disk \($id): cache_expire_days: a number of days, 0 for none") else empty end)
@@ -167,13 +170,14 @@ juicefs_url() {
 # configuration changed (a restart of it is harmless: the mount reads from the
 # master meanwhile).
 write_disk() {
-  local id="$1" cache_mb="$2" user pw folder access meta bucket expire host port ca hp changed=""
+  local id="$1" cache_mb="$2" user pw folder access meta bucket region expire host port ca hp changed=""
   user=$(jq -r .meta_user "$DISKS_JSON")
   pw=$(jq -r .meta_password "$SECRETS_JSON")
   folder=$(field "$id" .folder)
   access=$(field "$id" .access)
   meta=$(field "$id" .meta_url)
   bucket=$(field "$id" '.bucket_url // ""')
+  region=$(field "$id" '.bucket_region // ""')
   expire=$(field "$id" '.cache_expire_days // 30')
   hp=${meta#*://}; hp=${hp%/*}
   host=${hp%:*}; port=${hp##*:}
@@ -183,6 +187,8 @@ write_disk() {
     kv ACCESS "$access"
     kv META_URL "$(juicefs_url "$id" "$meta" "$user")"
     kv BUCKET_URL "$bucket"
+    # Only when set: a mount record of an engine without it stays the same.
+    if [ -n "$region" ]; then kv BUCKET_REGION "$region"; fi
     kv CACHE_MB "$cache_mb"
     kv CACHE_EXPIRE "$((expire * 24))h"
   } | put_private "$CONF/$id/mount.env"
@@ -524,13 +530,16 @@ cmd_clear() {
 cmd_mount() {
   local id="${1:?}"
   [ -f "$CONF/$id/mount.env" ] || die "disk $id is not configured"
-  local FOLDER ACCESS META_URL BUCKET_URL CACHE_MB CACHE_EXPIRE
+  local FOLDER ACCESS META_URL BUCKET_URL BUCKET_REGION="" CACHE_MB CACHE_EXPIRE
   # shellcheck disable=SC1090
   . "$CONF/$id/mount.env"
   set -a
   # shellcheck disable=SC1090
   . "$CONF/$id/secret.env"
   set +a
+  # The format keeps the endpoint, not the region: JuiceFS signs a path-style
+  # endpoint with AWS_REGION, else us-east-1, which a Garage elsewhere refuses.
+  if [ -n "$BUCKET_REGION" ]; then export AWS_REGION="$BUCKET_REGION"; fi
   install -d -m 700 "$RUN"
   wanted_record "$id" > "$RUN/$id.mounted"
   cp "$CONF/$id/folder" "$RUN/$id.folder"
