@@ -74,6 +74,7 @@ async def test_the_bootstrap_registers_a_user_on_each_visible_disk(
                 "volumeName": "progetti",
                 "access": "write",
                 "metaUrl": f"{instance_url(ctx, disk['id'])}/1",
+                "region": disk["region"],
                 "cacheExpireDays": 30,
                 "mountPath": "/Volumes/Floppy/Progetti",
             }

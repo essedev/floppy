@@ -76,7 +76,9 @@ class DiskConfig(CamelModel):
     """
     A disk the device may see, as the app mounts it: `metaUrl` is its own instance and
     database, without credentials (the app adds its user and password); `access: read` means
-    a `--read-only` mount.
+    a `--read-only` mount. `region` is the bucket's S3 region, which the device's mount signs
+    with: the format keeps only the endpoint, and JuiceFS takes the region of a path-style
+    endpoint from `AWS_REGION`, else `us-east-1`, which a Garage in another region refuses.
     """
 
     id: UUID
@@ -84,6 +86,7 @@ class DiskConfig(CamelModel):
     volume_name: str
     access: Access
     meta_url: str
+    region: str
     cache_expire_days: int
     mount_path: str
 
@@ -232,6 +235,7 @@ async def _disks(db: AsyncSession, device: Device) -> list[DiskConfig]:
             volume_name=v.volume_name,
             access="write" if access[v.id] == "write" else "read",
             meta_url=device_meta_url(url),
+            region=v.s3_region,
             cache_expire_days=v.cache_expire_days,
             mount_path=mount_path(v.name),
         )
