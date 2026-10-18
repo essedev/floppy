@@ -8,3 +8,4 @@ spike/meta-bench.*.tsv
 __pycache__/
 .claude/worktrees/
 .claude/settings.local.json
+CLAUDE.local.md
