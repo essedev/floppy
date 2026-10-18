@@ -4,7 +4,8 @@
 # scripts/build-engine.sh, in Contents/Resources/engine: the app installs it
 # into ~/.floppy on first run and on updates (app/src-tauri/src/installer.rs).
 # Usage: scripts/build-app.sh [output dir, default dist/app]
-# SIGN_IDENTITY picks the code signing identity, ad hoc ("-") by default.
+# SIGN_IDENTITY picks the code signing identity, ad hoc ("-") by default; releases use
+# "Floppy Self-Signed" (scripts/setup-signing.sh), stable across versions.
 # Needs Docker running (the engine), pnpm and Rust.
 set -euo pipefail
 cd "$(dirname "$0")/.."

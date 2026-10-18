@@ -3,15 +3,18 @@
 # publishes a GitHub release with the DMG and writes the cask for it into the
 # tap, essedev/homebrew-floppy. Everything it does is public: run it by hand.
 # Usage: scripts/release-app.sh
+# Signed with the stable self-signed identity of scripts/setup-signing.sh; an ad hoc
+# release is SIGN_IDENTITY=- scripts/release-app.sh.
 # The version is the one in app/src-tauri/tauri.conf.json, app/package.json
 # and app/Cargo.toml, bumped together beforehand. A version already on GitHub
 # but missing from the tap only updates the tap.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-REPO=essedev/fluix
+REPO=essedev/floppy
 TAP=essedev/homebrew-floppy
 GH_ACCOUNT=essedev
+SIGN_IDENTITY="${SIGN_IDENTITY:-Floppy Self-Signed}"
 
 fail() { echo "release: $*" >&2; exit 1; }
 
@@ -60,7 +63,13 @@ elif $tagged || $released; then
   fail "$tag is half published (tag $tagged, release $released): sort it out by hand"
 fi
 
-dmg=$(scripts/build-app.sh)
+# A stable identity: setup-signing.sh checks the certificate, the keychain in the search
+# list, the unlock and the trust.
+if [ "$SIGN_IDENTITY" != "-" ]; then
+  bash scripts/setup-signing.sh >&2 \
+    || fail "signing identity '$SIGN_IDENTITY' not ready (see above), or release ad hoc: SIGN_IDENTITY=- scripts/release-app.sh"
+fi
+dmg=$(SIGN_IDENTITY="$SIGN_IDENTITY" scripts/build-app.sh)
 sha=$(shasum -a 256 "$dmg" | cut -d' ' -f1)
 
 git push origin main
