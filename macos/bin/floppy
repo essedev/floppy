@@ -34,6 +34,8 @@ DISKS_FILE="$FLOPPY_HOME/disks.json"
 # The password between this Mac and its own VM, made by setup.
 SMB_SECRET="$FLOPPY_HOME/smb-password"
 LOCK_FILE="$FLOPPY_HOME/engine.lock"
+# The VM address the share was last mounted from (share_mount).
+SHARE_ADDRESS="$FLOPPY_HOME/share-address"
 # How often the agent checks the VM, the share and the Mac's free space.
 TICK_SECONDS=120
 
@@ -118,11 +120,24 @@ take_lock() {
   /usr/bin/lockf -s -t 900 9 || die "another floppy command is still running"
 }
 
+# This install's share, as "<VM address> <mount point>". A development VM
+# beside the real install mounts its own //drive@<its address>/Floppy, so the
+# share is found by the address it was mounted from (SHARE_ADDRESS), never
+# by name alone: a dev VM's `disks clear` would otherwise unmount the real
+# disk by force. A share mounted before the address was recorded is taken by
+# the real install only, as before.
+share_mount() {
+  local ip pat
+  ip=$(cat "$SHARE_ADDRESS" 2>/dev/null || true)
+  case "$ip" in
+    "" | *[!0-9.]*) [ "$VM" = floppy ] || return 0; pat='[0-9.]*' ;;
+    *) pat=$(printf '%s' "$ip" | sed 's/\./\\./g') ;;
+  esac
+  /sbin/mount | sed -n "s|^//drive@\($pat\)/$SHARE on \(.*\) (smbfs.*|\1 \2|p" | head -1
+}
 # Where macOS mounted the share. Usually /Volumes/Floppy, but macOS picks
 # Floppy-1 and so on when the name is taken, so it is never assumed.
-mount_point() {
-  /sbin/mount | sed -n "s|^//drive@[0-9.]*/$SHARE on \(.*\) (smbfs.*|\1|p" | head -1
-}
+mount_point() { share_mount | cut -d' ' -f2-; }
 is_mounted() { [ -n "$(mount_point)" ]; }
 
 vm_ip() {
@@ -258,6 +273,8 @@ unmount_share() {
 # force.
 mount_share() {
   if is_mounted; then
+    # A share mounted by an earlier version: from now on found by its address.
+    [ -s "$SHARE_ADDRESS" ] || share_mount | cut -d' ' -f1 > "$SHARE_ADDRESS"
     [ "${1:-}" = keep ] && return 0
     for _ in 1 2 3; do
       mount_alive && return 0
@@ -278,11 +295,15 @@ mount_share() {
   # CapCut projects point at media by full path: the disk must come back as
   # /Volumes/Floppy, never Floppy-1. macOS picks -1 while the folder
   # of the previous mount still exists, so wait for it to go.
+  # Another install's share there (a development VM's beside the real one)
+  # never goes by waiting: this one lands on Floppy-1.
   for _ in $(seq 30); do
     [ -e "/Volumes/$SHARE" ] || break
+    /sbin/mount | grep -q " on /Volumes/$SHARE (smbfs" && break
     rmdir "/Volumes/$SHARE" 2>/dev/null || true
     sleep 1
   done
+  printf '%s\n' "$ip" > "$SHARE_ADDRESS"
   /usr/bin/osascript -e "mount volume \"smb://drive:$(smb_password)@$ip/$SHARE\"" >/dev/null
   is_mounted || die "mount failed"
   if [ "$(mount_point)" != "/Volumes/$SHARE" ]; then
