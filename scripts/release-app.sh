@@ -1,6 +1,7 @@
 #!/bin/bash
 # Releases the app: builds the DMG (scripts/build-app.sh), tags the commit,
-# publishes a GitHub release with the DMG and writes the cask for it into the
+# publishes a GitHub release with the DMG and notes from the commits since the previous tag
+# (scripts/release-notes.sh), and writes the cask for it into the
 # tap, essedev/homebrew-floppy. Everything it does is public: run it by hand.
 # Usage: scripts/release-app.sh
 # Signed with the stable self-signed identity of scripts/setup-signing.sh; an ad hoc
@@ -75,7 +76,11 @@ sha=$(shasum -a 256 "$dmg" | cut -d' ' -f1)
 git push origin main
 git tag -a "$tag" -m "Floppy $tag"
 git push origin "$tag"
-gh release create "$tag" "$dmg" --repo "$REPO" --title "Floppy $tag" \
-  --notes "Install: brew install --cask essedev/floppy/floppy"
+# The notes come from the Conventional Commits since the previous tag (trunk-based: no pull
+# requests, so --generate-notes would only give the comparison link).
+notes=$(mktemp)
+scripts/release-notes.sh "$tag" > "$notes"
+gh release create "$tag" "$dmg" --repo "$REPO" --title "Floppy $tag" --notes-file "$notes"
+rm -f "$notes"
 update_tap "$sha"
 echo "Released Floppy $tag: brew install --cask essedev/floppy/floppy" >&2
