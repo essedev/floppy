@@ -27,11 +27,14 @@ class Settings(BaseSettings):
 
     # How Traefik reaches this container (its name or alias on Traefik's network), the
     # entrypoint the routes attach to (Dokploy's HTTPS one is `websecure`), the certificate
-    # resolver that obtains `*.<domain>` (empty: the TLS store's default certificate) and the
-    # prefix of the routers' names, unique per Floppy instance on a shared Traefik.
+    # resolver (empty: the TLS store's default certificate) and the prefix of the routers'
+    # names, unique per Floppy instance on a shared Traefik. `cert_scope` is what the
+    # resolver obtains: `wildcard`, one `*.<domain>` (a DNS challenge), or `host`, one
+    # certificate per disk's name (an HTTP challenge, with the names resolving to Traefik).
     upstream_host: str = "meta"
     entrypoint: str = "websecure"
     cert_resolver: str = ""
+    cert_scope: Literal["wildcard", "host"] = "wildcard"
     router_prefix: str = "floppy-meta"
 
     # The service's own API.

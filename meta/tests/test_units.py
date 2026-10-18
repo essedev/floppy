@@ -103,9 +103,23 @@ def test_routes_cover_the_running_instances_by_name_on_the_https_entrypoint(
     }
     service = config["tcp"]["services"][f"floppy-meta-{a.label}"]
     assert service == {"loadBalancer": {"servers": [{"address": "floppy-meta:7400"}]}}
+
     assert device_url(settings, a) == f"rediss://{a.label}.meta.floppy.test:443"
     # The disk's name never reaches a host name or a route.
     assert "disk-a" not in str(config)
     # Without a resolver the TLS store's default certificate serves.
     plain = traefik_config(make_settings(tmp_path), [a])
     assert plain["tcp"]["routers"][f"floppy-meta-{a.label}"]["tls"] == {}
+
+
+def test_routes_ask_one_certificate_per_disk_when_the_scope_is_host(tmp_path: Path) -> None:
+    settings = make_settings(tmp_path, cert_resolver="letsencrypt", cert_scope="host")
+    store = Store(settings)
+    a = store.create("disk-a", None)
+    b = store.create("disk-b", None)
+    routers = traefik_config(settings, [a, b])["tcp"]["routers"]
+    for instance in (a, b):
+        assert routers[f"floppy-meta-{instance.label}"]["tls"] == {
+            "certResolver": "letsencrypt",
+            "domains": [{"main": f"{instance.label}.meta.floppy.test"}],
+        }

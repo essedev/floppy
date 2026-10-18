@@ -14,6 +14,9 @@
 # TLS ClientHello on a TCP router, then Traefik clears the deadline, so idle Valkey
 # connections stay open (docs/ARCHITECTURE.md, "Deploy"; measured by deploy/check).
 
+# With FLOPPY_META_CERT_SCOPE=host and Dokploy's letsencrypt resolver (one certificate per
+# disk, no DNS token), only the providers block below is needed.
+
 certificatesResolvers:
   # The wildcard *.meta.<domain>: only a DNS challenge can obtain one.
   floppy-dns:

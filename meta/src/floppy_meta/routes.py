@@ -25,20 +25,22 @@ def device_url(settings: Settings, instance: Instance) -> str:
 
 def traefik_config(settings: Settings, instances: list[Instance]) -> dict[str, Any]:
     """The TCP routers and services of every instance that should run."""
-    tls: dict[str, Any] = {}
-    if settings.cert_resolver:
-        tls = {
-            "certResolver": settings.cert_resolver,
-            # One wildcard for every instance: one certificate to obtain and renew, and no
-            # instance's name in certificate transparency logs.
-            "domains": [{"main": f"*.{settings.domain}"}],
-        }
     routers: dict[str, Any] = {}
     services: dict[str, Any] = {}
     for instance in instances:
         if instance.desired != "running":
             continue
         key = f"{settings.router_prefix}-{instance.label}"
+        tls: dict[str, Any] = {}
+        if settings.cert_resolver:
+            # A wildcard is one certificate to obtain and renew; per host, each disk's opaque
+            # label reaches certificate transparency logs, never its name.
+            main = (
+                f"*.{settings.domain}"
+                if settings.cert_scope == "wildcard"
+                else host_of(settings, instance)
+            )
+            tls = {"certResolver": settings.cert_resolver, "domains": [{"main": main}]}
         routers[key] = {
             "entryPoints": [settings.entrypoint],
             "rule": f"HostSNI(`{host_of(settings, instance)}`)",
