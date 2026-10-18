@@ -31,6 +31,7 @@ from floppy_server.errors import ApiError, invalid_state, not_found, validation
 from floppy_server.infra.juicefs import FormatError, S3Credentials
 from floppy_server.infra.meta import MetaServiceError, device_meta_url
 from floppy_server.infra.providers import ProviderError
+from floppy_server.infra.storage import ProbeResult
 from floppy_server.keys.managed import control_plane_key
 from floppy_server.keys.schemas import S3KeyIn
 from floppy_server.keys.service import (
@@ -285,6 +286,7 @@ async def create_disk(ctx: Context, actor: Actor, body: CreateDiskRequest) -> Di
         raise not_found()
     endpoint, region, bucket = _storage_of(org_now, body)
     pasted: S3Credentials | None = None
+    probed: ProbeResult | None = None
     if body.storage is not None and bucket is not None:
         pasted = S3Credentials(body.storage.access_key_id.strip(), body.storage.secret_key)
         result = await probe(
@@ -292,6 +294,7 @@ async def create_disk(ctx: Context, actor: Actor, body: CreateDiskRequest) -> Di
         )
         if not result.ok:
             raise probe_failed(result.code, result.request)
+        probed = result
     who = AuditActor.person(actor.user_id, actor.label)
     async with ctx.sessions() as db, db.begin():
         await lock_organization(db, actor.organization_id)
@@ -336,7 +339,13 @@ async def create_disk(ctx: Context, actor: Actor, body: CreateDiskRequest) -> Di
         )
         db.add(volume)
         await db.flush()
-        db.add(VolumeStatus(volume_id=volume.id, organization_id=org.id))
+        status = VolumeStatus(volume_id=volume.id, organization_id=org.id)
+        if probed is not None:
+            # The write with the pasted key just succeeded: the disk's storage is tested.
+            status.storage_state, status.storage_probed_at = "ok", utcnow()
+            status.bucket_versioning = probed.versioning
+            status.bucket_old_versions_days = probed.old_versions_days
+        db.add(status)
         record(
             db, org.id, "disk_created", who, Target("disk", volume.id, body.name),
             {"blockSize": "1 MB"},

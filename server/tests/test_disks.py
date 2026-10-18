@@ -15,7 +15,7 @@ from floppy_server.context import Context
 from floppy_server.disks.service import derive_volume_name, run_disk_formats
 from floppy_server.infra.metadata import VolumeCounters
 from floppy_server.infra.storage import FakeStorageProber
-from floppy_server.models import AuditEvent, MetaInstance, S3Key, Volume
+from floppy_server.models import AuditEvent, MetaInstance, S3Key, Volume, VolumeStatus
 from tests.conftest import ClientFactory, Org
 from tests.helpers import (
     create_disk,
@@ -65,6 +65,13 @@ async def test_create_probes_the_pasted_key_then_the_job_gives_the_disk_its_inst
     assert "volumeName" not in created
     assert isinstance(ctx.prober, FakeStorageProber)
     assert ctx.prober.probes == [("studio-archivio", "AKIATESTDISK00001")]
+    # That write tested the storage: the disk is not "never probed" while it is created.
+    async with owner_engine.connect() as conn:
+        probed = (
+            await conn.execute(select(VolumeStatus.storage_state, VolumeStatus.storage_probed_at))
+        ).one()
+    assert probed[0] == "ok"
+    assert probed[1] is not None
     assert await run_disk_formats(ctx) == 1
     disk = (await admin.get(f"/disks/{created['id']}")).json()
     assert disk["state"] == "ready"
@@ -72,6 +79,8 @@ async def test_create_probes_the_pasted_key_then_the_job_gives_the_disk_its_inst
     assert (disk["blockSizeKb"], disk["trashDays"], disk["cache"]) == (1024, 14, {"expireDays": 30})
     assert disk["createdBy"] == "Giulia"
     assert (await admin.get("/disks")).json() == [disk]
+    storage = (await admin.get("/health")).json()["disks"][0]["storage"]
+    assert (storage["state"], storage["lastProbeAt"] is not None) == ("ok", True)
     # Manual: the disk's key goes into its own instance's format.
     formatted = formatter(ctx).formats[(instance_url(ctx, created["id"]), 1)]
     assert (formatted["name"], formatted["access_key_id"], formatted["trash_days"]) == (
