@@ -105,6 +105,8 @@ pub struct MountReport {
     pub mounted_disk_ids: Vec<String>,
     /// `replica`, `master` or `offline`: the worst among the mounted disks.
     pub replica_mode: Option<String>,
+    /// The largest lag among the mounted disks, an upper bound.
+    pub replica_lag_ms: Option<u64>,
 }
 
 /// The Keychain record of a signed-in Mac.
@@ -884,8 +886,10 @@ impl Account {
                             inner.last_beat = Some(Instant::now());
                             inner.credentials = Some(creds.clone());
                             inner.config = Some(config.clone());
-                            inner.config_due = false;
-                            inner.last_config = Some(Instant::now());
+                            // The register answer has no metadata CA: the
+                            // configuration, read at the next tick, brings it.
+                            inner.config_due = true;
+                            inner.last_config = None;
                             // A new registration reconciles whatever the last left.
                             inner.clear_owed = false;
                             true
@@ -932,9 +936,10 @@ impl Account {
         let mounts = self.team.report();
         let beat = HeartbeatRequest {
             versions: self.versions.clone(),
-            replica: mounts
-                .replica_mode
-                .map(|mode| ReplicaReport { mode, lag_ms: None }),
+            replica: mounts.replica_mode.map(|mode| ReplicaReport {
+                mode,
+                lag_ms: mounts.replica_lag_ms,
+            }),
             s3_access_key_tail: tail,
             mounted_disk_ids: mounts.mounted_disk_ids,
         };

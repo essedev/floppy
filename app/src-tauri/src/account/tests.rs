@@ -719,12 +719,17 @@ fn an_access_change_in_the_heartbeat_reads_the_configuration_again() {
     *r.team.mounts.lock().unwrap() = MountReport {
         mounted_disk_ids: vec!["0192-a".into()],
         replica_mode: Some("replica".into()),
+        replica_lag_ms: Some(500),
     };
     push(&r.fake.heartbeat, beat("active", &[("0192-a", "read")]));
     r.account.tick();
     let sent = r.fake.beats.lock().unwrap()[0].clone();
     assert_eq!(sent.mounted_disk_ids, ["0192-a"]);
-    assert_eq!(sent.replica.unwrap().mode, "replica");
+    let replica = sent.replica.unwrap();
+    assert_eq!(
+        (replica.mode.as_str(), replica.lag_ms),
+        ("replica", Some(500))
+    );
     assert_eq!(sent.s3_access_key_tail, None, "manual: no key of its own");
     // Lowered to read: the next tick reads and hands the new answer.
     push(

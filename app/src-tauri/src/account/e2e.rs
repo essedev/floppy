@@ -236,7 +236,7 @@ fn status_with(dir: &Path, mounted: &[(&str, &str)]) {
         .iter()
         .map(|(id, folder)| {
             format!(
-                r#"{{"id":"{id}","folder":"{folder}","access":"write","enabled":true,"state":"mounted","mounted_access":"write","pending":null,"cache_used_mb":1,"cache_size_mb":10240,"replica":"up","mode":"replica","online":true}}"#
+                r#"{{"id":"{id}","folder":"{folder}","access":"write","enabled":true,"state":"mounted","mounted_access":"write","pending":null,"cache_used_mb":1,"cache_size_mb":10240,"replica":"up","mode":"replica","online":true,"lag_ms":500,"listed":true}}"#
             )
         })
         .collect();
@@ -433,6 +433,7 @@ fn e2e_against_the_local_stack() {
     assert!(account.view().reachable);
     let device = admin.device(&meta_user);
     assert_eq!(device["replica"]["mode"], "replica", "{device}");
+    assert_eq!(device["replica"]["lagMs"], 500, "{device}");
 
     // 3. Access raised on one disk, a second disk given: the heartbeat sees
     //    it, the configuration is read again and applied.
@@ -443,6 +444,10 @@ fn e2e_against_the_local_stack() {
             && access_of(f, &showreel).as_deref() == Some("read")
     });
     assert_eq!(file["disks"].as_array().unwrap().len(), 2);
+    // The configuration read after the registration: the same user, the CA
+    // the server has (none on this stack).
+    assert_eq!(file["meta_user"], meta_user.as_str());
+    assert_eq!(file["meta_ca"], serde_json::Value::Null);
     // Taken away: gone from the file.
     admin.set_access(&showreel, &person, "none");
     mac.wait_file("taken away", |f| access_of(f, &showreel).is_none());

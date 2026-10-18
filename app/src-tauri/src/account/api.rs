@@ -238,8 +238,15 @@ pub struct DiskConfig {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DeviceConfig {
+    /// The Mac's Valkey user; also in the register answer, from which the
+    /// app keeps it, so an older server may leave it out.
+    #[serde(default)]
+    pub valkey_username: Option<String>,
     pub storage_mode: String,
     pub s3_access_key_tail: Option<String>,
+    /// PEM of the private CA of the disks' metadata TLS; null for a public one.
+    #[serde(default)]
+    pub meta_ca: Option<String>,
     pub organization: OrganizationRef,
     pub user: UserRef,
     pub disks: Vec<DiskConfig>,
@@ -282,8 +289,11 @@ impl RegisterResponse {
     /// The same facts as `GET /device/config` would give now.
     pub fn config(&self) -> DeviceConfig {
         DeviceConfig {
+            valkey_username: Some(self.valkey_username.clone()),
             storage_mode: self.storage_mode.clone(),
             s3_access_key_tail: self.s3.as_ref().map(|k| key_tail(&k.access_key_id)),
+            // Not in the register answer: the configuration read right after brings it.
+            meta_ca: None,
             organization: self.organization.clone(),
             user: self.user.clone(),
             disks: self.disks.clone(),
@@ -585,11 +595,14 @@ mod tests {
         assert_eq!(config.disks[0].access, Access::Read);
 
         let config: DeviceConfig = serde_json::from_str(
-            r#"{"storageMode":"manual","s3AccessKeyTail":null,
+            r#"{"valkeyUsername":"floppy_d_1","storageMode":"manual","s3AccessKeyTail":null,
+            "metaCa":"-----BEGIN CERTIFICATE-----\nx\n-----END CERTIFICATE-----\n",
             "organization":{"id":"o","name":"Studio"},"user":{"email":"a@b.it","name":"a@b.it"},"disks":[]}"#,
         )
         .unwrap();
         assert_eq!(config.storage_mode, "manual");
+        assert_eq!(config.valkey_username.as_deref(), Some("floppy_d_1"));
+        assert!(config.meta_ca.unwrap().starts_with("-----BEGIN"));
 
         let beat: HeartbeatAnswer =
             serde_json::from_str(r#"{"state":"active","disks":[{"id":"d1","access":"write"}]}"#)

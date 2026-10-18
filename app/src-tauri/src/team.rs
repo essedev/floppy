@@ -116,7 +116,8 @@ pub fn write(home: &Path, file: &DisksFile) -> std::io::Result<()> {
 
 /// The file for the server's answer: every disk the Mac may see, in the
 /// answer's order, with the person's choice and the Mac-side settings of the
-/// previous file kept. A new disk starts turned on.
+/// previous file kept. A new disk starts turned on. The metadata CA is the
+/// answer's; `meta_user` the answer's when it carries one.
 pub fn build(
     config: &DeviceConfig,
     meta_user: &str,
@@ -158,8 +159,11 @@ pub fn build(
     }
     let file = DisksFile {
         version: 1,
-        meta_user: meta_user.to_string(),
-        meta_ca: previous.and_then(|p| p.meta_ca.clone()),
+        meta_user: config
+            .valkey_username
+            .clone()
+            .unwrap_or_else(|| meta_user.to_string()),
+        meta_ca: config.meta_ca.clone(),
         cache_max_mb: previous.map_or(DEFAULT_CACHE_MAX_MB, |p| p.cache_max_mb),
         reserve_mb: previous.map_or(DEFAULT_RESERVE_MB, |p| p.reserve_mb),
         disks,
@@ -248,8 +252,10 @@ pub(crate) mod tests {
 
     pub fn config(disks: Vec<DiskConfig>) -> DeviceConfig {
         DeviceConfig {
+            valkey_username: None,
             storage_mode: "manual".into(),
             s3_access_key_tail: None,
+            meta_ca: None,
             organization: OrganizationRef {
                 id: "o1".into(),
                 name: "Studio Esempio".into(),
@@ -293,6 +299,13 @@ pub(crate) mod tests {
         ]);
         let (second, _) = build(&c2, "floppy_d_1", Some(&turned_off));
         assert_eq!(second.reserve_mb, 30720);
+        assert_eq!(second.meta_ca, None);
+        let mut c3 = c2.clone();
+        c3.meta_ca = Some("PEM".into());
+        c3.valkey_username = Some("floppy_d_2".into());
+        let (third, _) = build(&c3, "floppy_d_1", Some(&second));
+        assert_eq!(third.meta_ca.as_deref(), Some("PEM"));
+        assert_eq!(third.meta_user, "floppy_d_2");
         assert_eq!(second.disks[0].access, Access::Write);
         assert!(!second.disks[0].enabled);
         assert!(second.disks[1].enabled && second.disks[2].enabled);

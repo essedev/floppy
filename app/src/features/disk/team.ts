@@ -24,6 +24,9 @@ export function diskLook(d: DiskView, applying: boolean): DiskLook {
   const cache = d.cache_used_mb != null && d.cache_used_mb > 0 ? t.cache(gbUnit(d.cache_used_mb)) : null;
   const line = (...parts: (string | null)[]) => parts.filter(Boolean).join(" · ");
 
+  if (!d.listed) {
+    return { led: "dl", blink: false, readout: t.readout.removed, line: t.line.removed, dim: false };
+  }
   if (!d.enabled) {
     if (d.pending === "remove") {
       return { led: "dl", blink: false, readout: t.readout.leaving, line: t.line.leaving, dim: false };

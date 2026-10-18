@@ -21,6 +21,9 @@ export function faceFor(s: DiskStatus): FaceProps {
   const right = used != null && limit != null ? it.face.usage(gb(used), gb(limit)) : "";
   switch (s.state) {
     case "connected":
+      // A team disk that stays failed lights the faceplate red; the others
+      // keep working and the row says which one.
+      if ((s.team?.failing ?? 0) > 0) return { led: "err", readout: it.face.problem, fill, right };
       return isBusy(s)
         ? { led: "dl", blink: true, readout: it.face.activity, fill, right, activity: true }
         : { led: "ok", readout: it.face.connected, fill, right };

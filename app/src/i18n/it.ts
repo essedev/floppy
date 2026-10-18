@@ -21,6 +21,7 @@ export const it = {
     notInstalled: "NUOVO",
     needsSetup: "DA PREPARARE",
     noDisks: "NESSUN DISCO",
+    problem: "PROBLEMA",
     error: "ERRORE",
     ready: "PRONTO",
     usage: (used: string, limit: string) => `${used} / ${limit} GB`,
@@ -31,6 +32,10 @@ export const it = {
     label: "Pannello di Floppy",
     connected: { title: "Floppy è collegato", body: "I progetti sono nel Finder, sotto Floppy." },
     connectedTeam: { title: "Floppy è collegato", body: "I dischi del team sono nel Finder, dentro Floppy." },
+    failing: {
+      title: (n: number) => (n === 1 ? "1 disco con un problema" : `${n} dischi con un problema`),
+      body: "Gli altri sono nel Finder. Riprovo da solo: il dettaglio è sulla riga qui sotto.",
+    },
     noDisks: {
       signed_out: {
         title: "Accedi per vedere i dischi",
@@ -173,6 +178,7 @@ export const it = {
       failed: "ERRORE",
       off: "SPENTO",
       leaving: "IN USO",
+      removed: "TOLTO",
       unknown: "IN VERIFICA",
     },
     line: {
@@ -188,6 +194,7 @@ export const it = {
       stopped: "Non è collegato: riprovo da solo",
       off: "Spento su questo Mac",
       leaving: "Si spegne appena chiudi i file aperti",
+      removed: "Il team te l'ha tolto: sparisce appena chiudi i file aperti",
     },
     cache: (size: string) => `${size} su questo Mac`,
     actions: (name: string) => `Azioni per ${name}`,

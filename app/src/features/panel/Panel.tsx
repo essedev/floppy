@@ -153,9 +153,10 @@ function StatusSection({ status }: { status: DiskStatus }) {
           </>
         );
       } else {
+        const failing = team?.failing ?? 0;
         const copy = status.mode === "team" ? it.panel.connectedTeam : it.panel.connected;
-        title = copy.title;
-        body = copy.body;
+        title = failing > 0 ? it.panel.failing.title(failing) : copy.title;
+        body = failing > 0 ? it.panel.failing.body : copy.body;
         actions = finder;
       }
       break;
@@ -596,16 +597,19 @@ function DiskRow({ disk, status, applying, menuOpen, expanded, onMenu, onCloseMe
               </MenuItem>
             </>
           )}
-          <MenuItem
-            disabled={toggle.isPending}
-            onClick={() => {
-              onCloseMenu();
-              if (disk.enabled) setConfirm("off");
-              else toggle.mutate(true);
-            }}
-          >
-            {disk.enabled ? it.disks.turnOff : it.disks.turnOn}
-          </MenuItem>
+          {/* A disk the team took away is not the person's to turn on or off. */}
+          {disk.listed && (
+            <MenuItem
+              disabled={toggle.isPending}
+              onClick={() => {
+                onCloseMenu();
+                if (disk.enabled) setConfirm("off");
+                else toggle.mutate(true);
+              }}
+            >
+              {disk.enabled ? it.disks.turnOff : it.disks.turnOn}
+            </MenuItem>
+          )}
         </div>
       )}
       {confirm === "off" && (

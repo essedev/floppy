@@ -198,6 +198,17 @@ pub struct EngineDisk {
     pub mode: Option<MetaMode>,
     /// False only when offline, null when not mounted.
     pub online: Option<bool>,
+    /// The replica's lag, an upper bound; null when not mounted.
+    #[serde(default)]
+    pub lag_ms: Option<u64>,
+    /// False for a disk the disks file no longer lists that the VM still
+    /// has (its removal waiting while it is in use). An older engine omits it.
+    #[serde(default = "listed_default")]
+    pub listed: bool,
+}
+
+fn listed_default() -> bool {
+    true
 }
 
 /// What `floppy disks apply` prints.
@@ -760,6 +771,27 @@ pub(crate) mod tests {
         assert!(r.team_disks().is_empty());
         assert!(r.restart_needed());
         assert_eq!(derive(&Ok(r), None).0, DiskState::Off);
+    }
+
+    #[test]
+    fn parses_lag_and_unlisted_disks() {
+        let gone = disk_with(
+            DISK_A,
+            &[
+                ("listed", "false"),
+                ("enabled", "false"),
+                ("pending", "\"remove\""),
+                ("lag_ms", "512"),
+            ],
+        );
+        let r = parse_report(&team_status(&[DISK_A, &gone], "")).unwrap();
+        let (a, b) = (&r.team_disks()[0], &r.team_disks()[1]);
+        assert!(a.listed, "an engine without the field lists the disk");
+        assert_eq!(a.lag_ms, None);
+        assert!(!b.listed);
+        assert_eq!((b.lag_ms, b.pending), (Some(512), Some(Pending::Remove)));
+        // A disk on its way out is not one the person still uses.
+        assert_eq!(derive(&Ok(r), None).0, DiskState::Connected);
     }
 
     #[test]

@@ -38,6 +38,10 @@ pub const LIST_TIMEOUT: Duration = Duration::from_secs(3);
 /// How often `disks apply` runs again while a disk waits for a remount, and
 /// after a failed apply (docs/ARCHITECTURE.md, "Team disks": about a minute).
 pub const APPLY_RETRY: Duration = Duration::from_secs(60);
+/// A disk counts as having a problem once it has stayed failed this long:
+/// systemd retries a failed mount every 5 s, and a new disk's metadata route
+/// becomes reachable within seconds of its creation.
+pub const FAILED_GRACE: Duration = Duration::from_secs(20);
 
 /// The job the app is running.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -100,6 +104,9 @@ pub struct TeamView {
     /// The account has disks but this Mac runs the single-user volume, which
     /// the team engine refuses to share a VM with.
     pub refused_single: bool,
+    /// Disks the person uses that have stayed failed past `FAILED_GRACE`:
+    /// the faceplate shows a problem while the others work.
+    pub failing: u32,
 }
 
 /// One disk: the person's choice from the disks file, the rest from the engine.
@@ -120,6 +127,9 @@ pub struct DiskView {
     pub replica: Option<Replica>,
     pub meta_mode: Option<MetaMode>,
     pub online: Option<bool>,
+    pub lag_ms: Option<u64>,
+    /// False: no longer given to this person, removed once nothing is open.
+    pub listed: bool,
 }
 
 /// Where the install and `floppy setup` are, in the four steps the first-run
@@ -217,6 +227,10 @@ struct TeamSync {
     generation: u64,
     /// `APPLY_RETRY`, shorter in tests.
     retry: Duration,
+    /// Since when each disk has been reported failed, until it mounts.
+    failed_since: std::collections::HashMap<String, Instant>,
+    /// `FAILED_GRACE`, shorter in tests.
+    grace: Duration,
 }
 
 struct Inner {
@@ -287,6 +301,7 @@ impl Core {
                 team: TeamSync {
                     file,
                     retry: APPLY_RETRY,
+                    grace: FAILED_GRACE,
                     ..TeamSync::default()
                 },
             }),
@@ -392,6 +407,8 @@ impl Core {
                 replica: e.map(|d| d.replica),
                 meta_mode: e.and_then(|d| d.mode),
                 online: e.and_then(|d| d.online),
+                lag_ms: e.and_then(|d| d.lag_ms),
+                listed: e.is_none_or(|d| d.listed),
             }
         };
         let mut disks: Vec<DiskView> = match (&t.file, &t.plan) {
@@ -421,6 +438,15 @@ impl Core {
             error: t.error.clone(),
             restart_needed: report.is_some_and(EngineReport::restart_needed),
             refused_single: mode == Some(Mode::Single) && t.plan.is_some(),
+            failing: reported
+                .iter()
+                .filter(|d| d.enabled && d.listed && d.state != RunState::Mounted)
+                .filter(|d| {
+                    t.failed_since
+                        .get(&d.id)
+                        .is_some_and(|since| since.elapsed() >= t.grace)
+                })
+                .count() as u32,
         })
     }
 
@@ -457,6 +483,26 @@ impl Core {
         inner.checked_ms = now_ms();
         if !inner.team.applying && !inner.team.clearing {
             inner.team.file = team::read(&self.home).ok().flatten();
+        }
+        // A failure lasts until the disk mounts: a unit retrying is reported
+        // failed and starting by turns.
+        let disks: Vec<EngineDisk> = inner
+            .report
+            .as_ref()
+            .and_then(|r| r.as_ref().ok())
+            .map(|r| r.team_disks().to_vec())
+            .unwrap_or_default();
+        let failed = &mut inner.team.failed_since;
+        failed.retain(|id, _| {
+            disks
+                .iter()
+                .any(|d| &d.id == id && d.enabled && d.state != RunState::Mounted)
+        });
+        for d in disks
+            .iter()
+            .filter(|d| d.enabled && d.state == RunState::Failed)
+        {
+            failed.entry(d.id.clone()).or_insert_with(Instant::now);
         }
         self.publish(&mut inner);
     }
@@ -833,11 +879,12 @@ impl Core {
 impl TeamDisks for Core {
     fn configure(&self, config: &DeviceConfig, credentials: &DiskCredentials) {
         let mut inner = self.lock();
-        let same = inner
-            .team
-            .plan
-            .as_ref()
-            .is_some_and(|p| p.config.disks == config.disks && &p.credentials == credentials);
+        let same = inner.team.plan.as_ref().is_some_and(|p| {
+            p.config.disks == config.disks
+                && p.config.meta_ca == config.meta_ca
+                && p.config.valkey_username == config.valkey_username
+                && &p.credentials == credentials
+        });
         inner.team.plan = Some(Plan {
             config: config.clone(),
             credentials: credentials.clone(),
@@ -921,6 +968,7 @@ pub fn mount_report(disks: &[EngineDisk]) -> MountReport {
     MountReport {
         mounted_disk_ids: mounted.iter().map(|d| d.id.clone()).collect(),
         replica_mode: replica_mode.map(str::to_string),
+        replica_lag_ms: mounted.iter().filter_map(|d| d.lag_ms).max(),
     }
 }
 
@@ -1358,8 +1406,10 @@ esac"#
 
     fn plan(disks: &[(&str, &str, ApiAccess)], managed: bool) -> (DeviceConfig, DiskCredentials) {
         let config = DeviceConfig {
+            valkey_username: None,
             storage_mode: if managed { "managed" } else { "manual" }.into(),
             s3_access_key_tail: None,
+            meta_ca: None,
             organization: OrganizationRef {
                 id: "o1".into(),
                 name: "Studio Esempio".into(),
@@ -1569,6 +1619,82 @@ esac"#
     }
 
     #[test]
+    fn a_failure_counts_only_past_the_grace_and_until_it_mounts() {
+        let r = team_rig();
+        r.core.lock().team.grace = Duration::from_millis(300);
+        let failed = disk_with(
+            DISK_A,
+            &[
+                ("state", "\"failed\""),
+                ("mode", "null"),
+                ("online", "null"),
+            ],
+        );
+        let other = disk_with(DISK_A, &[("id", "\"b\""), ("folder", "\"B\"")]);
+        r.status(&team_status(&[&failed, &other], ""));
+        r.core.refresh();
+        // A new disk retrying while its route comes up: not a problem yet.
+        assert_eq!(r.core.status().team.unwrap().failing, 0);
+        thread::sleep(Duration::from_millis(350));
+        // Retrying: starting, then failed again; the clock keeps running.
+        let retrying = disk_with(DISK_A, &[("state", "\"starting\"")]);
+        r.status(&team_status(&[&retrying, &other], ""));
+        r.core.refresh();
+        let s = r.core.status();
+        assert_eq!(s.team.unwrap().failing, 1);
+        assert_eq!(s.state, DiskState::Connected, "the others work");
+        r.status(&team_status(&[DISK_A, &other], ""));
+        r.core.refresh();
+        assert_eq!(r.core.status().team.unwrap().failing, 0);
+    }
+
+    #[test]
+    fn an_unlisted_disk_is_shown_until_it_goes() {
+        let r = team_rig();
+        let (config, creds) = plan(&[("0192-a", "Archivio 2025", ApiAccess::Write)], false);
+        r.core.refresh();
+        r.core.configure(&config, &creds);
+        r.sync_and_wait();
+        let gone = disk_with(
+            DISK_A,
+            &[
+                ("id", "\"0192-z\""),
+                ("folder", "\"Vecchio\""),
+                ("listed", "false"),
+                ("enabled", "false"),
+                ("pending", "\"remove\""),
+            ],
+        );
+        r.status(&team_status(&[DISK_A, &gone], ""));
+        r.core.refresh();
+        let team = r.core.status().team.unwrap();
+        let disk = team.disks.iter().find(|d| d.id == "0192-z").unwrap();
+        assert!(!disk.listed && !disk.enabled);
+        assert_eq!(disk.pending, Some(Pending::Remove));
+        assert!(team.disks.iter().find(|d| d.id == "0192-a").unwrap().listed);
+    }
+
+    #[test]
+    fn the_metadata_ca_reaches_the_file_and_a_new_one_applies() {
+        let r = team_rig();
+        let (mut config, creds) = plan(&[("0192-a", "A", ApiAccess::Write)], false);
+        r.core.refresh();
+        r.core.configure(&config, &creds);
+        r.sync_and_wait();
+        assert_eq!(r.file()["meta_ca"], serde_json::Value::Null);
+        config.meta_ca = Some("-----BEGIN CERTIFICATE-----\nx\n-----END CERTIFICATE-----\n".into());
+        r.core.configure(&config, &creds);
+        r.sync_and_wait();
+        assert_eq!(r.applies().len(), 2);
+        assert!(
+            r.file()["meta_ca"]
+                .as_str()
+                .unwrap()
+                .starts_with("-----BEGIN")
+        );
+    }
+
+    #[test]
     fn restart_stops_then_starts() {
         let r = team_rig();
         r.status(
@@ -1605,6 +1731,14 @@ esac"#
         let report = mount_report(&disks);
         assert_eq!(report.mounted_disk_ids, ["0192-a", "b"]);
         assert_eq!(report.replica_mode.as_deref(), Some("offline"));
+        assert_eq!(report.replica_lag_ms, None);
+        let lagging = disk_with(DISK_A, &[("lag_ms", "1500")]);
+        let quick = disk_with(DISK_A, &[("id", "\"q\""), ("lag_ms", "500")]);
+        let with_lag: Vec<EngineDisk> = [lagging, quick]
+            .iter()
+            .map(|d| serde_json::from_str(d).unwrap())
+            .collect();
+        assert_eq!(mount_report(&with_lag).replica_lag_ms, Some(1500));
         assert_eq!(
             mount_report(&disks[..1]).replica_mode.as_deref(),
             Some("replica")

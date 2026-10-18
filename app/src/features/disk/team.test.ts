@@ -1,5 +1,6 @@
 import { describe, expect, it as test } from "vitest";
 import { lostAccess } from "@/features/account/view";
+import { faceFor } from "@/features/disk/face";
 import { diskLook, noDisksCase, teamOf } from "@/features/disk/team";
 import { it } from "@/i18n/it";
 import type { AuthView, DiskStatus, DiskView, TeamView } from "@/lib/types";
@@ -18,6 +19,8 @@ const mounted: DiskView = {
   replica: "up",
   meta_mode: "replica",
   online: true,
+  lag_ms: 500,
+  listed: true,
 };
 const r = it.disks.readout;
 const look = (over: Partial<DiskView>, applying = false) => diskLook({ ...mounted, ...over }, applying);
@@ -60,6 +63,11 @@ describe("diskLook", () => {
     expect(look({ state: "stopped" }, true)).toMatchObject({ led: "dl", blink: true });
   });
 
+  test("a disk the team took away says it is going", () => {
+    const gone = look({ listed: false, enabled: false, pending: "remove" });
+    expect(gone).toMatchObject({ led: "dl", readout: r.removed, line: it.disks.line.removed, dim: false });
+  });
+
   test("turned off is unlit and quiet, unless still in use", () => {
     expect(look({ enabled: false, state: "disabled" })).toMatchObject({ led: null, readout: r.off, dim: true });
     expect(look({ enabled: false, pending: "remove" })).toMatchObject({ led: "dl", readout: r.leaving, dim: false });
@@ -73,6 +81,7 @@ const team: TeamView = {
   error: null,
   restart_needed: false,
   refused_single: false,
+  failing: 0,
 };
 const base = { server: "s", server_display: "s", default_server: "s", busy: null, error: null, reachable: true } as const;
 const signedIn: AuthView = {
@@ -101,6 +110,20 @@ describe("teamOf", () => {
     expect(teamOf({ mode: "single", team: null } as DiskStatus)).toBeNull();
     const refused = { ...team, refused_single: true };
     expect(teamOf({ mode: "single", team: refused } as DiskStatus)).toBe(refused);
+  });
+});
+
+describe("faceFor with a failing disk", () => {
+  test("the faceplate goes to the error state while the others work", () => {
+    const status = {
+      state: "connected",
+      job: null,
+      space: null,
+      mode: "team",
+      team: { ...team, failing: 1 },
+    } as unknown as DiskStatus;
+    expect(faceFor(status)).toMatchObject({ led: "err", readout: it.face.problem });
+    expect(faceFor({ ...status, team }).led).toBe("ok");
   });
 });
 

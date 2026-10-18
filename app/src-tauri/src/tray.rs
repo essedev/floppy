@@ -49,7 +49,9 @@ pub fn look(status: &DiskStatus) -> Look {
         .job
         .as_ref()
         .is_some_and(|j| matches!(j.kind, JobKind::Warmup | JobKind::Free));
+    let failing = status.team.as_ref().is_some_and(|t| t.failing > 0);
     match status.state {
+        DiskState::Connected if failing => Look::Unreachable,
         DiskState::Connected if busy => Look::Activity,
         DiskState::Connected => Look::Connected,
         DiskState::Starting | DiskState::Stopping => Look::Starting,
@@ -92,9 +94,10 @@ impl TrayState {
     pub fn show(&self, status: &DiskStatus) {
         let look = look(status);
         let busy = look == Look::Activity;
+        let failing = status.team.as_ref().is_some_and(|t| t.failing > 0);
         let _ = self
             .icon
-            .set_tooltip(Some(text::tooltip(status.state, busy)));
+            .set_tooltip(Some(text::tooltip(status.state, busy, failing)));
         let mut cur = self.current.lock().unwrap_or_else(|e| e.into_inner());
         if cur.0 != look {
             *cur = (look, false);

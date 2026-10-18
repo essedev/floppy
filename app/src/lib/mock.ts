@@ -65,6 +65,8 @@ function disk(folder: string, over: Partial<DiskView> = {}): DiskView {
     replica: "up",
     meta_mode: "replica",
     online: true,
+    lag_ms: 500,
+    listed: true,
     ...over,
   };
 }
@@ -80,6 +82,7 @@ const teamBase: TeamView = {
   error: null,
   restart_needed: false,
   refused_single: false,
+  failing: 0,
 };
 const team = (over: Partial<TeamView> = {}): Partial<DiskStatus> => ({ mode: "team", team: { ...teamBase, ...over } });
 
@@ -121,6 +124,15 @@ const SCENARIOS: Record<string, Partial<DiskStatus>> = {
       disk("Cantine Arnaldi - Vendemmia", { online: false, meta_mode: "offline", cache_used_mb: 4.1 * GB }),
       disk("Fondazione Lirica - Backstage", { path: null, state: "failed", mounted_access: null, cache_used_mb: null }),
       disk("Pastificio Moretti - Spot Natale", { ...off }),
+      disk("Archivio 2024", { listed: false, enabled: false, pending: "remove", cache_used_mb: 2.2 * GB }),
+    ],
+  }),
+  team_failed: team({
+    failing: 1,
+    disks: [
+      disk("Archivio 2025", { access: "read", mounted_access: "read", cache_used_mb: 812 }),
+      disk("Showreel 2026", { path: null, state: "failed", mounted_access: null, cache_used_mb: null, lag_ms: null }),
+      disk("Pastificio Moretti - Spot Natale", { cache_used_mb: 31.6 * GB }),
     ],
   }),
   team_starting: { state: "starting", ...unmounted, ...team({ applying: true, disks: teamBase.disks.map((d) => ({ ...d, path: null, state: null })) }) },

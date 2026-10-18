@@ -207,6 +207,8 @@ function AccountRows({ view, computerName }: { view: AuthView; computerName: str
 /** The team's disks on this Mac, each with its state and a switch to turn it off. */
 function DisksGroup({ status, team }: { status: DiskStatus; team: TeamView }) {
   const restart = useDiskAction(backend.restart);
+  // A restart takes the disks out of the Finder for a few seconds: it asks first.
+  const [confirmRestart, setConfirmRestart] = useState(false);
   return (
     <Group title={it.settings.disks}>
       {team.refused_single ? (
@@ -237,19 +239,32 @@ function DisksGroup({ status, team }: { status: DiskStatus; team: TeamView }) {
               <span className="mt-1 block font-ro text-[11.5px] text-ink-2">{team.error}</span>
             </Notice>
           )}
-          {team.restart_needed && (
-            <Notice led="dl" title={it.team.restart.title}>
-              <span className="block">{it.team.restart.confirmBody}</span>
-              <Button
-                size="sm"
-                className="mt-2 bg-raised shadow-[0_0_0_0.5px_rgba(0,0,0,0.12)]"
-                disabled={!!status.job || restart.isPending}
-                onClick={() => restart.mutate()}
-              >
-                {it.team.restart.action}
-              </Button>
-            </Notice>
-          )}
+          {team.restart_needed &&
+            (confirmRestart ? (
+              <Confirm
+                title={it.team.restart.confirmTitle}
+                body={it.team.restart.confirmBody}
+                confirm={it.team.restart.confirm}
+                cancel={it.panel.cancel}
+                onConfirm={() => {
+                  setConfirmRestart(false);
+                  restart.mutate();
+                }}
+                onCancel={() => setConfirmRestart(false)}
+              />
+            ) : (
+              <Notice led="dl" title={it.team.restart.title}>
+                <span className="block">{it.team.restart.body}</span>
+                <Button
+                  size="sm"
+                  className="mt-2 bg-raised shadow-[0_0_0_0.5px_rgba(0,0,0,0.12)]"
+                  disabled={!!status.job || restart.isPending}
+                  onClick={() => setConfirmRestart(true)}
+                >
+                  {it.team.restart.action}
+                </Button>
+              </Notice>
+            ))}
           {restart.error && <Notice led="err">{it.errors[restart.error.code] ?? restart.error.message}</Notice>}
         </div>
       )}
@@ -260,26 +275,48 @@ function DisksGroup({ status, team }: { status: DiskStatus; team: TeamView }) {
 function DiskSetting({ disk, applying }: { disk: DiskView; applying: boolean }) {
   const look = diskLook(disk, applying);
   const toggle = useDiskAction<boolean>((on) => backend.setDiskEnabled(disk.id, on));
+  // Turning off deletes the disk's local copies: it asks first, as in the panel.
+  const [confirming, setConfirming] = useState(false);
   return (
-    <Row>
-      <span className="flex">
-        <Led state={look.led ?? undefined} blink={look.blink} />
-      </span>
-      <span className="min-w-0 flex-1">
-        <b className={`block truncate text-[13.5px] font-semibold ${look.dim ? "text-ink-2" : ""}`}>{disk.folder}</b>
-        <span className="block text-[13px] text-ink-2">{look.line}</span>
-        {toggle.error && (
-          <span className="mt-1 block text-[13px] text-ink">{it.errors[toggle.error.code] ?? toggle.error.message}</span>
+    <div>
+      <Row>
+        <span className="flex">
+          <Led state={look.led ?? undefined} blink={look.blink} />
+        </span>
+        <span className="min-w-0 flex-1">
+          <b className={`block truncate text-[13.5px] font-semibold ${look.dim ? "text-ink-2" : ""}`}>{disk.folder}</b>
+          <span className="block text-[13px] text-ink-2">{look.line}</span>
+          {toggle.error && (
+            <span className="mt-1 block text-[13px] text-ink">{it.errors[toggle.error.code] ?? toggle.error.message}</span>
+          )}
+        </span>
+        <Readout className="text-[11px]">{look.readout}</Readout>
+        {/* A disk the team took away is not the person's to turn on or off. */}
+        {disk.listed && (
+          <Toggle
+            checked={disk.enabled}
+            disabled={toggle.isPending || confirming}
+            label={it.settings.diskToggle(disk.folder)}
+            onChange={(on) => (on ? toggle.mutate(true) : setConfirming(true))}
+          />
         )}
-      </span>
-      <Readout className="text-[11px]">{look.readout}</Readout>
-      <Toggle
-        checked={disk.enabled}
-        disabled={toggle.isPending}
-        label={it.settings.diskToggle(disk.folder)}
-        onChange={(on) => toggle.mutate(on)}
-      />
-    </Row>
+      </Row>
+      {confirming && (
+        <div className="px-3 pb-3">
+          <Confirm
+            title={it.disks.offConfirm.title(disk.folder)}
+            body={it.disks.offConfirm.body}
+            confirm={it.disks.offConfirm.confirm}
+            cancel={it.panel.cancel}
+            onConfirm={() => {
+              setConfirming(false);
+              toggle.mutate(false);
+            }}
+            onCancel={() => setConfirming(false)}
+          />
+        </div>
+      )}
+    </div>
   );
 }
 

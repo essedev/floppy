@@ -47,6 +47,10 @@ export interface DiskView {
   replica: "up" | "syncing" | "down" | "stopped" | "other" | null;
   meta_mode: "replica" | "master" | "offline" | "unknown" | "other" | null;
   online: boolean | null;
+  /** The replica's lag, an upper bound; null when not mounted. */
+  lag_ms: number | null;
+  /** false: no longer given to this person, removed once nothing on it is open. */
+  listed: boolean;
 }
 
 /** A disk the Mac may see but cannot mount. */
@@ -67,6 +71,8 @@ export interface TeamView {
   restart_needed: boolean;
   /** The account has disks but this Mac runs the single-user volume. */
   refused_single: boolean;
+  /** Disks in use that have stayed failed for a while: the faceplate shows a problem. */
+  failing: number;
 }
 
 /** Space on this Mac and in the cache, in MB, with the command's reserve. */
