@@ -5,7 +5,7 @@
 # - traefik: Dokploy's Traefik as Dokploy configures it (its own static file, the Docker
 #   provider reading this project's labels, read-only socket) plus deploy/traefik/traefik.yml's
 #   blocks, with a self-signed wildcard instead of the DNS challenge. Ports 4570 (443) and
-#   4571 (80) from the fluix-deploy Portsage range.
+#   4571 (80) from the floppy-deploy Portsage range.
 # - garage: an S3 for the patched JuiceFS's format and mount.
 # - device: a device stand-in, a Valkey replica and the patched JuiceFS on FUSE, reaching the
 #   instances only through Traefik by name.

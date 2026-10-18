@@ -1,7 +1,7 @@
 # A local Floppy instance a real device can use (deploy/local/stack.sh drives it): the
 # production compose (deploy/docker-compose.yml) with what a host would provide, on this Mac's
 # 127.0.0.1. Relative paths are from deploy/, the first file's directory. Ports from the
-# fluix-local Portsage range (4580-4589):
+# floppy-local Portsage range (4580-4589):
 #
 #   http://127.0.0.1:4583          the admin web and /api/ (same origin), the app's server address
 #   <label>.meta.floppy.test:4580  each disk's Valkey over TLS, routed by name (a throwaway CA)

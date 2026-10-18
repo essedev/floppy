@@ -11,8 +11,8 @@
 # The image carries the patched JuiceFS built by spike/juicefs-replica/build.sh; JUICEFS_DIST
 # points at its output when it is not in the default place.
 #
-# Ports from the project's Portsage ranges (fluix 4500-4509, fluix-server 4540-4549,
-# fluix-meta 4560-4569), on localhost only.
+# Ports from the project's Portsage ranges (floppy 4500-4509, floppy-server 4540-4549,
+# floppy-meta 4560-4569), on localhost only.
 name: floppy-server
 
 services:
@@ -169,7 +169,7 @@ services:
       - garage-data:/var/lib/garage/data
     ports:
       - "127.0.0.1:4509:3900"
-      - "127.0.0.1:4540:3903" # admin API, for the managed storage adapter (fluix-server range)
+      - "127.0.0.1:4540:3903" # admin API, for the managed storage adapter (floppy-server range)
 
 volumes:
   db-data:
