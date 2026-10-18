@@ -22,4 +22,4 @@ docker compose build server                         # before the JuiceFS tests: 
 - **The admin web against this server in dev** needs a `/api` proxy to `127.0.0.1:4507` in `web/vite.config.ts` and `VITE_API=http`.
 - **Compose subnet 10.250.48.0/24**: spike/juicefs-replica/test.sh uses .46, the spike .45.
 - **Managed formats hold no S3 key**: the control plane formats with its own key in `AWS_*`, never `ACCESS_KEY` (a new format would store it); manual formats hold the disk's key (DECISIONS #24).
-- **Compose subnets**: `deploy/` uses 10.250.49.0/24, `deploy/check` .50 and .51.
+- **Compose subnets**: `deploy/` uses 10.250.49.0/24, `deploy/check` .50 and .51, `deploy/local` .56 and .57.

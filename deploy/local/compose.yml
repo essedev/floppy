@@ -1,0 +1,95 @@
+# A local Floppy instance a real device can use (deploy/local/stack.sh drives it): the
+# production compose (deploy/docker-compose.yml) with what a host would provide, on this Mac's
+# 127.0.0.1. Relative paths are from deploy/, the first file's directory. Ports from the
+# fluix-local Portsage range (4580-4589):
+#
+#   http://127.0.0.1:4583          the admin web and /api/ (same origin), the app's server address
+#   <label>.meta.floppy.test:4580  each disk's Valkey over TLS, routed by name (a throwaway CA)
+#   http://s3.floppy.test:4582     Garage's S3, managed by the control plane's Garage adapter
+#
+# A device's VM reaches the Mac's 127.0.0.1 as 192.168.5.2 (Lima's host.lima.internal), and
+# `stack.sh hosts` maps the names there in the VM's /etc/hosts.
+services:
+  traefik:
+    image: traefik:v3.6.25
+    command: ["--configFile=/etc/traefik/traefik.yml"]
+    restart: unless-stopped
+    volumes:
+      - ./local/traefik.yml:/etc/traefik/traefik.yml:ro
+      - ./local/.state/dynamic:/etc/traefik/dynamic:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    ports:
+      - "127.0.0.1:4580:443"
+      - "127.0.0.1:4583:8080"
+    networks: [proxy]
+
+  garage:
+    image: dxflrs/garage:v2.1.0
+    restart: unless-stopped
+    environment:
+      GARAGE_RPC_SECRET: ${LOCAL_GARAGE_RPC_SECRET:?run deploy/local/stack.sh up}
+      GARAGE_ADMIN_TOKEN: ${LOCAL_GARAGE_ADMIN_TOKEN:?run deploy/local/stack.sh up}
+    volumes:
+      - ./local/garage.toml:/etc/garage.toml:ro
+      - garage-meta:/var/lib/garage/meta
+      - garage-data:/var/lib/garage/data
+    ports:
+      - "127.0.0.1:4582:4582"
+    networks:
+      proxy:
+        aliases: [s3.floppy.test]
+
+  meta:
+    environment:
+      # Devices reach the instances on Traefik's published port, not 443.
+      FLOPPY_META_PUBLIC_PORT: "4580"
+
+  server:
+    environment:
+      # Console mail: sign-in codes, links and invitations are read from the server's log.
+      FLOPPY_ENV: development
+      FLOPPY_MAIL_BACKEND: console
+      FLOPPY_PUBLIC_URL: http://127.0.0.1:4583
+      FLOPPY_COOKIE_SECURE: "false"
+      # The throwaway CA of *.meta.floppy.test, handed to devices in metaCa.
+      FLOPPY_META_CA_PEM: ${LOCAL_META_CA_PEM:?run deploy/local/stack.sh up}
+      # Every sign-in comes from 127.0.0.1 and e2e.py signs the admin in twice per run: the
+      # limits stay on, high enough for repeated runs.
+      FLOPPY_SIGN_IN_HOURLY_LIMIT: "200"
+      FLOPPY_SIGN_IN_PER_MINUTE: "60"
+      FLOPPY_SIGN_IN_PER_HOUR: "1000"
+    labels:
+      - traefik.http.routers.floppy-local-api.rule=PathPrefix(`/api/`)
+      - traefik.http.routers.floppy-local-api.entrypoints=local
+      - traefik.http.routers.floppy-local-api.service=floppy-api
+      - traefik.http.routers.floppy-local-api.middlewares=floppy-api-headers
+
+  # A second device for e2e.py (profile device): the patched JuiceFS on FUSE, reaching the
+  # disks as a VM does, by name through the Mac's published ports.
+  device:
+    profiles: [device]
+    build:
+      context: ./check
+      dockerfile: device.Dockerfile
+      additional_contexts:
+        juicefs: ${FLOPPY_JUICEFS_DIST:-service:juicefs}
+    privileged: true # FUSE inside the container
+    devices:
+      - /dev/fuse
+    command: ["sleep", "infinity"]
+    init: true
+    volumes:
+      - ./local/.state/tls:/certs:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks: [proxy]
+
+  web:
+    labels:
+      - traefik.http.routers.floppy-local-web.rule=PathPrefix(`/`)
+      - traefik.http.routers.floppy-local-web.entrypoints=local
+      - traefik.http.routers.floppy-local-web.service=floppy-web
+
+volumes:
+  garage-meta:
+  garage-data:

@@ -1,0 +1,32 @@
+# deploy/local's Traefik: the blocks of deploy/traefik/traefik.yml on the entrypoints a Dokploy
+# host has, plus `local`, a plain-HTTP entrypoint for the web and the API on 127.0.0.1 (the
+# app accepts plain http only for localhost). The certificate of *.meta.floppy.test is a
+# self-signed wildcard in the file provider's TLS store (stack.sh writes it), so no resolver
+# is ever asked for one.
+providers:
+  docker:
+    exposedByDefault: false
+    watch: true
+    network: floppy-local-proxy
+    # Only this project's containers, on a machine running many.
+    constraints: "Label(`com.docker.compose.project`, `floppy-local`)"
+  file:
+    directory: /etc/traefik/dynamic
+    watch: true
+  http:
+    endpoint: http://floppy-meta:8080/v1/traefik
+    pollInterval: 5s
+    headers:
+      # Reads the routes and nothing else; a local stack on 127.0.0.1, so not a secret.
+      Authorization: Bearer floppy-local-routes-token-not-a-secret-01
+
+entryPoints:
+  web:
+    address: ":80"
+  websecure:
+    address: ":443"
+  local:
+    address: ":8080"
+
+log:
+  level: INFO

@@ -375,6 +375,8 @@ The engine of the team version, in `macos/` next to the single-user mode, which 
 
 Measured on the development Mac (17/10/2026) against the central side of `spike/metatls.py` run locally (Valkey 8.1.4 behind Traefik on one TLS port, Garage) and a VM installed from a package without `config.env`: install 50 s; the first `disks apply` of three disks 6 s (1 s inside the VM), all three in replica mode; after a VM restart they come back by themselves; with the master unreachable, offline in 10 s, reads go on, writes are refused, and replica mode is back 2-3 s after; 300-file listing from the Mac 0.57 s cold, 0.21 s warm.
 
+End to end on the development Mac (18/10/2026, `deploy/local/e2e.py`): the local instance of `deploy/local` (the production compose, Traefik with a private CA, Garage managed), a VM installed from the output of `scripts/build-engine.sh`, the admin web in Chrome and the app's own `Account` and `Core` driving the engine. Sign-in by code 0.6 s; both disks mounted in replica mode 5-10 s later, the read-only one refusing a write from the Mac with `EROFS`; 8 MB written from the Mac read back identical there and by a second device; a disk lowered to read in the web remounted read-only 70-72 s later (the macOS client had kept the file open), a write then refused with `EROFS`; a revocation in the web cleared the disks, the VM and `/Volumes/Floppy` in 2-3 s.
+
 ## Alternatives considered
 
 | Alternative | Outcome | Reason |

@@ -55,6 +55,20 @@ A launchd agent checks every 2 minutes that the VM, JuiceFS and Samba are runnin
 
 In the team version, without a `config.env`, the menu bar app drives the same command: it writes the disks the person may see to `~/.floppy/disks.json`, pipes the secrets to `floppy disks apply`, and each disk appears as a folder of **Floppy**, read-only or read-write; `floppy disks clear` removes them all from a revoked Mac. The contract is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#team-disks).
 
+## Try the team version on one Mac
+
+`deploy/local/` runs a self-hosted instance on this Mac that a real install can use: the production compose plus Traefik with a throwaway CA, Garage in managed mode and console mail.
+
+```bash
+deploy/local/stack.sh up             # server and admin web at http://127.0.0.1:4583, admin admin@floppy.test
+deploy/local/stack.sh mail <email>   # the last sign-in code or link sent to that address
+deploy/local/stack.sh hosts          # after creating a disk: its name in the VM's /etc/hosts
+deploy/local/stack.sh down           # stops it; the data stays in its volumes
+deploy/local/e2e.py                  # the whole chain with a development VM in /tmp/fe2e
+```
+
+In the app, the server is `http://127.0.0.1:4583`. The disks' metadata (`<label>.meta.floppy.test`) and the S3 endpoint (`s3.floppy.test`) point to the Mac only inside the VM, through `stack.sh hosts`, to run again after each new disk. `e2e.py` signs a member in through the app's own code against a real VM and checks the disks in the Finder, read-only and read-write access, a second device, a lowered access and a revocation; its docstring has the setup.
+
 ## Status
 
 Early: a test package for macOS, tried on OVH Object Storage in Milan, with the metadata in SQLite inside each VM, so every Mac has its own disk. The team version is being built: the control plane (`server/`, sign-in, people, devices, disks, key rotation, storage modes) and its admin web (`web/`) work end to end on a local stack; the menu bar app (`app/`) has its interface but is not connected yet; the engine for the team version (a Valkey replica and a JuiceFS mount per disk in the VM, disks as folders) works on a local stack and waits for the app to drive it. Measurements, decisions and alternatives are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), plans in [docs/ROADMAP.md](docs/ROADMAP.md).

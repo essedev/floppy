@@ -1,0 +1,18 @@
+# deploy/local's Garage: one node, S3 on the same port inside and outside the container
+# (4582), so http://s3.floppy.test:4582 is one address for the control plane (a network alias)
+# and for a device's VM (the Mac's published port).
+metadata_dir = "/var/lib/garage/meta"
+data_dir = "/var/lib/garage/data"
+db_engine = "sqlite"
+replication_factor = 1
+
+rpc_bind_addr = "[::]:3901"
+rpc_public_addr = "127.0.0.1:3901"
+
+[s3_api]
+s3_region = "garage"
+api_bind_addr = "[::]:4582"
+root_domain = ".s3.garage.localhost"
+
+[admin]
+api_bind_addr = "[::]:3903"

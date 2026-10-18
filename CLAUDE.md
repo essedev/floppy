@@ -44,6 +44,10 @@ cd app && pnpm dev             # views in a browser: ?view=panel|settings|welcom
 cd app/src-tauri && FLOPPY_E2E_SERVER=<url> FLOPPY_E2E_CONTAINER=<server container> cargo test e2e -- --ignored --test-threads=1   # sign-in and team disks against a server stack (setup in account/e2e.rs)
 app/scripts/render-marks.sh    # tray PNGs and app icons from design/mark/
 
+# A local instance a real install can use (http://127.0.0.1:4583); the team chain end to end with a dev VM
+deploy/local/stack.sh up|down|mail <email>|hosts
+deploy/local/e2e.py
+
 # Control plane: server/ (commands in .claude/rules/server.md); admin web, dev on the fake API
 cd web && pnpm dev             # http://localhost:4508; pnpm typecheck, lint, build
 make meta-check                # the meta service (meta/): one Valkey per disk

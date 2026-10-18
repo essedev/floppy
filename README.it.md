@@ -55,6 +55,20 @@ Un agente launchd controlla ogni 2 minuti che VM, JuiceFS e Samba siano attivi e
 
 Nella versione per i team, senza un `config.env`, l'app nella barra dei menu guida lo stesso comando: scrive in `~/.floppy/disks.json` i dischi che la persona può vedere, passa i segreti a `floppy disks apply`, e ogni disco compare come una cartella di **Floppy**, in sola lettura o in lettura e scrittura; `floppy disks clear` li toglie tutti da un Mac revocato. Il contratto è in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#team-disks).
 
+## Provare la versione per i team su un Mac
+
+`deploy/local/` avvia su questo Mac un'istanza self-hosted che un'installazione vera può usare: il compose di produzione più Traefik con una CA usa e getta, Garage in modalità gestita e la posta sulla console.
+
+```bash
+deploy/local/stack.sh up             # server e dashboard su http://127.0.0.1:4583, admin admin@floppy.test
+deploy/local/stack.sh mail <email>   # l'ultimo codice o link di accesso mandato a quell'indirizzo
+deploy/local/stack.sh hosts          # dopo aver creato un disco: il suo nome nell'/etc/hosts della VM
+deploy/local/stack.sh down           # lo ferma; i dati restano nei suoi volumi
+deploy/local/e2e.py                  # tutta la catena con una VM di sviluppo in /tmp/fe2e
+```
+
+Nell'app il server è `http://127.0.0.1:4583`. I metadati dei dischi (`<label>.meta.floppy.test`) e l'endpoint S3 (`s3.floppy.test`) puntano al Mac solo dentro la VM, grazie a `stack.sh hosts`, da rilanciare dopo ogni disco nuovo. `e2e.py` fa entrare un membro con il codice dell'app contro una VM vera e controlla i dischi nel Finder, l'accesso in lettura e in scrittura, un secondo dispositivo, un accesso abbassato e una revoca; la sua docstring spiega la preparazione.
+
 ## Stato
 
 Agli inizi: un pacchetto di test per macOS, provato su OVH Object Storage a Milano, con i metadati in SQLite dentro ogni VM, quindi ogni Mac ha il suo disco. La versione per i team è in costruzione: il control plane (`server/`, accesso, persone, dispositivi, dischi, cambio della chiave, modi dello storage) e la sua dashboard (`web/`) funzionano dall'inizio alla fine su uno stack locale; l'app nella barra dei menu (`app/`) ha l'interfaccia ma non è ancora collegata; il motore della versione per i team (una replica Valkey e un mount JuiceFS per disco nella VM, i dischi come cartelle) funziona su uno stack locale e aspetta che l'app lo guidi. Misure, decisioni e alternative sono in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), i piani in [docs/ROADMAP.md](docs/ROADMAP.md).

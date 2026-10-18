@@ -2,7 +2,7 @@ SCRIPTS := macos/bin/floppy macos/install.sh macos/vm/guest/guest-install.sh \
 	macos/vm/guest/floppy-mount macos/vm/guest/floppy-disks macos/tests/engine.sh scripts/package.sh scripts/build-engine.sh scripts/build-app.sh \
 	scripts/release-app.sh packaging/homebrew/render.sh spike/setup.sh spike/bench.sh spike/data-bench.sh spike/meta-bench.sh spike/meta-access.sh spike/meta-tls.sh \
 	spike/juicefs-replica/build.sh spike/juicefs-replica/test.sh \
-	spike/drive/entrypoint.sh spike/drive/perdisk-entrypoint.sh app/scripts/render-marks.sh server/docker/db-init.sh
+	spike/drive/entrypoint.sh spike/drive/perdisk-entrypoint.sh app/scripts/render-marks.sh server/docker/db-init.sh deploy/local/stack.sh
 
 .DEFAULT_GOAL := help
 
