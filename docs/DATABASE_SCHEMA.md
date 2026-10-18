@@ -2,7 +2,7 @@
 
 The control plane's data model, in PostgreSQL. **Status: built**: `server/`, models in `server/src/floppy_server/models.py`, migrations `0001_initial`, `0002` and `0003`. `0003` moved the control plane from one Valkey instance and one bucket per organization to one of each per disk, with access per person and per disk (DECISIONS #23, #24); what it changed is listed in [Migration 0003](#migration-0003).
 
-The design started as the paper of the build roadmap (ROADMAP 4), written from the team architecture ([architecture.html](architecture.html), sections 06 to 11), the concepts ([concept-d-onboarding](concepts/concept-d-onboarding.html), [concept-e-admin](concepts/concept-e-admin.html)) and the admin web's API contract (`web/src/lib/api/types.ts`, `http.ts`, and the rules the fake in `web/src/lib/api/fake/` keeps). This file changes in the same commit as every migration.
+The design started as the paper of the build roadmap (ROADMAP 3), written from the team architecture ([architecture.html](architecture.html), sections 06 to 11), the concepts ([concept-d-onboarding](concepts/concept-d-onboarding.html), [concept-e-admin](concepts/concept-e-admin.html)) and the admin web's API contract (`web/src/lib/api/types.ts`, `http.ts`, and the rules the fake in `web/src/lib/api/fake/` keeps). This file changes in the same commit as every migration.
 
 The control plane is AGPL-3.0 (DECISIONS #3), FastAPI with SQLAlchemy 2.0 async and Alembic, and stays off the data path (DECISIONS #2): nothing in these tables is read when a device lists a folder or reads a clip.
 

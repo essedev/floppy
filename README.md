@@ -24,7 +24,7 @@ Floppy ships as a Homebrew cask: the menu bar app with the engine inside, so the
 brew install --cask essedev/floppy/floppy
 ```
 
-The tap (`essedev/homebrew-floppy`) has no cask yet: the first release writes it. The app is built with `make app` (`scripts/build-app.sh`), which needs Docker running because the patched JuiceFS is built and the Debian packages for the VM are fetched in containers. It produces `dist/app/Floppy.app` (about 555 MB: Lima, the Debian image, JuiceFS with Floppy's patches from `spike/juicefs-replica`, the Debian packages) and the DMG the cask downloads (about 410 MB). On first run the app installs the engine into `~/.floppy` and prepares the disk; after an upgrade it offers the engine's update. `scripts/release-app.sh` publishes a release and the cask (`packaging/homebrew`).
+Each release writes the cask into the tap (`essedev/homebrew-floppy`); the first is `v0.1.0`. The app is built with `make app` (`scripts/build-app.sh`), which needs Docker running because the patched JuiceFS is built and the Debian packages for the VM are fetched in containers. It produces `dist/app/Floppy.app` (about 555 MB: Lima, the Debian image, JuiceFS with Floppy's patches from `spike/juicefs-replica`, the Debian packages) and the DMG the cask downloads (about 410 MB). On first run the app installs the engine into `~/.floppy` and prepares the disk; after an upgrade it offers the engine's update. `scripts/release-app.sh` publishes a release and the cask (`packaging/homebrew`).
 
 Until the team version configures the disk from the sign-in, testers get a zip built from a filled-in configuration, with the same engine:
 
@@ -71,7 +71,7 @@ In the app, the server is `http://127.0.0.1:4583`. The disks' metadata (`<label>
 
 ## Status
 
-Early: a test package for macOS, tried on OVH Object Storage in Milan, with the metadata in SQLite inside each VM, so every Mac has its own disk. The team version works end to end on a local stack (`deploy/local/`, its `e2e.py` run with a real VM): an admin invites from the web (`web/`), the person signs in from the menu bar app (`app/`), and the disks appear as folders of **Floppy** with per-disk access, through the control plane (`server/`), the meta service (`meta/`) behind Traefik and the engine. Next: the first self-hosted instance on Dokploy and the Homebrew release. Measurements, decisions and alternatives are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), plans in [docs/ROADMAP.md](docs/ROADMAP.md).
+Early: a test package for macOS, tried on OVH Object Storage in Milan, with the metadata in SQLite inside each VM, so every Mac has its own disk. The team version works end to end on a local stack (`deploy/local/`, its `e2e.py` run with a real VM): an admin invites from the web (`web/`), the person signs in from the menu bar app (`app/`), and the disks appear as folders of **Floppy** with per-disk access, through the control plane (`server/`), the meta service (`meta/`) behind Traefik and the engine. The app is on Homebrew (`v0.1.0`). Next: the first self-hosted instance on Dokploy. Measurements, decisions and alternatives are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), plans in [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## License
 

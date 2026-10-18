@@ -12,7 +12,11 @@ Log of the work done, most recent first. Plans are in [ROADMAP.md](ROADMAP.md), 
 - **Web**: access as a people-by-disks matrix, disk creation with its bucket and key (manual) or nothing (managed), invitations that list disks, keys and rotations per disk.
 - **Deploy**: `deploy/docker-compose.yml` for Dokploy, with the web and the API on one origin and each disk's Valkey on the same 443; `deploy/check/check.py` verifies it behind Dokploy's own Traefik configuration, whose default timeouts turned out to be enough (idle connections held for 10 minutes). Self-hosting pages on the site.
 - **End to end** (`deploy/local/`, `e2e.py`): a local instance, a real VM and the app's own code. Sign-in by code in 0.6 s, the disks mounted 5-10 s later, a read-only disk refusing writes, a second device reading the same data, a lowered access remounted read-only 70-72 s later, a revocation cleared in 2-3 s. Found on the way: a managed Garage disk refused uploads because JuiceFS signed with `us-east-1`; each disk's region now reaches the mount.
-- **Next**: the first release through the cask, the first instance on Dokploy, the measures on OVH.
+- **First release**: `v0.1.0` on GitHub with its cask in `essedev/homebrew-floppy`, signed with a stable self-signed identity (`scripts/setup-signing.sh`) so an update keeps the app's Keychain access; installed from the cask on a clean Mac against the local stack.
+- **Manual mode on OVH Milan**: `STACK=manual` runs a second local instance whose disks bring their own bucket and key, and `e2e.py` drives it against a real bucket beside a real install: the creation probe, the volume under its own prefix, the region the mounts sign with, the key in no file or argv, 55 MB/s written and 57 MB/s read cold from the Mac. Found on the way: a development VM took the real install's share for its own, so each install now finds its share by the VM address it mounted it from.
+- **Without a DNS token**: `FLOPPY_META_CERT_SCOPE=host` gives each disk's route a certificate of its own name from the host's HTTP resolver, for a shared Traefik that should hold no DNS token (DECISIONS #25); the wildcard stays the default.
+- **Web**: a panel under the access matrix explains how access works.
+- **Next**: the first instance on Dokploy with the team's disk and its backups, release 0.1.1 with the engine fix, the measures on OVH on that instance.
 
 ## 9. The team product takes shape (17/10/2026)
 
