@@ -4,13 +4,12 @@ The principle is the one in [ARCHITECTURE.md](ARCHITECTURE.md#guiding-principle)
 
 ## 1. The system online (next)
 
-The first goal: the team version running on a server, used by a team. The app is on Homebrew (`v0.1.0`, tap `essedev/homebrew-floppy`) and installs from the cask on a clean Mac (tried on Simone's, against the local stack); manual storage works end to end on OVH Milan (`STACK=manual deploy/local/e2e.py`, CYCLES 10). In order:
+The first instance runs on Dokploy (CYCLES 11): the control plane, the admin web and the meta service behind Dokploy's shared Traefik, one certificate per disk name, mail through SMTP, and the team's first disk in manual mode on OVH Milan with bucket versioning (old versions kept 7 days). Simone's Mac mounts it from the `v0.1.1` cask. Left, in order:
 
-1. **The first instance on Dokploy**: `deploy/docker-compose.yml` as `deploy/check/check.py` verifies it, on Dokploy's shared Traefik with its default timeouts and one certificate per disk name, so the shared Traefik gets only the provider block of `deploy/traefik/traefik.yml` and no DNS token (`FLOPPY_META_CERT_SCOPE=host`, DECISIONS #25).
-2. **The team's disk**: manual mode on an OVH bucket and its key, with bucket versioning on and old versions expiring after 7 days.
-3. **Backups before real files**: PostgreSQL through Dokploy's scheduled backup to S3; the disk's metadata through a daily `juicefs dump` from the control plane, kept outside the bucket too, with a restore tried once. JuiceFS's own hourly metadata copy in the bucket stays, untested. A copy of the bucket on a second provider can wait while the team works on copies.
-4. **Release 0.1.1** with the engine fix that finds each install's share by its VM address (`491cb11`), then the team installs with `brew install --cask essedev/floppy/floppy`, sets the instance's address and signs in.
-5. **The measures on OVH** on that instance (ROADMAP 2).
+1. **Backups before real files**: PostgreSQL through Dokploy's scheduled backup to S3; the disk's metadata through a daily `juicefs dump` from the control plane, kept outside the bucket too, with a restore tried once. JuiceFS's own hourly metadata copy in the bucket stays, untested. A copy of the bucket on a second provider can wait while the team works on copies.
+2. **The team on it**: invitations from the admin web with access to the disk; each person installs with `brew install --cask essedev/floppy/floppy`, sets the instance's address and signs in.
+3. **The measures on OVH** on that instance (ROADMAP 2).
+4. **Small things seen on the way**: a change of access reaches the app at its next heartbeat, up to 60 s later; the Finder's sidebar may keep showing nothing after the share is remounted by name until the Finder is relaunched; a failed mount leaves a Finder dialog that blocks the engine until someone clicks OK; the SMB password between Mac and VM is in `osascript`'s arguments (to the Keychain).
 
 ## 2. Data path on OVH
 
@@ -25,7 +24,7 @@ The team version works end to end on a local stack (CYCLES 10): control plane, m
 - **The Mac stays awake while data moves**: `caffeinate -i` during a copy, an upload or a warmup, released a couple of minutes after the traffic stops (as JuiceMount does), so sleep does not cut a transfer halfway. No administrator rights needed.
 - **Keeping the JuiceFS patches alive**: JuiceFS stays pinned (v1.4.1) and moves only when a release brings something we need (a security or bug fix, performance), not with every Floppy release. The patches (0001 metadata replica, 0002 whole-block reads, 0003 keys from the environment) move from the files in `spike/juicefs-replica/` to a branch of a fork (`essedev/juicefs`), one commit per change, so an update is a rebase. A scheduled GitHub Actions job applies them to each new JuiceFS release and runs the Go tests, so a break shows up before we need the update. An update ships only after the Go tests, JuiceFS's own Redis metadata tests and the acceptance suite pass, and after a run with mixed versions (some Macs on the old JuiceFS, some on the new, one Valkey); if mixed versions do not hold, the control plane enforces a minimum version. Checked on 17/10/2026: no JuiceFS release after v1.4.1 yet; against `main` (212 commits later) 25 of the patch's 27 hunks in `redis.go` apply, and `doCleanStaleSession` and `doRemoveXattr` conflict.
 - **Control plane**: phases 1 and 2 and per-disk access are done (`server/`, CYCLES 9 and 10). Left: the OVH, AWS and MinIO adapters (Garage is built), a shared store for rate limits (with the hosted service), and cleanup of provider keys orphaned by a failed commit.
-- **App**: a change of access reaches the app at its next heartbeat, up to 60 s later: make it immediate. Drop "Later" in the first run and retire the zip and its docs once the team uses the cask.
+- **App**: make a change of access immediate (ROADMAP 1). Drop "Later" in the first run and retire the zip and its docs once the team uses the cask.
 
 ## 4. Pilot
 

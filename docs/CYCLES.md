@@ -2,6 +2,13 @@
 
 Log of the work done, most recent first. Plans are in [ROADMAP.md](ROADMAP.md), the reasons behind the choices in [ARCHITECTURE.md](ARCHITECTURE.md).
 
+## 11. Online (18/10/2026)
+
+- **The first instance**: `deploy/docker-compose.yml` on a Dokploy host, built from the repository; the shared Traefik got only the provider block of `deploy/traefik/traefik.yml`, kept its default timeouts, and serves one certificate per disk name (`FLOPPY_META_CERT_SCOPE=host`), so no DNS token sits in it. The disks' names resolve to the host without the CDN proxy, which passes only HTTP. Behind the CDN the control plane believes `X-Forwarded-For` from the proxy's network and the CDN's ranges, so rate limits count the client. Mail through SMTP.
+- **The team's disk**: manual mode on OVH Milan, bucket versioning on with old versions kept 7 days; mounted on a Mac from the cask, read-write, metadata in replica mode.
+- **`v0.1.1`**: the engine mounts the share by the VM's name, `smb://drive@floppy/Floppy`, mapped to the VM's address in its `nsmb.conf` block (no DNS, no mDNS: any host on the LAN could answer a `.local` name, and SMB signing is off), with the IP as fallback, so the Finder reads "floppy"; each install finds its own share. Release notes now come from the Conventional Commits since the previous tag (`scripts/release-notes.sh`, as in Relay).
+- **Next**: backups before real files, the team invited, the measures on OVH.
+
 ## 10. The team version end to end (17-18/10/2026)
 
 - **Per-disk permissions** (DECISIONS #23-#25, superseding #19 and #22): each person has none, read or read-write on each disk, enforced with one Valkey instance and one bucket per disk. Proven in the spike first: `spike/perdisk.py` (read-only mounts, users and keys, a tampered mount, access lowered while mounted, hidden disks, per-bucket keys on Garage), an immutable share root after a `0555` root and `--all-squash` both failed, and `spike/metatls.py`, the disks' instances behind Traefik on one TLS port routed by name.
@@ -16,7 +23,6 @@ Log of the work done, most recent first. Plans are in [ROADMAP.md](ROADMAP.md), 
 - **Manual mode on OVH Milan**: `STACK=manual` runs a second local instance whose disks bring their own bucket and key, and `e2e.py` drives it against a real bucket beside a real install: the creation probe, the volume under its own prefix, the region the mounts sign with, the key in no file or argv, 55 MB/s written and 57 MB/s read cold from the Mac. Found on the way: a development VM took the real install's share for its own, so each install now finds its share by the VM address it mounted it from.
 - **Without a DNS token**: `FLOPPY_META_CERT_SCOPE=host` gives each disk's route a certificate of its own name from the host's HTTP resolver, for a shared Traefik that should hold no DNS token (DECISIONS #25); the wildcard stays the default.
 - **Web**: a panel under the access matrix explains how access works.
-- **Next**: the first instance on Dokploy with the team's disk and its backups, release 0.1.1 with the engine fix, the measures on OVH on that instance.
 
 ## 9. The team product takes shape (17/10/2026)
 

@@ -18,9 +18,7 @@ The full glossary is in [docs/CONVENTIONS.md](docs/CONVENTIONS.md#glossary). The
 ```bash
 make check                               # the full quality pass; make lint: bash -n, shellcheck, prose language
 make app                                 # dist/app/Floppy.app and its DMG, the engine inside; needs Docker running
-scripts/release-app.sh                   # tag, GitHub release, cask into essedev/homebrew-floppy (outward: only when Simone asks)
-scripts/package.sh my-test.env [dist]    # zip for a tester (holds the keys), until the cask replaces it
-bash floppy/install.sh                    # from the unpacked package: installs into ~/.floppy and mounts
+scripts/release-app.sh                   # after a `chore(release): X.Y.Z` bump of app/package.json, tauri.conf.json, app/Cargo.toml: tag, GitHub release with notes from the commits (scripts/release-notes.sh), cask into essedev/homebrew-floppy (outward: only when Simone asks)
 ~/.floppy/bin/floppy status                # setup|start|stop|status|warmup <path>|free <path>|uninstall
 ~/.floppy/bin/floppy disks apply <secrets.json  # team disks from ~/.floppy/disks.json; `disks clear` on revocation
 FLOPPY_HOME=/tmp/fd FLOPPY_VM=floppy-dev macos/install.sh   # a development VM beside the real one
@@ -69,7 +67,7 @@ FLOPPY_JUICEFS_DIST=spike/juicefs-replica/dist deploy/check/check.py   # the Dok
 
 **macOS `/bin/bash` is 3.2**: with `set -u` an empty array expanded as `"${a[@]}"` is an error. Write `${a[@]+"${a[@]}"}`.
 
-**No external network during install.** An office DNS did not resolve `cloud.debian.org`: the Debian image, the patched JuiceFS (built by `package.sh` from `spike/juicefs-replica`) and the Samba and FUSE `.deb` files are in the zip (`scripts/package.sh`). The `.deb` files are the whole dependency closure, taken in a `debian:trixie` container with an empty dpkg status: a plain `--download-only` would miss the libraries the container already has and the image may have in an older version. The list is `PACKAGES` in `guest-install.sh`, which `package.sh` reads; `deb.debian.org` stays as a fallback if the local repository fails.
+**No external network during install.** An office DNS did not resolve `cloud.debian.org`: the Debian image, the patched JuiceFS and the `.deb` closure of `PACKAGES` (`guest-install.sh`) travel in the app bundle (`scripts/build-engine.sh`). The `.deb` files come from a `debian:trixie` container with an empty dpkg status, or a plain `--download-only` misses the libraries the container already has.
 
 **Samba's directory leases stay off** (`smb3 directory leases = no`): with them the macOS client keeps every folder it listed open, and a team disk can never be unmounted to apply lowered access.
 
@@ -118,7 +116,6 @@ A change to how the disk behaves almost always goes through several files:
 - `spike/juicefs-replica/` (Dockerfile tag, patches) and `JUICEFS_VERSION` in `guest-install.sh` together if JuiceFS changes: `package.sh` refuses a mismatch.
 - `docs/ARCHITECTURE.md`: the "Configuration" and "macOS package" sections, and "Measured performance" if a number changes.
 - `README.md` and `README.it.md` together.
-- A zip already handed out does not update itself: it has to be rebuilt and sent again.
 
 Inverse states: `setup` writes the `nsmb.conf` block and the launchd agent, `uninstall` removes them; `warmup` has `free`; `start` has `stop`. Whoever adds an effect on the user's Mac adds its removal to `uninstall`.
 
