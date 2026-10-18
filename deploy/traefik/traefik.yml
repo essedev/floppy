@@ -9,14 +9,10 @@
 #   cloudflare  CF_DNS_API_TOKEN (a token with Zone:DNS:Edit and Zone:Zone:Read on the zone)
 #   ovh         OVH_ENDPOINT=ovh-eu, OVH_APPLICATION_KEY, OVH_APPLICATION_SECRET,
 #               OVH_CONSUMER_KEY (rules POST and DELETE on /domain/zone/*)
-
-entryPoints:
-  websecure:
-    transport:
-      respondingTimeouts:
-        # Traefik's 60 s default also closes idle TCP connections: a JuiceFS connection
-        # pool or a quiet replication link (spike/metatls.py, DECISIONS #25).
-        readTimeout: 0
+#
+# The HTTPS entrypoint keeps Traefik's defaults: its readTimeout bounds only the wait for a
+# TLS ClientHello on a TCP router, then Traefik clears the deadline, so idle Valkey
+# connections stay open (docs/ARCHITECTURE.md, "Deploy"; measured by deploy/check).
 
 certificatesResolvers:
   # The wildcard *.meta.<domain>: only a DNS challenge can obtain one.

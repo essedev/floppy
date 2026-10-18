@@ -5,8 +5,8 @@
 #   <label>.meta.<FLOPPY_DOMAIN>:443   each disk's Valkey, routed by name in the TLS handshake
 #
 # Traefik is the host's own (Dokploy's), never a second one: it needs the blocks of
-# deploy/traefik/traefik.yml (the meta routes, a DNS-01 resolver for the wildcard, no read
-# timeout on 443), see docs/ARCHITECTURE.md, "Deploy". Variables in deploy/.env.example; in
+# deploy/traefik/traefik.yml (the meta routes and a DNS-01 resolver for the wildcard; its
+# timeouts stay the defaults), see docs/ARCHITECTURE.md, "Deploy". Variables in deploy/.env.example; in
 # Dokploy they go in the compose's Environment tab. Nothing here has the Docker socket.
 #
 #   docker compose -f deploy/docker-compose.yml --env-file deploy/.env up -d --build

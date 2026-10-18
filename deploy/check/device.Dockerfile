@@ -3,7 +3,7 @@
 FROM valkey/valkey:8.1.4
 ARG TARGETARCH
 RUN apt-get update \
- && apt-get install -y --no-install-recommends fuse3 ca-certificates \
+ && apt-get install -y --no-install-recommends fuse3 ca-certificates python3 \
  && rm -rf /var/lib/apt/lists/*
 COPY --from=juicefs juicefs-linux-${TARGETARCH} SHA256SUMS /tmp/juicefs/
 RUN cd /tmp/juicefs && grep " juicefs-linux-${TARGETARCH}$" SHA256SUMS | sha256sum -c - \

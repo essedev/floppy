@@ -32,14 +32,14 @@ TLS ends at Traefik, which also renews the certificates; behind it the traffic s
 ## Install with Dokploy
 
 1. **DNS**: point `disk.example.com` and `*.meta.disk.example.com` at the server (A, and AAAA if it has IPv6). Only ports 80 and 443 need to be open.
-2. **Traefik**: in Dokploy, under Web Server, Traefik, edit its configuration and merge in the blocks of `deploy/traefik/traefik.yml`: no read timeout on port 443 (Valkey connections stay open while idle), a resolver that obtains the wildcard by DNS challenge, and the address the meta service publishes its routes on. Under Modify Environment, add the DNS provider's credentials, then reload Traefik.
+2. **Traefik**: in Dokploy, under Web Server, Traefik, edit its configuration and merge in the two blocks of `deploy/traefik/traefik.yml`: a resolver that obtains the wildcard by DNS challenge, and the address the meta service publishes its routes on. Traefik's timeouts, and every other application it serves, stay as they are: idle disk connections are not cut. Under Modify Environment, add the DNS provider's credentials, then reload Traefik.
    - **Cloudflare**: `CF_DNS_API_TOKEN`, a token limited to the zone with Zone DNS Edit and Zone Read.
    - **OVH**: `OVH_ENDPOINT=ovh-eu`, `OVH_APPLICATION_KEY`, `OVH_APPLICATION_SECRET` and `OVH_CONSUMER_KEY`, with a consumer key allowed `POST` and `DELETE` on `/domain/zone/*`.
 3. **The service**: create a Compose service from %repo% with the compose path `deploy/docker-compose.yml`, type Docker Compose. Leave its Domains tab empty and Isolated Deployments off: the routes are in the file.
 4. **Variables**: copy `deploy/.env.example` into the Environment tab and fill it in: the domain, the generated secrets, SMTP, the subnet of `dokploy-network` as the trusted proxy, and the first organization with its admin's address and default S3 endpoint.
 5. **Deploy.** The first start migrates the database and creates the organization; its admin signs in at `https://disk.example.com` with the link that arrives by mail, then creates the disks and invites people.
 
-Without Dokploy, the same file runs with `docker compose --env-file deploy/.env -f deploy/docker-compose.yml up -d --build` on any host whose Traefik reads Docker labels and has the same three blocks.
+Without Dokploy, the same file runs with `docker compose --env-file deploy/.env -f deploy/docker-compose.yml up -d --build` on any host whose Traefik reads Docker labels and has the same two blocks.
 
 ## Security
 

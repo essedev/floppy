@@ -45,6 +45,7 @@ services:
     init: true
     volumes:
       - ./check/.state/tls:/certs:ro
+      - ./check:/check:ro
     networks: [proxy]
     # The disks' names resolve to Traefik; check.py adds each label as it creates one.
     extra_hosts:

@@ -1,6 +1,6 @@
 # deploy/check's Traefik: Dokploy's default static configuration (getDefaultTraefikConfig in
 # Dokploy's traefik-setup.ts: Docker and file providers, web and websecure with HTTP/3, the
-# letsencrypt resolver) plus the blocks of deploy/traefik/traefik.yml. Locally the
+# letsencrypt resolver, default timeouts) plus the blocks of deploy/traefik/traefik.yml. Locally the
 # certificates are a self-signed wildcard in the file provider's TLS store (check.py writes
 # them), so neither resolver is ever asked for one.
 providers:
@@ -29,9 +29,6 @@ entryPoints:
     http:
       tls:
         certResolver: letsencrypt
-    transport:
-      respondingTimeouts:
-        readTimeout: 0
 
 certificatesResolvers:
   letsencrypt:

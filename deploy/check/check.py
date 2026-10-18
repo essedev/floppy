@@ -10,7 +10,8 @@ Valkey replica and the patched JuiceFS through it, idle connections kept, the ro
 added, the meta service restarted, and the web's CSP in a real browser. Each check prints
 its measure, its threshold and PASS or FAIL.
 
-Usage: deploy/check/check.py [--keep]   (--keep leaves the stack running)
+Usage: deploy/check/check.py [--keep] [--idle MINUTES]   (--keep leaves the stack running;
+--idle sets how long the idle checks wait, 2 minutes by default)
 
 Needs Docker, and the patched juicefs: FLOPPY_JUICEFS_DIST names a directory with
 spike/juicefs-replica/build.sh's output (default: spike/juicefs-replica/dist), or set it to
@@ -201,17 +202,12 @@ def resp(*parts):
     return b"*%d\r\n" % len(parts) + b"".join(b"$%d\r\n%s\r\n" % (len(p), p) for p in (x.encode() for x in parts))
 
 
-def valkey_ping(host, password, user="default", idle=0.0):
-    """AUTH and PING through Traefik; with `idle`, PING again after that many quiet seconds."""
-    sock = tls_socket(host, timeout=max(10, idle + 10))
+def valkey_ping(host, password, user="default"):
+    """AUTH and PING through Traefik."""
+    sock = tls_socket(host)
     try:
         sock.sendall(resp("AUTH", user, password) + resp("PING"))
-        first = sock.recv(1024)
-        if idle:
-            time.sleep(idle)
-            sock.sendall(resp("PING"))
-            return first, sock.recv(1024)
-        return first, b""
+        return sock.recv(1024), b""
     finally:
         sock.close()
 
@@ -292,6 +288,70 @@ def mode():
 
 DEVICE_ENV: dict[str, str] = {}
 MNT = ["/mnt/disk"]
+IDLE = [120.0]  # seconds of the idle checks; --idle sets it
+
+
+def master_stats(port):
+    out = in_device(f"valkey-cli -h floppy-meta -p {port} --user \"$CHECK_DEVICE_USER\" -a \"$CHECK_DEVICE_PW\" "
+                    "--no-auth-warning INFO stats", env=DEVICE_ENV).stdout
+    return {k: int(v) for k, v in re.findall(r"^(sync_full|sync_partial_ok|sync_partial_err):(\d+)", out, re.M)}
+
+
+def idle_checks(host, mnt, port):
+    """
+    Quiet connections through 443 with Traefik's default timeouts on the entrypoint: (a) one
+    with no traffic at all, (b) one with a PING every 20 s, (c) the replica's link, (d) the
+    JuiceFS mount left alone, then a stat, a read and a write; (e) as a control, a connection
+    that never sends a TLS ClientHello, which the readTimeout does close.
+    """
+    seconds = IDLE[0]
+    before = master_stats(port)
+    log_from = int(in_device("wc -l < /tmp/jfs.log").stdout.strip() or 0)
+    resyncs_from = int(in_device("grep -c 'MASTER <-> REPLICA sync started' /tmp/replica.log; true").stdout.strip() or 0)
+    in_device(f"mountpoint -q {mnt} && head -c 1000000 /dev/urandom > {mnt}/idle-blob && sync")
+    for probe, extra in (("quiet", []), ("ping", ["20"]), ("hello", [])):
+        dc("exec", "-d", "-e", "CHECK_DEVICE_USER", "-e", "CHECK_DEVICE_PW", "device", "python3", "/check/idle_probe.py",
+           probe, host, str(seconds), f"/tmp/probe-{probe}.json", *extra, env=DEVICE_ENV)
+    print(f"      idle for {seconds:.0f} s ...", flush=True)
+    time.sleep(seconds + 15)
+
+    # (d) first: the mount's first operations after the quiet period.
+    ops = in_device(f"cd {mnt} && for op in 'stat -c %s idle-blob' 'md5sum idle-blob' 'echo x > after-idle'; do "
+                    "t=$(date +%s%N); sh -c \"$op\" >/dev/null 2>/tmp/op.err; rc=$?; "
+                    "echo \"$rc $(( ($(date +%s%N) - t) / 1000 ))\"; done", check=False).stdout.splitlines()
+    results = [line.split() for line in ops if line.strip()]
+    log = in_device(f"tail -n +{log_from + 1} /tmp/jfs.log", check=False).stdout
+    switches = re.findall(r"mode (\w+) -> (\w+)", log)
+    errors = [line.split("<", 1)[1][:160] for line in log.splitlines() if re.search(r"<(ERROR|WARNING)>", line)]
+    ok = len(results) == 3 and all(r[0] == "0" for r in results)
+    record(f"c08d the mount after {seconds:.0f} s alone: stat, read, write",
+           ", ".join(f"{name} {int(r[1]) / 1000:.1f} ms" + ("" if r[0] == "0" else " FAILED")
+                     for name, r in zip(("stat", "read 1 MB", "write"), results, strict=False)),
+           "no error, no switch, mode 1", ok and not switches and mode() == "1",
+           f"switches {switches or 'none'}, {len(errors)} warnings/errors" + (f": {errors[:3]}" if errors else ""))
+
+    quiet = json.loads(in_device("cat /tmp/probe-quiet.json", check=False).stdout or "{}")
+    record(f"c08a a connection with no traffic for {seconds:.0f} s",
+           f"closed after {quiet['closed_after_s']} s" if "closed_after_s" in quiet
+           else f"alive, PING at the end: {quiet.get('ping_at_end')}", "alive",
+           quiet.get("ping_at_end") == "+PONG")
+    pinged = json.loads(in_device("cat /tmp/probe-ping.json", check=False).stdout or "{}")
+    record(f"c08b a connection with a PING every 20 s for {seconds:.0f} s",
+           f"{pinged.get('pings')} PINGs, failures {pinged.get('failures')}", "no failure",
+           pinged.get("pings", 0) > 0 and not pinged.get("failures"))
+    # The control: Traefik's readTimeout (60 s by default) does hold for a connection that
+    # never sends its TLS ClientHello, and only until the ClientHello.
+    hello = json.loads(in_device("cat /tmp/probe-hello.json", check=False).stdout or "{}")
+    cut = hello.get("closed_after_s", -1)
+    record("c08e control: a TCP connection that never starts TLS",
+           f"closed by Traefik after {cut} s ({hello.get('closed_with', '')[:30]})", "about 60 s (readTimeout)",
+           55 <= cut <= 65 and "timed out" not in hello.get("closed_with", ""))
+    after = master_stats(port)
+    resyncs = int(in_device("grep -c 'MASTER <-> REPLICA sync started' /tmp/replica.log; true").stdout.strip() or 0)
+    delta = {k: after.get(k, 0) - before.get(k, 0) for k in after}
+    record(f"c08c the replica's link over the same {seconds:.0f} s",
+           f"{replica_link()}, master stats delta {delta}, {resyncs - resyncs_from} new syncs", "up, no sync",
+           replica_link() == "up" and not any(delta.values()) and resyncs == resyncs_from)
 
 
 def meta_checks(key):
@@ -359,10 +419,7 @@ def meta_checks(key):
                f"mode 1 in {in_mode:.1f} s, {w.stdout.strip()} entries", "replica mode, 19",
                in_mode >= 0 and w.stdout.strip() == "19")
 
-        # Quiet connections are not cut: Traefik's readTimeout is 0 on 443.
-        first, second = valkey_ping(host, spec["password"], idle=75)
-        record("c08 an idle connection through 443 survives 75 s", repr(second), "+PONG", second == b"+PONG\r\n")
-        record("c08 the replica's link after the same 75 s", replica_link(), "up", replica_link() == "up")
+        idle_checks(host, mnt, re.search(r":(\d+)$", spec["admin_url"]).group(1))
 
         rtt = {}
         port = re.search(r":(\d+)$", spec["admin_url"]).group(1)
@@ -411,7 +468,9 @@ def browser_check():
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--keep", action="store_true", help="leave the stack running")
+    ap.add_argument("--idle", type=float, default=2, help="minutes of the idle checks (default 2)")
     a = ap.parse_args()
+    IDLE[0] = a.idle * 60
     try:
         key = setup()
         web_checks()
