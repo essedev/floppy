@@ -1397,4 +1397,6 @@ fn signed_in(r: &DeviceRecord) -> Phase {
 #[cfg(test)]
 mod e2e;
 #[cfg(test)]
+mod e2e_engine;
+#[cfg(test)]
 mod tests;

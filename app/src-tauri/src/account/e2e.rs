@@ -42,7 +42,7 @@ fn server_log() -> String {
 }
 
 /// The newest console mail to `to`, waiting for it to show up in the log.
-fn mail_to(to: &str, after: usize) -> (String, usize) {
+pub(super) fn mail_to(to: &str, after: usize) -> (String, usize) {
     let marker = format!("To: {to}\n");
     for _ in 0..50 {
         let log = server_log();
@@ -57,7 +57,7 @@ fn mail_to(to: &str, after: usize) -> (String, usize) {
     panic!("no mail to {to} in the log");
 }
 
-fn mails_so_far(to: &str) -> usize {
+pub(super) fn mails_so_far(to: &str) -> usize {
     server_log().matches(&format!("To: {to}\n")).count()
 }
 
@@ -70,7 +70,7 @@ fn token_in(mail: &str) -> String {
         .to_string()
 }
 
-fn code_in(mail: &str) -> String {
+pub(super) fn code_in(mail: &str) -> String {
     mail.split(|c: char| !c.is_ascii_digit())
         .find(|w| w.len() == 6)
         .expect("a code")
