@@ -42,7 +42,7 @@ from pathlib import Path
 import perdisk as pd
 
 SPIKE = Path(__file__).resolve().parent
-MNT = Path.home() / "FloppySpikeT"
+MNT = SPIKE / ".local" / "mnt" / "drive-t"
 SMB_PORT = 4514
 STAMP = int(time.time())
 DISKS = {"Progetti": 1, "Archivio": 2}

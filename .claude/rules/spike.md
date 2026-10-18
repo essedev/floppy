@@ -21,6 +21,10 @@ SMB_FORCE_USER=drive spike/perdisk.py [t14 ...]   # per-disk permissions: one Va
 spike/metatls.py               # disks' Valkey behind Traefik, one TLS port routed by name (profile metatls), 14 checks
 ```
 
+## What the spike leaves on the Mac
+
+Everything is in `spike/.local/`, outside git: `mnt/<client>` are the Mac's mount points (`drive`, `drive-b`, `drive-p`, `drive-t`; `MNT` overrides the shell benches'), created before mounting and removed after unmounting; `state-a` and `state-b` are the `/state` of `drive` and `drive-b` (their SQLite metadata). The share is `FloppySpike`, never `Floppy`: macOS names an SMB volume after its share, and a spike mount would look like the real disk in the Finder. `grep -r` over the repo during a test enters the mounted share; `rg` and VS Code's search skip it (`.gitignore`).
+
 ## Gotchas
 
 **Simulate bandwidth with the shaped link, not Toxiproxy nor JuiceFS's limits.** Toxiproxy's `bandwidth` is per connection and JuiceFS opens many: 2.7 GB "went through" at 150 MB/s with a 37 MB/s limit. JuiceFS's `--download-limit` lets the first megabyte through at once and then stalls, which hid how readahead competes with a new read. Toxiproxy is for latency; bandwidth is the `shaped` profile (`LINE_MBPS`, with `DOWNLOAD_LIMIT_MBPS=0`), one queue for everything Toxiproxy sends.
@@ -29,4 +33,6 @@ spike/metatls.py               # disks' Valkey behind Traefik, one TLS port rout
 
 **The spike needs the SMB timeout too.** The real install raises `max_resp_timeout` for the VM's address; the spike talks to `localhost` and `127.0.0.1`, so the same block (`# floppy-spike begin/end` in `~/Library/Preferences/nsmb.conf`) has to be there, or cold reads fail after 30 s.
 
-**macOS mounts a server and share only once.** A second mount of `localhost/Floppy`, even on another port, fails with "File exists": the spike reaches the second client by address (`127.0.0.1`).
+**macOS mounts a server and share only once.** A second mount of `localhost/FloppySpike`, even on another port, fails with "File exists": the spike reaches the second client by address (`127.0.0.1`).
+
+**Unmount from the Mac before stopping or recreating a client.** A server that goes away under a mount brings up macOS's "Server connections interrupted" dialog on Simone's screen, and the mount disappears by itself 25 to 70 s later. Seven such runs (stop, recreate, force unmount right after the stop, a file held open, a Finder window open, the whole stack stopped) left no ghost, but the ghosts found in the Finder's Computer view (a disk with no URL and no mount behind it) were all spike mount points of past runs. A ghost does not go with the Finder's `eject`, `diskutil unmount force`, or a mount and unmount at the same path: only `killall Finder` clears it. The harnesses unmount first (`unmount()` in `acceptance.py`, `mac_unmount()` in `perdisk.py`, the shell benches, `setup.sh` before rebuilding `drive`), and the Python ones and `meta-*.sh` raise an error instead of going on while the share is still mounted.

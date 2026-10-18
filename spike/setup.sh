@@ -71,5 +71,12 @@ toxi toxic add -t latency -a latency="$PG_LATENCY_MS" valkey
 echo "Valkey through the simulated link: toxiproxy:4505 (${PG_LATENCY_MS} ms; start it with --profile replica)"
 
 mkdir -p juicefs-replica/dist # build context of the drive image, filled by juicefs-replica/build.sh
+mkdir -p .local/state-a .local/state-b # the clients' /state (SQLite metadata), outside git
+# The rebuild may recreate drive: its share comes off the Mac first, because a server
+# that goes away under a mount brings up macOS's "Server connections interrupted"
+# dialog and can leave a ghost disk in the Finder.
+/sbin/mount | sed -En 's#^//[^ ]*@localhost:4503/[^ ]* on (.*) \(smbfs.*#\1#p' | while IFS= read -r mp; do
+  /sbin/umount -f "$mp"
+done
 docker compose up -d --build drive
-echo "Mount from Finder: smb://drive@localhost:4503/Floppy (password: SMB_PASSWORD in spike/.env)"
+echo "Mount from Finder: smb://drive@localhost:4503/FloppySpike (password: SMB_PASSWORD in spike/.env)"

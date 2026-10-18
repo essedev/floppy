@@ -14,7 +14,8 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-MNT="${MNT:-$HOME/FloppySpike}"
+# Mount point inside the repo (spike/.local, outside git)
+MNT="${MNT:-$PWD/.local/mnt/drive}"
 LABEL="${LABEL:-baseline}"
 SEQ_MB="${SEQ_MB:-200}"
 LINE_MBPS="${LINE_MBPS:-${DOWNLOAD_LIMIT_MBPS:-100}}"
@@ -23,7 +24,7 @@ drive() { docker compose exec -T drive "$@"; }
 
 mount_share() {
   mkdir -p "$MNT"
-  /sbin/mount_smbfs "//drive:$(grep '^SMB_PASSWORD=' .env | cut -d= -f2)@localhost:4503/Floppy" "$MNT"
+  /sbin/mount_smbfs "//drive:$(grep '^SMB_PASSWORD=' .env | cut -d= -f2)@localhost:4503/FloppySpike" "$MNT"
 }
 # -f: a gentle unmount can leave a stale SMB session that answers I/O errors.
 unmount_share() { /sbin/umount -f "$MNT" 2>/dev/null || true; }
@@ -83,3 +84,4 @@ cold; echo "[$LABEL] seq:    $(mac seq "$MNT/data/clip_1.mov" "$SEQ_MB")"
 cold; echo "[$LABEL] seek:   $(mac seek "$MNT/data/clip_2.mov")"
 cold; echo "[$LABEL] scrub:  $(mac scrub "$MNT/data/clip_3.mov")"
 unmount_share
+rmdir "$MNT" 2>/dev/null || true

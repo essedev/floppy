@@ -12,7 +12,8 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-MNT="${MNT:-$HOME/FloppySpike}"
+# Mount point inside the repo (spike/.local, outside git)
+MNT="${MNT:-$PWD/.local/mnt/drive}"
 DB=access
 ROLE=floppy_d_test
 env_val() { grep "^$1=" .env | cut -d= -f2; }
@@ -28,11 +29,20 @@ garage() { docker compose exec -T garage /garage "$@"; }
 admin_juicefs() { docker compose run --rm -T --no-deps -e META_URL="$ADMIN_META" --entrypoint juicefs drive "$@"; }
 say() { printf '\n## %s\n' "$*"; }
 
-unmount() { /sbin/mount | grep -q " on $MNT " && /sbin/umount "$MNT" 2>/dev/null || true; }
+# Before every stop or recreation of drive: a server that goes away under a mount
+# brings up macOS's "Server connections interrupted" dialog (.claude/rules/spike.md).
+unmount() {
+  for _ in 1 2 3 4 5; do
+    /sbin/mount | grep -q " on $MNT " || { rmdir "$MNT" 2>/dev/null || true; return 0; }
+    /sbin/umount -f "$MNT" 2>/dev/null || sleep 2
+  done
+  echo "meta-access: cannot unmount $MNT" >&2
+  return 1
+}
 mount_share() {
   mkdir -p "$MNT"
   for _ in $(seq 1 30); do
-    /sbin/mount_smbfs "//drive:$SMB_PASSWORD@localhost:4503/Floppy" "$MNT" 2>/dev/null && return 0
+    /sbin/mount_smbfs "//drive:$SMB_PASSWORD@localhost:4503/FloppySpike" "$MNT" 2>/dev/null && return 0
     sleep 2
   done
   echo "meta-access: the share did not come up" >&2

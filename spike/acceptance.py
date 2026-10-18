@@ -32,8 +32,8 @@ import time
 from pathlib import Path
 
 SPIKE = Path(__file__).resolve().parent
-HOME = Path.home()
-MNT_A, MNT_B = HOME / "FloppySpikeA", HOME / "FloppySpikeB"
+# Mount points inside the repo (spike/.local, outside git), created by mount() and removed by unmount().
+MNT_A, MNT_B = SPIKE / ".local" / "mnt" / "drive", SPIKE / ".local" / "mnt" / "drive-b"
 PORT_A, PORT_B = 4503, 4506
 LATENCY_MS = int(os.environ.get("LATENCY_MS", "15"))
 # A fresh volume name per run: a reformat refuses a bucket prefix that still holds blocks.
@@ -100,23 +100,39 @@ def mount(port, path):
     # macOS refuses a second mount of the same server and share even on another
     # port, so the second client is reached by address instead of by name.
     host = "localhost" if port == PORT_A else "127.0.0.1"
-    path.mkdir(exist_ok=True)
+    path.mkdir(parents=True, exist_ok=True)
     for _ in range(40):
-        if subprocess.run(["/sbin/mount_smbfs", f"//drive:{SMB_PW}@{host}:{port}/Floppy", str(path)],
+        if subprocess.run(["/sbin/mount_smbfs", f"//drive:{SMB_PW}@{host}:{port}/FloppySpike", str(path)],
                           capture_output=True).returncode == 0:
             return
         time.sleep(2)
     raise RuntimeError(f"cannot mount port {port}")
 
 
+def mounted(path):
+    return f" on {path} " in subprocess.run(["/sbin/mount"], capture_output=True, text=True).stdout
+
+
 def unmount(path):
+    """Unmounts a share from the Mac, then removes its mount point; raises if it stays mounted.
+
+    Called before every stop or recreation of a client: a server that goes away under a
+    mount brings up macOS's "Server connections interrupted" dialog and can leave the
+    Finder listing a disk that is no longer mounted.
+    """
     for _ in range(5):
-        if f" on {path} " not in subprocess.run(["/sbin/mount"], capture_output=True, text=True).stdout:
-            return
+        if not mounted(path):
+            break
         # A gentle unmount can leave the macOS SMB client with a stale session that
         # answers I/O errors on the next mount of the same share
         subprocess.run(["/sbin/umount", "-f", str(path)], capture_output=True)
         time.sleep(1)
+    if mounted(path):
+        raise RuntimeError(f"cannot unmount {path}")
+    try:
+        path.rmdir()
+    except FileNotFoundError:
+        pass
 
 
 def record(test, measure, threshold, ok, note=""):
@@ -181,7 +197,7 @@ def wait_mode(service, mode, limit=30):
 def remount_both():
     """macOS does not always bring an SMB mount back after the server stalled."""
     for port, path in ((PORT_A, MNT_A), (PORT_B, MNT_B)):
-        subprocess.run(["/sbin/umount", "-f", str(path)], capture_output=True)
+        unmount(path)
         mount(port, path)
 
 

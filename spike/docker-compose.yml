@@ -111,10 +111,10 @@ services:
       UPLOAD_LIMIT_MBPS: ${UPLOAD_LIMIT_MBPS:-300}
       PREFETCH: ${PREFETCH:-8}
     volumes:
-      - ${HOME}/.floppy-spike:/state
+      - ./.local/state-a:/state
       - drive-cache:/cache
     ports:
-      - "127.0.0.1:4503:445" # SMB, mount from Finder: smb://drive@localhost:4503/Floppy
+      - "127.0.0.1:4503:445" # SMB, mount from Finder: smb://drive@localhost:4503/FloppySpike
     depends_on:
       - toxiproxy
 
@@ -151,7 +151,7 @@ services:
       UPLOAD_LIMIT_MBPS: ${UPLOAD_LIMIT_MBPS:-300}
       PREFETCH: ${PREFETCH:-8}
     volumes:
-      - ${HOME}/.floppy-spike-b:/state
+      - ./.local/state-b:/state
       - drive-b-cache:/cache
     ports:
       - "127.0.0.1:4506:445" # SMB of the second client

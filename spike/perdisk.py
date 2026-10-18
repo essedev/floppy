@@ -6,7 +6,7 @@ master behind the simulated link and its own bucket on Garage. The person's
 device has one Valkey user on each instance it may see and one S3 key granted
 per bucket: read-write on Progetti, read-only on Archivio, nothing on Riservato.
 Each visible disk is a JuiceFS mount at /mnt/drive/<disk> with a local replica
-of its instance; Samba exports /mnt/drive as the one Floppy share (DECISIONS #20)
+of its instance; Samba exports /mnt/drive as the one share (DECISIONS #20)
 and the Mac mounts it. Each check prints its measure, its threshold and PASS or
 FAIL; t14 and t25 print the numbers to record.
 
@@ -48,7 +48,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 SPIKE = Path(__file__).resolve().parent
-MNT = Path.home() / "FloppySpikeP"
+# The Mac's mount point, inside the repo (spike/.local, outside git); mac_unmount() removes it.
+MNT = SPIKE / ".local" / "mnt" / "drive-p"
 SMB_PORT = 4510
 LATENCY_MS = int(os.environ.get("LATENCY_MS", "15"))
 STAMP = int(time.time())
@@ -304,21 +305,37 @@ def format_disk(name):
 
 
 def mac_mount():
-    MNT.mkdir(exist_ok=True)
+    MNT.mkdir(parents=True, exist_ok=True)
     for _ in range(40):
-        if subprocess.run(["/sbin/mount_smbfs", f"//drive:{SMB_PW}@localhost:{SMB_PORT}/Floppy", str(MNT)],
+        if subprocess.run(["/sbin/mount_smbfs", f"//drive:{SMB_PW}@localhost:{SMB_PORT}/FloppySpike", str(MNT)],
                           capture_output=True).returncode == 0:
             return
         time.sleep(2)
     raise RuntimeError("cannot mount the share")
 
 
+def mac_mounted():
+    return f" on {MNT} " in subprocess.run(["/sbin/mount"], capture_output=True, text=True).stdout
+
+
 def mac_unmount():
+    """Unmounts the share from the Mac and removes the mount point; raises if it stays mounted.
+
+    Called before every stop or recreation of drive-p: a server that goes away under a mount
+    brings up macOS's "Server connections interrupted" dialog and can leave a ghost disk in
+    the Finder.
+    """
     for _ in range(5):
-        if f" on {MNT} " not in subprocess.run(["/sbin/mount"], capture_output=True, text=True).stdout:
-            return
+        if not mac_mounted():
+            break
         subprocess.run(["/sbin/umount", "-f", str(MNT)], capture_output=True)
         time.sleep(1)
+    if mac_mounted():
+        raise RuntimeError(f"cannot unmount {MNT}")
+    try:
+        MNT.rmdir()
+    except FileNotFoundError:
+        pass
 
 
 def proxy(name, listen, upstream, latency):
