@@ -1,7 +1,7 @@
 """
 Disks (volumes): the list, creation with its own instance, bucket and format, the two settings
 that change later (trash days through `juicefs config`, the cache expiry at the next mount),
-and a probe of the disk's bucket.
+deletion, and a probe of the disk's bucket.
 
 Creating a disk (docs/DATABASE_SCHEMA.md, "volumes"): under the organization's lock the name
 and the bucket are checked, JuiceFS's name is derived from the display name, and the row is
@@ -616,3 +616,41 @@ async def update_disk(
                 changes,
             )
     return await get_disk(ctx, actor.organization_id, volume_id)
+
+
+async def delete_disk(ctx: Context, actor: Actor, volume_id: UUID) -> None:
+    """
+    Soft deletes a disk: it leaves every list and every device, whose users on its instance
+    are deleted like a lowering to `none` (the app unmounts a disk no longer listed). The
+    instance, the metadata and the objects stay, and so does the disk's key at the provider:
+    deleting files is a separate act (docs/DATABASE_SCHEMA.md, "volumes").
+    """
+    async with ctx.sessions() as db, db.begin():
+        await lock_organization(db, actor.organization_id)
+        volume = (
+            await db.execute(
+                select(Volume)
+                .where(
+                    Volume.organization_id == actor.organization_id,
+                    Volume.id == volume_id,
+                    Volume.deleted_at.is_(None),
+                )
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
+        if volume is None:
+            raise not_found("No such disk")
+        if volume.state == "creating":
+            raise invalid_state("The disk is still being created")
+        volume.deleted_at = utcnow()
+        record(
+            db,
+            actor.organization_id,
+            "disk_deleted",
+            AuditActor.person(actor.user_id, actor.label),
+            Target("disk", volume.id, volume.name),
+            {"bucket": volume.s3_bucket},
+        )
+        await db.flush()
+        await sync(db, actor.organization_id, volume_ids=[volume.id])
+    await apply_owed(ctx, actor.organization_id)

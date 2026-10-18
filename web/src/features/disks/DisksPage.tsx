@@ -4,6 +4,7 @@
   devices get (each device sizes its own cache) and the people who see it. On a device it is a
   folder, /Volumes/Floppy/<name>; names never change, CapCut keeps full paths. Creating one is
   a state: the instance, the bucket and the format come after the answer, and can fail.
+  Deleting one takes it off every device and keeps its data, confirmed by typing its name.
 */
 
 import { Plus } from 'lucide-react'
@@ -28,7 +29,7 @@ import { useHealth } from '@/features/settings/hooks'
 import { DiskState } from './DiskState'
 import { NewDiskDialog } from './NewDiskDialog'
 import { intIn } from './numbers'
-import { useDiskCreation, useDisks, useProbeDisk, useUpdateDisk } from './hooks'
+import { useDeleteDisk, useDiskCreation, useDisks, useProbeDisk, useUpdateDisk } from './hooks'
 
 function EditDialog({ disk, onClose, onSaved }: { disk: Disk; onClose(): void; onSaved(): void }) {
   const { t } = useI18n()
@@ -72,6 +73,44 @@ function EditDialog({ disk, onClose, onSaved }: { disk: Disk; onClose(): void; o
       {num(t.disks.trashDays, trash, setTrash, values.trash, 0, 365)}
       <SlotNote className="text-[13px]">{t.disks.editNote}</SlotNote>
       {update.isError && <p className="text-[13px] text-bad-text" role="alert">{errorText(update.error)}</p>}
+    </Dialog>
+  )
+}
+
+function DeleteDialog({ disk, onClose, onDeleted }: { disk: Disk; onClose(): void; onDeleted(): void }) {
+  const { t } = useI18n()
+  const errorText = useErrorText()
+  const remove = useDeleteDisk()
+  const [typed, setTyped] = useState('')
+  const matches = typed.trim() === disk.name
+  return (
+    <Dialog
+      title={fmt(t.disks.deleteDialogTitle, { name: disk.name })}
+      onClose={onClose}
+      onSubmit={() => matches && remove.mutate(disk.id, { onSuccess: onDeleted })}
+      busy={remove.isPending}
+      actions={
+        <>
+          <Button variant="ghost" onClick={onClose} disabled={remove.isPending}>
+            {t.common.cancel}
+          </Button>
+          <Button type="submit" variant="danger" busy={remove.isPending} disabled={!matches}>
+            {t.disks.deleteConfirm}
+          </Button>
+        </>
+      }
+    >
+      <p>{t.disks.deleteBody}</p>
+      <p>{fmt(t.disks.deleteData, { bucket: disk.bucket })}</p>
+      <Field label={t.disks.deleteType}>
+        {(id, describedBy) => <Input id={id} autoComplete="off" spellCheck={false} placeholder={disk.name} value={typed} aria-describedby={describedBy} onChange={(e) => setTyped(e.target.value)} />}
+      </Field>
+      {remove.isError && (
+        <div className="notice grid gap-1 px-4 py-3" role="alert">
+          <State led="err">{t.common.failed}</State>
+          <span>{errorText(remove.error)}</span>
+        </div>
+      )}
     </Dialog>
   )
 }
@@ -175,7 +214,7 @@ function AccessPart({ disk }: { disk: Disk }) {
   )
 }
 
-function DiskDetail({ disk, onEdit }: { disk: Disk; onEdit(): void }) {
+function DiskDetail({ disk, onEdit, onDelete }: { disk: Disk; onEdit(): void; onDelete(): void }) {
   const { t, locale } = useI18n()
   const f = useFormat()
   const ready = disk.state === 'ready'
@@ -214,6 +253,12 @@ function DiskDetail({ disk, onEdit }: { disk: Disk; onEdit(): void }) {
       </dl>
       <SlotNote className="mt-3 text-[13px] text-ink-2">{t.disks.capNote}</SlotNote>
       <SlotNote className="mt-4 text-[13px] text-ink-2">{t.disks.renameNote}</SlotNote>
+      <div className="mt-5 flex items-center justify-between gap-3 border-t border-line pt-4">
+        <h3 className="eyebrow m-0">{t.disks.deleteTitle}</h3>
+        <Button size="sm" onClick={onDelete} disabled={disk.state === 'creating'} title={disk.state === 'creating' ? t.disks.creatingNote : undefined}>
+          {t.disks.deleteButton}
+        </Button>
+      </div>
     </Well>
   )
 }
@@ -266,6 +311,7 @@ export function DisksPage() {
   const disks = useDisks()
   const [params, setParams] = useSearchParams()
   const [editing, setEditing] = useState<Disk | null>(null)
+  const [deleting, setDeleting] = useState<Disk | null>(null)
   const [flash, setFlash] = useFlash<string>()
   const [tracking, setTracking] = useState<string | null>(null)
   const creating = params.get('nuovo') === '1'
@@ -338,7 +384,7 @@ export function DisksPage() {
                   </tbody>
                 </table>
               </div>
-              {selected && <DiskDetail disk={selected} onEdit={() => setEditing(selected)} />}
+              {selected && <DiskDetail disk={selected} onEdit={() => setEditing(selected)} onDelete={() => setDeleting(selected)} />}
             </div>
           )
         }}
@@ -349,6 +395,20 @@ export function DisksPage() {
           onCreated={(disk) => {
             setParams({ disco: disk.id })
             setTracking(disk.id)
+          }}
+        />
+      )}
+      {deleting && (
+        <DeleteDialog
+          disk={deleting}
+          onClose={() => setDeleting(null)}
+          onDeleted={() => {
+            setDeleting(null)
+            setParams((p) => {
+              p.delete('disco')
+              return p
+            })
+            setFlash(fmt(t.disks.deleteDone, { name: deleting.name }))
           }}
         />
       )}

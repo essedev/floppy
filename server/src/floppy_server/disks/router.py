@@ -1,4 +1,4 @@
-"""`/disks`: list, create, update, probe (admins only)."""
+"""`/disks`: list, create, update, delete, probe (admins only)."""
 
 from uuid import UUID
 
@@ -36,6 +36,13 @@ async def update_disk(
 ) -> DiskOut:
     """Changes trash days or the cache expiry."""
     return await service.update_disk(ctx, actor, disk_id, body)
+
+
+@router.delete("/disks/{disk_id}", status_code=204)
+async def delete_disk(disk_id: UUID, actor: AdminDep, ctx: CtxDep) -> Response:
+    """Removes a disk from every device; its instance, metadata and objects stay."""
+    await service.delete_disk(ctx, actor, disk_id)
+    return Response(status_code=204)
 
 
 @router.post("/disks/{disk_id}/probe", status_code=204)

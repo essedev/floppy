@@ -45,6 +45,7 @@ ACTIONS: dict[str, tuple[str, frozenset[str]]] = {
     "disk_created": ("disks", frozenset({"blockSize"})),
     "disk_updated": ("disks", frozenset({"trashDays", "cacheExpireDays"})),
     "disk_access_changed": ("disks", frozenset({"person", "from", "to"})),
+    "disk_deleted": ("disks", frozenset({"bucket"})),
     "settings_updated": ("settings", frozenset({"fields"})),
 }
 

@@ -10,7 +10,7 @@ import httpx
 from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import AsyncEngine
 
-from floppy_server.background import expire_stale_rows, poll_status
+from floppy_server.background import expire_stale_rows, poll_status, reconcile_instances
 from floppy_server.context import Context
 from floppy_server.disks.service import derive_volume_name, run_disk_formats
 from floppy_server.infra.metadata import VolumeCounters
@@ -25,6 +25,7 @@ from tests.helpers import (
     fake_valkey,
     formatter,
     instance_url,
+    invite_and_join,
 )
 
 
@@ -309,3 +310,66 @@ async def test_status_poller_reads_each_instance_and_the_probe_each_bucket(
     health = (await admin.get("/health")).json()
     by_name = {d["name"]: d["storage"]["state"] for d in health["disks"]}
     assert by_name["Progetti"] == "ok"
+
+
+async def test_deleting_a_disk_takes_it_off_every_device_and_keeps_its_data(
+    org: Org,
+    ctx: Context,
+    admin: httpx.AsyncClient,
+    clients: ClientFactory,
+    owner_engine: AsyncEngine,
+) -> None:
+    disk = await create_disk(admin, ctx, "Archivio", bucket="studio-archivio")
+    kept = await create_disk(admin, ctx, "Progetti")
+    app = clients()
+    device = await enrol_device(app, admin, ctx, org.admin_email)
+    url = instance_url(ctx, disk["id"])
+    valkey = fake_valkey(ctx)
+    assert valkey.access(url, device.valkey_user) == "write"
+
+    member = clients()
+    await invite_and_join(admin, member, ctx, "sara@studio-a.test")
+    assert (await member.delete(f"/disks/{disk['id']}")).status_code == 403
+
+    response = await admin.delete(f"/disks/{disk['id']}")
+    assert response.status_code == 204, response.text
+    # Off the lists and off the device: its user deleted and its connections killed.
+    assert [d["name"] for d in (await admin.get("/disks")).json()] == ["Progetti"]
+    assert {e["diskId"] for e in (await admin.get("/access")).json()} == {kept["id"]}
+    assert valkey.access(url, device.valkey_user) is None
+    assert device.valkey_user in valkey.killed
+    beat = (
+        await app.post(
+            "/device/heartbeat",
+            json={"appVersion": "0.4.0", "macosVersion": "15.5"},
+            headers=device.auth,
+        )
+    ).json()
+    assert beat["disks"] == [{"id": kept["id"], "access": "write"}]
+    # Its instance stays, and the reconciler does not bring the user back.
+    assert fake_meta(ctx).instances[disk["id"]].url == url
+    await reconcile_instances(ctx, org.id)
+    assert valkey.access(url, device.valkey_user) is None
+    assert (await admin.delete(f"/disks/{disk['id']}")).status_code == 404
+
+    async with owner_engine.connect() as conn:
+        detail = (
+            await conn.execute(select(AuditEvent.detail).where(AuditEvent.action == "disk_deleted"))
+        ).scalar_one()
+    assert detail == {"bucket": "studio-archivio"}
+    # The name is free again; the bucket is not, its objects are still there.
+    again = await create_disk(admin, ctx, "Archivio")
+    assert again["state"] == "ready"
+    assert await volume_names(owner_engine) == ["archivio", "progetti", "archivio-2"]
+    same_bucket = await admin.post(
+        "/disks", json={"name": "Altro", "storage": {"bucket": "studio-archivio", **disk_key(9)}}
+    )
+    assert (same_bucket.status_code, same_bucket.json()["code"]) == (409, "bucket_taken")
+
+
+async def test_a_disk_still_creating_cannot_be_deleted(
+    org: Org, ctx: Context, admin: httpx.AsyncClient
+) -> None:
+    created = await create_disk(admin, ctx, "Archivio", run=False)
+    response = await admin.delete(f"/disks/{created['id']}")
+    assert (response.status_code, response.json()["code"]) == (409, "invalid_state")

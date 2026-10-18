@@ -222,6 +222,7 @@ export const it = {
     disk_created: '{actor} ha creato {target}',
     disk_updated: '{actor} ha modificato {target}',
     disk_access_changed: '{actor} ha cambiato chi vede {target}',
+    disk_deleted: '{actor} ha eliminato {target}',
     settings_updated: '{actor} ha modificato le impostazioni',
   },
   actions: {
@@ -246,6 +247,7 @@ export const it = {
     disk_created: 'Disco creato',
     disk_updated: 'Disco modificato',
     disk_access_changed: 'Accesso cambiato',
+    disk_deleted: 'Disco eliminato',
     settings_updated: 'Impostazioni modificate',
   },
   details: {
@@ -279,6 +281,7 @@ export const it = {
     cacheExpireDays: 'scadenza della cache da {from} a {to} giorni',
     appVersion: 'app {v}',
     blockSize: 'blocchi da {v}',
+    bucket: 'bucket {bucket}',
     devices: p('1 dispositivo revocato', '{n} dispositivi revocati'),
   },
   people: {
@@ -437,6 +440,14 @@ export const it = {
     lastProbe: 'Ultima prova riuscita {time}',
     probeDisk: 'Prova a scrivere',
     probeDiskOk: 'Scrittura di prova riuscita',
+    deleteTitle: 'Elimina il disco',
+    deleteButton: 'Elimina…',
+    deleteDialogTitle: 'Eliminare {name}?',
+    deleteBody: 'Il disco sparisce dalla lista e da tutti i dispositivi: ogni Mac lo smonta appena nessuno lo sta usando.',
+    deleteData: 'I file non vengono cancellati: restano nel bucket {bucket}, e i metadati sul server. La chiave del disco resta valida presso il provider: se il bucket non serve più, cancella lì chiave e bucket.',
+    deleteType: 'Per confermare scrivi il nome del disco',
+    deleteConfirm: 'Elimina il disco',
+    deleteDone: '{name} eliminato',
     nameRule: 'Usa lettere senza accenti, cifre, spazi, punti, trattini e trattini bassi, fino a 60 caratteri, con una lettera o una cifra all’inizio e alla fine. Niente accenti: macOS potrebbe riceverli scritti in un altro modo, e CapCut non ritroverebbe più i file.',
     nameTaken: 'Esiste già un disco “{name}”. Maiuscole e minuscole contano come la stessa lettera, come nel Finder.',
     colFiles: 'File',

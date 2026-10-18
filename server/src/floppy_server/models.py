@@ -116,6 +116,7 @@ AUDIT_ACTIONS = (
     "disk_created",
     "disk_updated",
     "disk_access_changed",
+    "disk_deleted",
     "settings_updated",
 )
 

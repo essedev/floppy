@@ -105,7 +105,7 @@ Consequences: in managed mode a replica, on a revoked device or anywhere, carrie
 
 **Providers**: Garage (admin API: create the bucket, a key per device, allow or deny it per bucket, changed in place) and MinIO (a user or service account per device with a policy listing its buckets) scope keys per bucket. AWS does it with one IAM user per device and a policy listing the buckets, rewritten on every change; IAM's default quota of 5,000 users per account is the ceiling. OVH would need one Public Cloud user per device with an S3 policy: to verify (quota and latency of creating users).
 
-**Bucket versioning** in manual mode. A device that could see a disk may have copied the disk's key, and until the admin deletes it at the provider it can delete blocks. With versioning on, a deleted block stays recoverable for some days: recommended, with a lifecycle rule that expires old versions after 7 days, and a policy on the key that denies `s3:DeleteObjectVersion` and changes to versioning and lifecycle (JuiceFS needs only `DeleteObject`, which with versioning leaves a delete marker). The control plane reads the bucket's versioning and lifecycle with the disk's key (`GetBucketVersioning`, `GetBucketLifecycleConfiguration`) at every probe and shows them per disk; `unknown` when the provider or the key's policy does not answer.
+**Bucket versioning** in manual mode. A device that could see a disk may have copied the disk's key, and until the admin deletes it at the provider it can delete blocks. With versioning on, a deleted block stays recoverable for some days: recommended, with a lifecycle rule that expires old versions after 7 days, and a policy on the key that denies changes to versioning and lifecycle. Denying `s3:DeleteObjectVersion` works where the provider has that action (AWS); on OVH `s3:DeleteObject` also erases versions, so only Object Lock keeps them from the key (ARCHITECTURE, Backup and resilience). The control plane reads the bucket's versioning and lifecycle with the disk's key (`GetBucketVersioning`, `GetBucketLifecycleConfiguration`) at every probe and shows them per disk; `unknown` when the provider or the key's policy does not answer.
 
 **The mode is chosen when the organization is created** and frozen once a disk exists: moving formats between "a key inside" and "no key" is a migration of its own. The hosted service refuses `manual`.
 
@@ -391,6 +391,8 @@ Indexes:
 
 **Creating a disk** is an **asynchronous job**. `POST /disks`, under the organization's lock, checks the name, in manual mode probes the pasted bucket and key (a test write, `probe_failed` before anything is written), and inserts the volume `creating`, its key `pending` (manual), its `volume_status` row (manual: with that probe's result as the disk's storage state) and the access the request carries (the creator gets `write` unless listed otherwise); it answers `201` with that row. A background job then: asks the meta service for the disk's instance and records it in `meta_instances`; in managed mode creates the bucket and grants it to the control plane's key, then probes it; runs `juicefs format` on the instance (manual: the disk's key goes into the format; managed: the control plane's key through `AWS_*`, nothing stored); and sets `ready` and `juicefs_uuid`, with the disk's key `active` (manual). Then the devices that may see the disk get their users and grants (see [Access per disk](#access-per-disk)). If a step fails, or the job finds a `creating` row it was interrupted on, the row becomes `failed` with `format_error` and is soft deleted; its key `rejected`, its instance released and wiped (its format never reached a device). `GET /disks/{id}` still shows it, so the web can say why. Its prefix stays burned.
 
+**Deleting a disk** (0004, `DELETE /disks/{id}`, not while `creating`): under the organization's lock the row gets `deleted_at` and `disk_deleted` is logged with its bucket; the same transaction writes every device's `meta_users` (and, managed, `s3_key_grants`) on it to `none`, applied after the commit like a lowering of access, so the users are deleted and their connections killed. The heartbeat stops listing it and the app unmounts it. The instance, the metadata, the objects and, in manual mode, the disk's key at the provider stay: deleting data is a separate act. The name is free again; the prefix and the bucket are not.
+
 ### Disks on a device
 
 A device mounts the disks its person may see (see [Access per disk](#access-per-disk)). Inside the VM each disk is its own JuiceFS mount at `/mnt/drive/<name>`, with its own local replica of the disk's instance; Samba exports `/mnt/drive` as the one `Floppy` share, so the Mac keeps one SMB mount at the fixed `/Volumes/Floppy` and sees each disk as a folder: `/Volumes/Floppy/Progetti`, `/Volumes/Floppy/Archivio 2025` (DECISIONS #20). A new disk, or one the person was given, appears as a new folder at the next configuration poll, without remounting the share; one taken away disappears. `/mnt/drive` itself is `0555` and Samba runs as an unprivileged user: nothing can be written at the top level, where it would land on the VM's disk instead of S3 (`spike/perdisk.py`, t24).
@@ -640,6 +642,7 @@ What it records, the `CHECK` list after `0003`:
 | `key_rotation_failed` | key | system | key | `{disk, step, code}` |
 | `key_window_closed` | key | person | key | `{disk, oldKeyTail, reasons}` |
 | `disk_created`, `disk_updated` | disks | person | disk | `{blockSize}`; `{trashDays: [old, new]}` and `{cacheExpireDays: [old, new]}` for what changed |
+| (0004) `disk_deleted` | disks | person | disk | `{bucket}`: where its objects stay |
 | `settings_updated` | settings | person | organization | `{fields: [...]}`: the names of what changed, never values of secrets |
 
 Sign-in attempts on unknown addresses are not recorded: they belong to no organization, and logging them would store addresses of people who are not users.
@@ -731,6 +734,7 @@ The admin web's contract, under `/api/v1`. The OpenAPI document and its pages (`
 | `GET /disks/{id}` (admin) | The same for one disk, a recently failed one included with its `format_error` | |
 | `POST /disks` (admin) `{name, trashDays, storage?, access?}` | `organizations` under lock, `volumes`, `memberships` | (0003) Manual: `storage {endpoint?, region?, bucket, accessKeyId, secretKey}` probed first (`probe_failed`), the disk's key `pending`. Managed: no `storage`. `volumes` (`creating`), `volume_status`, `disk_access` (the creator `write` unless listed), `audit_events`; answers `201`, then the job creates the instance, the bucket (managed), the format |
 | `PATCH /disks/{id}` (admin) | `volumes`, `meta_instances` | `juicefs config --trash-days` first, then `volumes`; `audit_events` |
+| (0004) `DELETE /disks/{id}` (admin) | `organizations` under lock, `volumes` | `volumes.deleted_at`, `meta_users` and `s3_key_grants` to `none`, `audit_events`; then the instances and the provider. `invalid_state` while `creating`; answers `204` |
 | (0003) `POST /disks/{id}/probe` (admin) | `volumes`, the disk's or the control plane's key | `volume_status.storage_*` and versioning; `probe_failed` when the write fails |
 | `GET /key` (admin) | `s3_keys`, `key_rotations` not closed, open `key_exposures`, `volume_status` | (0003) `{storageMode, storageProvider, controlPlaneKeyTail, disks: [{diskId, diskName, bucket, accessKeyTail, rotatedAt, window, rotation, versioning}], keys: [the devices' keys, live or owed]}` |
 | `POST /key/rotations` (admin, manual) `{diskId, accessKeyId, secretKey}` | `key_rotations` under the organization lock | `s3_keys`, `key_rotations`, `audit_events`; the worker then writes the probe, the instance (`juicefs config`), the keys' states, `volume_status`. Managed: `invalid_state` |
@@ -797,6 +801,10 @@ Built: `server/migrations/versions/0003_per_disk.py`, for one Valkey instance an
 9. `audit_events`: `disk_access_changed` joins the actions.
 
 `downgrade()` reverses it on an empty database.
+
+## Migration 0004
+
+Built: `server/migrations/versions/0004_disk_deleted.py`. `audit_events`: `disk_deleted` joins the actions. `downgrade()` refuses while such an event exists, since the audit log is never rewritten.
 
 ## Decisions taken
 

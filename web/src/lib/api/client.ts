@@ -87,6 +87,8 @@ export interface Api {
     update(id: string, body: UpdateDiskRequest): Promise<Disk>
     /** A test write on the disk's bucket; the result also lands in its storage status. */
     probe(id: string): Promise<void>
+    /** Takes the disk off every device and every list; its instance, metadata and objects stay. */
+    remove(id: string): Promise<void>
   }
   access: {
     /** Every live disk and person that is not removed, `none` included. */

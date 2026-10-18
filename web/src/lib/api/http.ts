@@ -83,6 +83,7 @@ export const httpApi: Api = {
     create: (body) => request('POST', '/disks', body),
     update: (diskId, body) => request('PATCH', `/disks/${id(diskId)}`, body),
     probe: (diskId) => request('POST', `/disks/${id(diskId)}/probe`),
+    remove: (diskId) => request('DELETE', `/disks/${id(diskId)}`),
   },
   access: {
     list: () => request('GET', '/access'),

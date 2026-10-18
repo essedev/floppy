@@ -771,6 +771,18 @@ export const fakeApi: Api = {
       disk.storageState = 'ok'
       save()
     },
+    async remove(id) {
+      await latency(300, 600)
+      const me = requireAdmin()
+      const disk = db.disks.find((d) => d.id === id)
+      if (!disk) throw new ApiError(404, 'not_found', 'No such disk')
+      if (disk.state === 'creating') throw new ApiError(409, 'invalid_state', 'The disk is still being created')
+      // Soft deleted, like a failed one: its name is free again, its prefix and bucket are not.
+      db.disks = db.disks.filter((d) => d.id !== id)
+      db.failedDisks.push(disk)
+      log({ actor: actorOf(me), action: 'disk_deleted', category: 'disks', target: { kind: 'disk', id, label: disk.name }, detail: { bucket: disk.bucket } })
+      save()
+    },
   },
 
   access: {

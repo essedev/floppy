@@ -215,6 +215,7 @@ export const en: Dict = {
     disk_created: '{actor} created {target}',
     disk_updated: '{actor} edited {target}',
     disk_access_changed: '{actor} changed who sees {target}',
+    disk_deleted: '{actor} deleted {target}',
     settings_updated: '{actor} edited the settings',
   },
   actions: {
@@ -239,6 +240,7 @@ export const en: Dict = {
     disk_created: 'Disk created',
     disk_updated: 'Disk edited',
     disk_access_changed: 'Access changed',
+    disk_deleted: 'Disk deleted',
     settings_updated: 'Settings edited',
   },
   details: {
@@ -272,6 +274,7 @@ export const en: Dict = {
     cacheExpireDays: 'cache expiry from {from} to {to} days',
     appVersion: 'app {v}',
     blockSize: '{v} blocks',
+    bucket: 'bucket {bucket}',
     devices: p('1 device revoked', '{n} devices revoked'),
   },
   people: {
@@ -430,6 +433,14 @@ export const en: Dict = {
     lastProbe: 'Last test succeeded {time}',
     probeDisk: 'Test a write',
     probeDiskOk: 'Test write succeeded',
+    deleteTitle: 'Delete the disk',
+    deleteButton: 'Delete…',
+    deleteDialogTitle: 'Delete {name}?',
+    deleteBody: 'The disk leaves the list and every device: each Mac unmounts it as soon as nobody is using it.',
+    deleteData: 'The files are not deleted: they stay in the bucket {bucket}, and the metadata on the server. The disk’s key stays valid at the provider: if the bucket is no longer needed, delete the key and the bucket there.',
+    deleteType: 'To confirm, type the disk’s name',
+    deleteConfirm: 'Delete the disk',
+    deleteDone: '{name} deleted',
     nameRule: 'Use letters without accents, digits, spaces, dots, hyphens and underscores, up to 60 characters, starting and ending with a letter or a digit. No accents: macOS could receive them written another way, and CapCut would no longer find the files.',
     nameTaken: 'A disk “{name}” already exists. Upper and lower case count as the same letter, as in the Finder.',
     colFiles: 'Files',

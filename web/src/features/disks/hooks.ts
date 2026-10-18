@@ -1,4 +1,4 @@
-/* Disks: list, create with their bucket and access, change cache policy and trash, probe. */
+/* Disks: list, create with their bucket and access, change cache policy and trash, probe, delete. */
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, type CreateDiskRequest, type UpdateDiskRequest } from '@/lib/api'
@@ -56,5 +56,15 @@ export function useUpdateDisk() {
   return useMutation({
     mutationFn: ({ id, body }: { id: string; body: UpdateDiskRequest }) => api.disks.update(id, body),
     onSuccess: () => Promise.all([queryKeys.disks, queryKeys.auditAll].map((queryKey) => client.invalidateQueries({ queryKey }))),
+  })
+}
+
+/** Deletes a disk: off every device and list; its data stays at the provider. */
+export function useDeleteDisk() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => api.disks.remove(id),
+    onSuccess: () =>
+      Promise.all([queryKeys.disks, queryKeys.access, queryKeys.key, queryKeys.session, queryKeys.health, queryKeys.auditAll].map((queryKey) => client.invalidateQueries({ queryKey }))),
   })
 }
