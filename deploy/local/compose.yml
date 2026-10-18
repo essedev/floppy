@@ -9,26 +9,32 @@
 #
 # A device's VM reaches the Mac's 127.0.0.1 as 192.168.5.2 (Lima's host.lima.internal), and
 # `stack.sh hosts` maps the names there in the VM's /etc/hosts.
+#
+# STACK=manual (floppy-local-manual, 4590-4599) sets LOCAL_* in its env file: its own state
+# folder and Traefik configuration, 4590 for the metadata, 4593 for the web; no Garage (the
+# `garage` profile, which only the managed stack turns on).
 services:
   traefik:
     image: traefik:v3.6.25
     command: ["--configFile=/etc/traefik/traefik.yml"]
     restart: unless-stopped
     volumes:
-      - ./local/traefik.yml:/etc/traefik/traefik.yml:ro
-      - ./local/.state/dynamic:/etc/traefik/dynamic:ro
+      - ${LOCAL_TRAEFIK_YML:-./local/traefik.yml}:/etc/traefik/traefik.yml:ro
+      - ./local/${LOCAL_STATE:-.state}/dynamic:/etc/traefik/dynamic:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
     ports:
-      - "127.0.0.1:4580:443"
-      - "127.0.0.1:4583:8080"
+      - "127.0.0.1:${LOCAL_META_PORT:-4580}:443"
+      - "127.0.0.1:${LOCAL_WEB_PORT:-4583}:8080"
     networks: [proxy]
 
   garage:
+    profiles: [garage]
     image: dxflrs/garage:v2.1.0
     restart: unless-stopped
     environment:
-      GARAGE_RPC_SECRET: ${LOCAL_GARAGE_RPC_SECRET:?run deploy/local/stack.sh up}
-      GARAGE_ADMIN_TOKEN: ${LOCAL_GARAGE_ADMIN_TOKEN:?run deploy/local/stack.sh up}
+      # Written by stack.sh for the managed stack; empty, the manual one never starts Garage.
+      GARAGE_RPC_SECRET: ${LOCAL_GARAGE_RPC_SECRET:-}
+      GARAGE_ADMIN_TOKEN: ${LOCAL_GARAGE_ADMIN_TOKEN:-}
     volumes:
       - ./local/garage.toml:/etc/garage.toml:ro
       - garage-meta:/var/lib/garage/meta
@@ -42,14 +48,14 @@ services:
   meta:
     environment:
       # Devices reach the instances on Traefik's published port, not 443.
-      FLOPPY_META_PUBLIC_PORT: "4580"
+      FLOPPY_META_PUBLIC_PORT: "${LOCAL_META_PORT:-4580}"
 
   server:
     environment:
       # Console mail: sign-in codes, links and invitations are read from the server's log.
       FLOPPY_ENV: development
       FLOPPY_MAIL_BACKEND: console
-      FLOPPY_PUBLIC_URL: http://127.0.0.1:4583
+      FLOPPY_PUBLIC_URL: http://127.0.0.1:${LOCAL_WEB_PORT:-4583}
       FLOPPY_COOKIE_SECURE: "false"
       # The throwaway CA of *.meta.floppy.test, handed to devices in metaCa.
       FLOPPY_META_CA_PEM: ${LOCAL_META_CA_PEM:?run deploy/local/stack.sh up}
@@ -79,7 +85,7 @@ services:
     command: ["sleep", "infinity"]
     init: true
     volumes:
-      - ./local/.state/tls:/certs:ro
+      - ./local/${LOCAL_STATE:-.state}/tls:/certs:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks: [proxy]
