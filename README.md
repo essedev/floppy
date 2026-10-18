@@ -71,7 +71,7 @@ In the app, the server is `http://127.0.0.1:4583`. The disks' metadata (`<label>
 
 ## Status
 
-Early: a test package for macOS, tried on OVH Object Storage in Milan, with the metadata in SQLite inside each VM, so every Mac has its own disk. The team version is being built: the control plane (`server/`, sign-in, people, devices, disks, key rotation, storage modes) and its admin web (`web/`) work end to end on a local stack; the menu bar app (`app/`) has its interface but is not connected yet; the engine for the team version (a Valkey replica and a JuiceFS mount per disk in the VM, disks as folders) works on a local stack and waits for the app to drive it. Measurements, decisions and alternatives are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), plans in [docs/ROADMAP.md](docs/ROADMAP.md).
+Early: a test package for macOS, tried on OVH Object Storage in Milan, with the metadata in SQLite inside each VM, so every Mac has its own disk. The team version works end to end on a local stack (`deploy/local/`, its `e2e.py` run with a real VM): an admin invites from the web (`web/`), the person signs in from the menu bar app (`app/`), and the disks appear as folders of **Floppy** with per-disk access, through the control plane (`server/`), the meta service (`meta/`) behind Traefik and the engine. Next: the first self-hosted instance on Dokploy and the Homebrew release. Measurements, decisions and alternatives are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), plans in [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## License
 
