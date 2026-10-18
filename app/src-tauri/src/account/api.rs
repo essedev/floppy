@@ -220,7 +220,9 @@ pub struct UserRef {
 }
 
 /// A disk this Mac may see, as it mounts it: `metaUrl` is its instance and
-/// database without credentials; `read` is a `--read-only` mount.
+/// database without credentials; `read` is a `--read-only` mount; `region`
+/// the bucket's S3 region, which the mount signs with (an older server
+/// leaves it out).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DiskConfig {
@@ -229,6 +231,8 @@ pub struct DiskConfig {
     pub volume_name: String,
     pub access: Access,
     pub meta_url: String,
+    #[serde(default)]
+    pub region: Option<String>,
     pub cache_expire_days: u32,
     pub mount_path: String,
 }
@@ -583,7 +587,7 @@ mod tests {
             "organization":{"id":"0192f0c4-0000-7000-8000-000000000001","name":"Studio Esempio"},
             "user":{"email":"giulia@studio.test","name":"Giulia Ferri"},
             "disks":[{"id":"0192f0c4-7d1e-7a40-9e52-3c1d2b9a0f11","name":"Archivio 2025","volumeName":"archivio-2025",
-            "access":"read","metaUrl":"rediss://archivio-2025.meta.example.com:6443/1","cacheExpireDays":30,
+            "access":"read","metaUrl":"rediss://archivio-2025.meta.example.com:6443/1","region":"garage","cacheExpireDays":30,
             "mountPath":"/Volumes/Floppy/Archivio 2025"}]}"#,
         )
         .unwrap();
@@ -593,6 +597,7 @@ mod tests {
         assert_eq!(config.s3_access_key_tail.as_deref(), Some("bcdef"));
         assert_eq!(config.organization.name, "Studio Esempio");
         assert_eq!(config.disks[0].access, Access::Read);
+        assert_eq!(config.disks[0].region.as_deref(), Some("garage"));
 
         let config: DeviceConfig = serde_json::from_str(
             r#"{"valkeyUsername":"floppy_d_1","storageMode":"manual","s3AccessKeyTail":null,

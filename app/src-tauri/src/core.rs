@@ -1426,6 +1426,7 @@ esac"#
                     volume_name: id.to_string(),
                     access: *access,
                     meta_url: "redis://localhost:4551/1".into(),
+                    region: None,
                     cache_expire_days: 30,
                     mount_path: format!("/Volumes/Floppy/{name}"),
                 })

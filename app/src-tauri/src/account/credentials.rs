@@ -135,6 +135,7 @@ mod tests {
             volume_name: id.into(),
             access: Access::Read,
             meta_url: "rediss://m.example.com:6443/1".into(),
+            region: None,
             cache_expire_days: 30,
             mount_path: format!("/Volumes/Floppy/{id}"),
         }

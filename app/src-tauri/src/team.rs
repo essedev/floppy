@@ -60,6 +60,9 @@ pub struct FileDisk {
     pub meta_url: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bucket_url: Option<String>,
+    /// The bucket's S3 region, the server's: the mount signs with it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bucket_region: Option<String>,
     #[serde(default = "default_expire")]
     pub cache_expire_days: u32,
     /// False: the person turned the disk off on this Mac.
@@ -153,6 +156,7 @@ pub fn build(
             access: d.access,
             meta_url: d.meta_url.clone(),
             bucket_url: before.and_then(|b| b.bucket_url.clone()),
+            bucket_region: d.region.clone().filter(|r| valid_region(r)),
             cache_expire_days: d.cache_expire_days,
             enabled: before.is_none_or(|b| b.enabled),
         });
@@ -203,6 +207,16 @@ pub fn valid_folder(name: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || b" ._-".contains(c))
 }
 
+/// The engine's rule for a bucket region: 1-64 letters, digits, hyphens,
+/// underscores. An empty or other one is left out of the file, and the mount
+/// signs with JuiceFS's default.
+pub fn valid_region(region: &str) -> bool {
+    (1..=64).contains(&region.len())
+        && region
+            .bytes()
+            .all(|c| c.is_ascii_alphanumeric() || c == b'-' || c == b'_')
+}
+
 /// The engine's rule for a metadata address: `rediss://<name>:<port>/<db>`
 /// (or `redis://` for a local stack), no credentials, no query, and a name,
 /// never an address, over TLS (the proxy routes by SNI, DECISIONS #25).
@@ -245,6 +259,7 @@ pub(crate) mod tests {
                 "rediss://{}.meta.example.com:6443/1",
                 name.to_lowercase().replace(' ', "-")
             ),
+            region: None,
             cache_expire_days: 30,
             mount_path: format!("/Volumes/Floppy/{name}"),
         }
@@ -309,6 +324,30 @@ pub(crate) mod tests {
         assert_eq!(second.disks[0].access, Access::Write);
         assert!(!second.disks[0].enabled);
         assert!(second.disks[1].enabled && second.disks[2].enabled);
+    }
+
+    #[test]
+    fn carries_the_buckets_region_for_the_mount() {
+        let mut garage = disk("0192-a", "Archivio", Access::Read);
+        garage.region = Some("garage".into());
+        let mut empty = disk("0192-b", "Showreel", Access::Read);
+        empty.region = Some(String::new());
+        let mut odd = disk("0192-c", "Nuovo", Access::Read);
+        odd.region = Some("eu south".into());
+        let older = disk("0192-d", "Vecchio", Access::Read);
+        let (file, rejected) = build(&config(vec![garage, empty, odd, older]), "u", None);
+        assert!(rejected.is_empty());
+        let regions: Vec<Option<&str>> = file
+            .disks
+            .iter()
+            .map(|d| d.bucket_region.as_deref())
+            .collect();
+        assert_eq!(regions, [Some("garage"), None, None, None]);
+        let json = serde_json::to_value(&file).unwrap();
+        assert_eq!(json["disks"][0]["bucket_region"], "garage");
+        assert!(json["disks"][1].get("bucket_region").is_none());
+        assert!(valid_region("eu-south-mil") && valid_region("us_east_1"));
+        assert!(!valid_region("") && !valid_region("a/b") && !valid_region(&"a".repeat(65)));
     }
 
     #[test]
