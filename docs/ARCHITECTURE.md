@@ -78,7 +78,7 @@ The cache lives on each Mac's SSD, inside the Linux machine's disk, managed by t
 - **They survive a restart**, until: the cache reaches `--cache-size` (the least recently used blocks go), free space drops below `--free-space-ratio` (default 10%), `--cache-expire` runs out if set, or they are freed by hand with `juicefs warmup --evict <folder>`. The blocks of a deleted file disappear at once on the Mac that deletes it; on the others they become orphans and are the first to go.
 - **`--free-space-ratio` does not protect the Mac**: it looks at the Linux machine's disk, not the Mac's. In the package the cache ceiling and the emergency eviction are computed on the Mac side (see [macOS package](#macos-package)).
 - **Every Mac has its own cache**: what one person has watched does not help the others.
-- **Offline it is read-only**: the file tree lives in the central Valkey, but each VM keeps a replica of it. Without a network the disk can still be browsed and the cached blocks read; writes fail with "read-only file system" until the master answers again. Measured in the spike; the panel has to say it (ROADMAP 3).
+- **Offline it is read-only**: the file tree lives in the central Valkey, but each VM keeps a replica of it. Without a network the disk can still be browsed and the cached blocks read; writes fail with "read-only file system" until the master answers again. Measured in the spike; the panel has to say it (ROADMAP 4).
 - **Never stale data**: a modified file is written to new blocks, and the cached ones simply go unused.
 
 ## Measured performance
