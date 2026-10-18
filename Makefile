@@ -27,12 +27,16 @@ app: ## Floppy.app with the engine inside and the cask's DMG, in dist/app (needs
 web-check: ## The admin web: typecheck, lint and build
 	cd web && pnpm install --frozen-lockfile && pnpm typecheck && pnpm lint && pnpm build
 
-server-check: ## The control plane: format, lint, types and tests (needs `docker compose --profile test up -d db meta-test-1 meta-test-2 meta-test-3` in server/)
+server-check: ## The control plane: format, lint, types and tests (needs `docker compose --profile test up -d --build db meta-test-1 meta-test-2 meta-test-3 meta-test` in server/)
 	cd server && uv run ruff format --check . && uv run ruff check . && uv run mypy && uv run --env-file .env pytest
 
 site-check: ## The site: Astro check and build
 	cd site && pnpm install --frozen-lockfile && pnpm check && pnpm build
 
-check: lint engine-test app-check web-check server-check site-check ## The full quality pass
+meta-check: ## The meta service: format, lint, types, and its tests in its image
+	cd meta && uv run ruff format --check . && uv run ruff check . && uv run mypy
+	docker build --target test -t floppy-meta-test meta/ && docker run --rm floppy-meta-test
 
-.PHONY: help lint engine-test app-check app web-check server-check site-check check
+check: lint engine-test app-check web-check server-check meta-check site-check ## The full quality pass
+
+.PHONY: help lint engine-test app-check app web-check server-check meta-check site-check check

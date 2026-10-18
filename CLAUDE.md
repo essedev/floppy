@@ -46,6 +46,8 @@ app/scripts/render-marks.sh    # tray PNGs and app icons from design/mark/
 
 # Control plane: server/ (commands in .claude/rules/server.md); admin web, dev on the fake API
 cd web && pnpm dev             # http://localhost:4508; pnpm typecheck, lint, build
+make meta-check                # the meta service (meta/): one Valkey per disk
+FLOPPY_JUICEFS_DIST=spike/juicefs-replica/dist deploy/check/check.py   # the Dokploy compose behind Traefik on 443, 20 checks
 ```
 
 ## Gotchas
