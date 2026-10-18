@@ -34,7 +34,8 @@ DISKS_FILE="$FLOPPY_HOME/disks.json"
 # The password between this Mac and its own VM, made by setup.
 SMB_SECRET="$FLOPPY_HOME/smb-password"
 LOCK_FILE="$FLOPPY_HOME/engine.lock"
-# The VM address the share was last mounted from (share_mount).
+# The server the share was last mounted from, the VM's name or its address
+# (share_mount, share_server).
 SHARE_ADDRESS="$FLOPPY_HOME/share-address"
 # How often the agent checks the VM, the share and the Mac's free space.
 TICK_SECONDS=120
@@ -120,21 +121,26 @@ take_lock() {
   /usr/bin/lockf -s -t 900 9 || die "another floppy command is still running"
 }
 
-# This install's share, as "<VM address> <mount point>". A development VM
-# beside the real install mounts its own //drive@<its address>/Floppy, so the
-# share is found by the address it was mounted from (SHARE_ADDRESS), never
-# by name alone: a dev VM's `disks clear` would otherwise unmount the real
-# disk by force. A share mounted before the address was recorded is taken by
-# the real install only, as before.
+# This install's share, as "<server> <mount point>". The share is mounted as
+# //drive@<VM name>/Floppy (share_server), or from the VM's address when the
+# name cannot be used, and a development VM beside the real install mounts
+# its own: the share is found by its own VM's name or by the address it was
+# mounted from (SHARE_ADDRESS), never by the share's name alone, or a dev
+# VM's `disks clear` would unmount the real disk by force. A share mounted by
+# address before the address was recorded is taken by the real install only.
 share_mount() {
-  local ip pat
-  ip=$(cat "$SHARE_ADDRESS" 2>/dev/null || true)
-  case "$ip" in
-    "" | *[!0-9.]*) [ "$VM" = floppy ] || return 0; pat='[0-9.]*' ;;
-    *) pat=$(printf '%s' "$ip" | sed 's/\./\\./g') ;;
+  local rec servers
+  rec=$(cat "$SHARE_ADDRESS" 2>/dev/null || true)
+  servers=$(ere "$VM")
+  case "$rec" in
+    "") [ "$VM" != floppy ] || servers="$servers|[0-9.]+" ;;
+    *[!0-9.]*) ;;
+    *) servers="$servers|$(ere "$rec")" ;;
   esac
-  /sbin/mount | sed -n "s|^//drive@\($pat\)/$SHARE on \(.*\) (smbfs.*|\1 \2|p" | head -1
+  /sbin/mount | sed -En "s#^//drive@($servers)/$SHARE on (.*) \(smbfs.*#\1 \2#p" | head -1
 }
+# A name or address as an extended regular expression that matches only it.
+ere() { printf '%s' "$1" | sed 's/[.]/\\./g'; }
 # Where macOS mounted the share. Usually /Volumes/Floppy, but macOS picks
 # Floppy-1 and so on when the name is taken, so it is never assumed.
 mount_point() { share_mount | cut -d' ' -f2-; }
@@ -242,18 +248,53 @@ start_vm() {
   esac
 }
 
-# macOS fails an SMB read after 30 s without a reply. On a slow link a read
-# can wait longer while JuiceFS fetches blocks, and the Finder would get an
-# I/O error. Raise the limit for the VM's address only, in the user's
-# nsmb.conf, inside a block this script owns.
-set_smb_timeout() {
+# This install's servers in the user's nsmb.conf, inside a block this script
+# owns. The VM's name maps to its address (addr=), so the share mounts as
+# smb://drive@floppy/Floppy and the Finder's sidebar reads "floppy", not
+# the address: no DNS, mDNS or administrator rights, and nothing on the
+# network can answer for the name. And macOS fails an SMB read after 30 s
+# without a reply: on a slow link a read can wait longer while JuiceFS
+# fetches blocks, and the Finder would get an I/O error. The limit is raised
+# for the name and for the address, the server of a share mounted by address.
+set_smb_servers() {
   local ip="$1" rest=""
   [ -f "$NSMB_CONF" ] && rest=$(sed "/^$NSMB_BEGIN\$/,/^$NSMB_END\$/d" "$NSMB_CONF")
   {
     [ -n "$rest" ] && printf '%s\n' "$rest"
-    printf '%s\n[%s]\nmax_resp_timeout=600\n%s\n' "$NSMB_BEGIN" "$ip" "$NSMB_END"
+    printf '%s\n[%s]\naddr=%s\nmax_resp_timeout=600\n[%s]\nmax_resp_timeout=600\n%s\n' \
+      "$NSMB_BEGIN" "$VM" "$ip" "$ip" "$NSMB_END"
   } > "$NSMB_CONF.tmp"
   mv "$NSMB_CONF.tmp" "$NSMB_CONF"
+}
+
+# The server for the mount URL: the VM's name, mapped to its address by
+# nsmb.conf. The SMB client asks the system resolver first and reads addr only
+# when the name does not resolve, so a host of the same name in the office DNS
+# or a VPN's search domain would take the mount: then, or when the resolver
+# does not answer within 3 s (the client would wait as long), the address.
+share_server() {
+  local ip="$1" out pid
+  out=$(mktemp)
+  /usr/bin/dscacheutil -q host -a name "$VM" >"$out" 2>/dev/null &
+  pid=$!
+  for _ in 1 2 3 4 5 6; do
+    if ! kill -0 "$pid" 2>/dev/null; then
+      wait "$pid" || true
+      if [ -s "$out" ]; then
+        log "$(date '+%F %T') $VM resolves on this network: mounting from $ip"
+        echo "$ip"
+      else
+        echo "$VM"
+      fi
+      rm -f "$out"
+      return 0
+    fi
+    sleep 0.5
+  done
+  kill "$pid" 2>/dev/null || true
+  rm -f "$out"
+  log "$(date '+%F %T') the resolver is not answering: mounting from $ip"
+  echo "$ip"
 }
 
 # Used only when the user stops or removes the drive, or when the VM behind
@@ -273,7 +314,7 @@ unmount_share() {
 # force.
 mount_share() {
   if is_mounted; then
-    # A share mounted by an earlier version: from now on found by its address.
+    # A share mounted by an earlier version: from now on found by its server.
     [ -s "$SHARE_ADDRESS" ] || share_mount | cut -d' ' -f1 > "$SHARE_ADDRESS"
     [ "${1:-}" = keep ] && return 0
     for _ in 1 2 3; do
@@ -284,10 +325,10 @@ mount_share() {
     /usr/sbin/diskutil unmount "$(mount_point)" >/dev/null 2>&1 \
       || die "the disk is busy and not responding: close the apps using it and run floppy start again"
   fi
-  local ip
+  local ip server
   ip=$(vm_ip)
   [ -n "$ip" ] || die "VM has no network address"
-  set_smb_timeout "$ip"
+  set_smb_servers "$ip"
   for _ in $(seq 60); do
     /usr/bin/nc -z -G 1 "$ip" 445 2>/dev/null && break
     sleep 1
@@ -303,8 +344,16 @@ mount_share() {
     rmdir "/Volumes/$SHARE" 2>/dev/null || true
     sleep 1
   done
-  printf '%s\n' "$ip" > "$SHARE_ADDRESS"
-  /usr/bin/osascript -e "mount volume \"smb://drive:$(smb_password)@$ip/$SHARE\"" >/dev/null
+  server=$(share_server "$ip")
+  printf '%s\n' "$server" > "$SHARE_ADDRESS"
+  # By name it can only fail where the address works if nsmb.conf is not
+  # read: the disk still mounts, from the address.
+  if ! /usr/bin/osascript -e "mount volume \"smb://drive:$(smb_password)@$server/$SHARE\"" >/dev/null 2>&1 \
+      && [ "$server" != "$ip" ]; then
+    log "$(date '+%F %T') mounting as $server failed: mounting from $ip"
+    printf '%s\n' "$ip" > "$SHARE_ADDRESS"
+    /usr/bin/osascript -e "mount volume \"smb://drive:$(smb_password)@$ip/$SHARE\"" >/dev/null || true
+  fi
   is_mounted || die "mount failed"
   if [ "$(mount_point)" != "/Volumes/$SHARE" ]; then
     log "$(date '+%F %T') warning: mounted at $(mount_point), CapCut links to /Volumes/$SHARE will break"

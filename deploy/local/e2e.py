@@ -219,7 +219,7 @@ def in_vm(script: str, timeout: float = 600) -> str:
 
 def smb_shares() -> set[str]:
     """Every Floppy share on this Mac, as `/sbin/mount` lists it."""
-    return {line for line in run("/sbin/mount").stdout.splitlines() if re.match(r"^//drive@[0-9.]+/Floppy on ", line)}
+    return {line for line in run("/sbin/mount").stdout.splitlines() if re.match(r"^//drive@[^/]+/Floppy on ", line)}
 
 
 def mounted_at(path: str | None) -> bool:

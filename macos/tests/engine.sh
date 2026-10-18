@@ -10,7 +10,7 @@
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 FLOPPY="$here/../bin/floppy"
-if /sbin/mount | grep -q '^//drive@[0-9.]*/Floppy on '; then
+if /sbin/mount | grep -q '^//drive@[^/]*/Floppy on '; then
   echo "engine.sh: a Floppy share is mounted; unmount it before running the tests" >&2
   exit 2
 fi
