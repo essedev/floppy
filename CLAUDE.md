@@ -16,7 +16,7 @@ The full glossary is in [docs/CONVENTIONS.md](docs/CONVENTIONS.md#glossary). The
 ## Commands
 
 ```bash
-make check                               # bash -n, shellcheck, prose language
+make check                               # the full quality pass; make lint: bash -n, shellcheck, prose language
 make app                                 # dist/app/Floppy.app and its DMG, the engine inside; needs Docker running
 scripts/release-app.sh                   # tag, GitHub release, cask into essedev/homebrew-floppy (outward: only when Simone asks)
 scripts/package.sh my-test.env [dist]    # zip for a tester (holds the keys), until the cask replaces it
@@ -51,7 +51,7 @@ deploy/local/e2e.py
 # Control plane: server/ (commands in .claude/rules/server.md); admin web, dev on the fake API
 cd web && pnpm dev             # http://localhost:4508; pnpm typecheck, lint, build
 make meta-check                # the meta service (meta/): one Valkey per disk
-FLOPPY_JUICEFS_DIST=spike/juicefs-replica/dist deploy/check/check.py   # the Dokploy compose behind Traefik on 443, 20 checks
+FLOPPY_JUICEFS_DIST=spike/juicefs-replica/dist deploy/check/check.py   # the Dokploy compose behind Traefik on 443, 23 checks
 ```
 
 ## Gotchas

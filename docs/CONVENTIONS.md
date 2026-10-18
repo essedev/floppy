@@ -1,6 +1,6 @@
 # Conventions
 
-The code today is bash and configuration (Lima, systemd, Samba). The Tauri app, when it arrives, follows the TypeScript and Rust layout of [Portsage](https://github.com/essedev/portsage).
+The engine is bash and configuration (Lima, systemd, Samba), and the sections below are mostly its rules. The control plane and the meta service are Python (`server/`, `meta/`, rules in `.claude/rules/server.md`); the menu bar app is Tauri with TypeScript and Rust in the layout of [Portsage](https://github.com/essedev/portsage) (rules in `.claude/rules/app.md`); the admin web and the site are TypeScript.
 
 ## Language
 
@@ -22,8 +22,10 @@ Public repository: code, comments, docs and commits are in English.
 | Term | Meaning |
 |---|---|
 | Disk, Floppy | What the user sees in the Finder, mounted at `/Volumes/Floppy`. A team's disks are its folders, `/Volumes/Floppy/<disk>` (DECISIONS #20). |
-| Volume | The JuiceFS filesystem behind a disk, with a slug name (`VOLUME_NAME`) never shown to the user. One per Mac in the test package; in the team version one per disk, its metadata in its own database of the organization's Valkey. |
-| Metadata | JuiceFS's tree of files and folders. In the test it lives in SQLite inside the VM. |
+| Volume | The JuiceFS filesystem behind a disk, with a slug name (`VOLUME_NAME`) never shown to the user. One per Mac in the test package; in the team version one per disk, its metadata in the disk's own Valkey instance (DECISIONS #23). |
+| Metadata | JuiceFS's tree of files and folders. In the test it lives in SQLite inside the VM; in the team version in each disk's Valkey instance, with a replica in the VM of every device that may see the disk. |
+| Device | A Mac registered to the control plane, with its own token, Valkey password and, in managed mode, S3 key. The web and the server say device, not Mac. |
+| Meta service | `meta/`: the container that runs one Valkey instance per disk, reached through the reverse proxy on one TLS port (DECISIONS #25). |
 | Cache | Blocks already downloaded, on the VM's disk. |
 | Warmup, "Make available" | Preloading a folder into the cache (`floppy warmup`). "Rendi disponibile" in the Italian UI. |
 | Evict, "Free up space" | Dropping a folder from the cache (`floppy free`). "Libera spazio" in the Italian UI. |

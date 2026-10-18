@@ -13,7 +13,7 @@ Su macOS JuiceFS richiederebbe l'estensione del kernel di macFUSE, cioè avviare
 ```
 Finder  ->  SMB (private Mac-VM link)  ->  Samba + JuiceFS in a Lima VM  ->  S3 bucket
                                             cache on the Mac's SSD           metadata: SQLite in the VM (test)
-                                                                                       or PostgreSQL (shared)
+                                                                                       or Valkey, replica in the VM (team)
 ```
 
 ## Installazione
@@ -24,7 +24,7 @@ Floppy si distribuisce come cask di Homebrew: l'app della barra dei menu con il 
 brew install --cask essedev/floppy/floppy
 ```
 
-Il tap (`essedev/homebrew-floppy`) non è ancora pubblicato. L'app si costruisce con `make app` (`scripts/build-app.sh`), che vuole Docker acceso perché il JuiceFS patchato si compila e i pacchetti Debian della VM si scaricano in container. Produce `dist/app/Floppy.app` (circa 555 MB: Lima, l'immagine Debian, JuiceFS con le patch di Floppy da `spike/juicefs-replica`, i pacchetti Debian) e il DMG che il cask scarica (circa 410 MB). Al primo avvio l'app installa il motore in `~/.floppy` e prepara il disco; dopo un aggiornamento propone l'aggiornamento del motore. `scripts/release-app.sh` pubblica una release e il cask (`packaging/homebrew`).
+Il tap (`essedev/homebrew-floppy`) non ha ancora un cask: lo scrive la prima release. L'app si costruisce con `make app` (`scripts/build-app.sh`), che vuole Docker acceso perché il JuiceFS patchato si compila e i pacchetti Debian della VM si scaricano in container. Produce `dist/app/Floppy.app` (circa 555 MB: Lima, l'immagine Debian, JuiceFS con le patch di Floppy da `spike/juicefs-replica`, i pacchetti Debian) e il DMG che il cask scarica (circa 410 MB). Al primo avvio l'app installa il motore in `~/.floppy` e prepara il disco; dopo un aggiornamento propone l'aggiornamento del motore. `scripts/release-app.sh` pubblica una release e il cask (`packaging/homebrew`).
 
 Finché la versione per i team non configura il disco dall'accesso, chi prova riceve uno zip costruito da una configurazione compilata, con lo stesso motore:
 

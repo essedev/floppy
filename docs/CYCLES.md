@@ -2,6 +2,18 @@
 
 Log of the work done, most recent first. Plans are in [ROADMAP.md](ROADMAP.md), the reasons behind the choices in [ARCHITECTURE.md](ARCHITECTURE.md).
 
+## 10. The team version end to end (17-18/10/2026)
+
+- **Per-disk permissions** (DECISIONS #23-#25, superseding #19 and #22): each person has none, read or read-write on each disk, enforced with one Valkey instance and one bucket per disk. Proven in the spike first: `spike/perdisk.py` (read-only mounts, users and keys, a tampered mount, access lowered while mounted, hidden disks, per-bucket keys on Garage), an immutable share root after a `0555` root and `--all-squash` both failed, and `spike/metatls.py`, the disks' instances behind Traefik on one TLS port routed by name.
+- **Control plane** (migration 0003): disks with their own instance and bucket, access per person and per disk written as owed state, applied live and finished by the reconciler, key rotations and windows per disk, and a device configuration with the metadata CA, the Valkey user and each disk's S3 region.
+- **Meta service** (`meta/`): one valkey-server per disk as child processes behind an internal API, reached by an opaque label, AOF with `appendfsync always` plus RDB, ACL users saved every 30 s, Traefik's routes over its HTTP provider.
+- **Engine**: team disks in `macos/` beside the single-user mode, per disk a Valkey replica and a patched JuiceFS mount under the immutable root, driven by `floppy disks apply` and `floppy disks clear` and never forcing a busy disk; Samba's directory leases off, since the macOS client kept every listed folder open; a kernel lock for the engine; `install.sh` without a `config.env`. The tester zip now carries the patched JuiceFS, its version naming the patch set.
+- **App**: sign-in by code or link with PKCE, registration and heartbeat, secrets only in the Keychain; the engine installed and updated from the app bundle (`make app`, the cask in `packaging/homebrew`, DECISIONS #26); the team's disks in the panel and Settings; sign-out and revocation clear the disks before the Keychain.
+- **Web**: access as a people-by-disks matrix, disk creation with its bucket and key (manual) or nothing (managed), invitations that list disks, keys and rotations per disk.
+- **Deploy**: `deploy/docker-compose.yml` for Dokploy, with the web and the API on one origin and each disk's Valkey on the same 443; `deploy/check/check.py` verifies it behind Dokploy's own Traefik configuration, whose default timeouts turned out to be enough (idle connections held for 10 minutes). Self-hosting pages on the site.
+- **End to end** (`deploy/local/`, `e2e.py`): a local instance, a real VM and the app's own code. Sign-in by code in 0.6 s, the disks mounted 5-10 s later, a read-only disk refusing writes, a second device reading the same data, a lowered access remounted read-only 70-72 s later, a revocation cleared in 2-3 s. Found on the way: a managed Garage disk refused uploads because JuiceFS signed with `us-east-1`; each disk's region now reaches the mount.
+- **Next**: the first release through the cask, the first instance on Dokploy, the measures on OVH.
+
 ## 9. The team product takes shape (17/10/2026)
 
 - **Shared design system** (`design/tokens.css`, `design/mark/`): the tokens, detail set A and the final marks for every surface; colour lives only in the LED, the slot included.

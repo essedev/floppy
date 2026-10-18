@@ -1,6 +1,6 @@
 # Decisions
 
-Decisions that bind the future, each with the alternative it ruled out. Cite them as `DECISIONS #N`. Status: proposed, active, superseded. The story of how they came about is in [CYCLES.md](CYCLES.md), the reasoning in [ARCHITECTURE.md](ARCHITECTURE.md).
+Decisions that bind the future, each with the alternative it ruled out. Cite them as `DECISIONS #N`. Status: proposed, active, superseded. Entries no longer active (#4, #19, #22) are in [decisions-archive.md](decisions-archive.md), with their numbers. The story of how they came about is in [CYCLES.md](CYCLES.md), the reasoning in [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## 1. JuiceFS in a Linux VM, shared to the Mac over SMB
 
@@ -17,11 +17,6 @@ A Valkey replica copies its whole instance, so every disk has its own Valkey ins
 
 **Active, 16/10/2026.** Protection matters only where hosting happens; the client side stays free to reuse. The author keeps the copyright, so a hosted service and commercial licenses stay possible; outside contributions to the control plane need a CLA first.
 **Ruled out:** MIT everywhere (anyone could resell a hosted copy), AGPL everywhere.
-
-## 4. Only standard S3 and standard database protocols in the core
-
-**Superseded by #22, 17/10/2026.** The core uses plain S3 and a Redis-compatible metadata server; no provider API. Per-person S3 keys were dropped: the S3 key lives in the volume's metadata, a revoked Mac loses it with its metadata access, and the key is rotated by pasting a new one (`juicefs config`).
-**Ruled out:** provisioning S3 users through the OVH API, which would tie the product to one provider.
 
 ## 5. Shared metadata on Valkey with a local replica in every VM
 
@@ -94,11 +89,6 @@ Criteria that emerged while choosing: a real word of one or two syllables, read 
 **Active, 17/10/2026.** Revoking a Mac that had a Valkey user, or removing a person who had one, opens the "rotate the S3 key" window; signing out from the app does not, since its owner keeps access. Closing a rotation (the admin confirms the old key is deleted at the provider) closes only the exposures that happened before the rotation started: a Mac revoked while it was applying may already have read the new key from its replica. The rotation waits for every disk, not for every Mac.
 **Ruled out:** closing every reason at once, closing when the new key is applied, waiting for Macs that may be switched off.
 
-## 19. Valkey users per Mac and per organization, not per disk
-
-**Superseded by #23, 17/10/2026.** A consequence of #2 and #7: a Mac's replica copies the whole Valkey instance, every disk and its S3 key included, so one user per Mac on the organization's instance gives exactly what the Mac can read anyway. Valkey does not replicate ACL users, so the control plane keeps each password's SHA-256 (the form Valkey stores) and rebuilds the users on a promoted or restored master.
-**Ruled out:** a user per disk (it would restrict writes, not reads), an instance per disk until per-disk access is really needed.
-
 ## 20. Several disks are folders of the one share at /Volumes/Floppy
 
 **Active, 17/10/2026.** A team's disks appear as `/Volumes/Floppy/<disk>`: one SMB mount at the fixed mount point, each disk its own JuiceFS mount inside the VM, exported as a subfolder of the `Floppy` share. The folder is the disk's display name, part of every path CapCut keeps, so a disk is never renamed; names are ASCII (letters, digits, space, dot, hyphen, underscore) until a spike shows accented paths survive Samba and CapCut. The JuiceFS name is a slug derived once and never shown. The share's root is immutable (`chattr +i` on the VM's ext4 folder), so nothing can be created beside the disks even by Samba running as root; the engine lifts the flag only to add or remove a disk's folder. A `0555` root with Samba as an unprivileged user and `--all-squash` was ruled out: Samba checks ownership itself, so files written as root by existing installs became unwritable from the Mac (`spike/perdisk.py`, t24 and t26). A disk the person may not see is not mounted, so its folder is absent; a read-only disk is mounted `--read-only`.
@@ -108,11 +98,6 @@ Criteria that emerged while choosing: a real word of one or two syllables, read 
 
 **Active, 17/10/2026.** Macs reach the central Valkey across the internet with their own password, for writes and for replication: the connection is TLS (`rediss://`), on the master and on its replica in the datacenter. SMB stays plain only because it never leaves the Mac.
 **Ruled out:** plain Valkey over the WAN, a VPN or tunnel (a system extension or administrator rights on every Mac).
-
-## 22. Storage in two modes, with team, per-person or per-Mac keys
-
-**Superseded by #24, 17/10/2026.** Supersedes #4; the core still speaks only plain S3. **Manual**, for any S3: the admin picks one team key (kept in the volumes' format, rotated by hand when someone leaves, #18) or one key per person (made at the provider, limited to the bucket by a policy, pasted when inviting; removing the person or losing one of their Macs means deleting that one key, no rotation). With a team key, bucket versioning is recommended (old versions expiring after 7 days, the key denied version deletion), and the control plane checks and shows whether it is on. **Managed**: an optional, isolated adapter (OVH, AWS, MinIO, Garage to start) creates the bucket and gives each Mac (or person) its own key, deleted at the provider on revocation; where a provider cannot scope keys, it rotates a team key by itself. The hosted service always uses managed; mode and scope are fixed once a disk exists. Per-person and per-Mac keys leave the format empty and need JuiceFS to mount with a key from the environment (the AWS SDK's chain when the format holds none, or a patch), and a team rotation without the key in argv needs patch 0003. Details in [DATABASE_SCHEMA.md](DATABASE_SCHEMA.md#storage-modes).
-**Ruled out:** provider APIs in the core (adapters are optional and outside it), per-person or per-Mac keys stored in the format (every replica would carry every key), managed-only (it would drop any S3 without an adapter), versioning without a key that is denied version deletion (a copied key would erase the versions too).
 
 ## 23. Per-disk access: one Valkey instance and one bucket per disk
 
@@ -128,3 +113,8 @@ Criteria that emerged while choosing: a real word of one or two syllables, read 
 
 **Active, 17/10/2026.** The control plane does not start containers: a `meta` service in the compose runs one Valkey instance per disk, created, reconfigured and stopped on the control plane's request, with its data on the service's volume. Devices reach every instance on one public TLS port, where the reverse proxy (Traefik, as Dokploy ships it) routes by the name in the TLS handshake, `<disk>.meta.<domain>`, with a wildcard certificate. TLS ends at the proxy, which renews the certificate, and goes on in plain text to the instance on the private network. Verified in `spike/metatls.py`: the patched JuiceFS and a Valkey replica both send the name, the replica only when `replicaof` gets a name, never an IP; the proxy keeps its default timeouts, since `readTimeout` bounds only the wait for the TLS ClientHello and is cleared before the TCP router (idle for 10 minutes in `deploy/check`), so a shared Traefik needs no change for other applications; it adds 0.04-0.08 ms per round trip.
 **Ruled out:** the Docker socket in the control plane, Valkey's numbered databases (a replica copies them all), a port per disk as the first choice (a firewall rule for every new disk).
+
+## 26. The engine ships inside the app
+
+**Active, 17/10/2026.** Floppy.app carries the whole engine (Lima, the Debian image, the patched JuiceFS, the Debian packages for the VM), about 555 MB and a 410 MB DMG, and installs it by running the same `install.sh` as the tester zip. An install reaches no host but Homebrew's download of the app: an office DNS that did not resolve `cloud.debian.org` broke both of a tester's first installs. The engine moves only with an app release, and an update over a working disk waits for the user, because `floppy setup` restarts the drive. Details in [ARCHITECTURE.md](ARCHITECTURE.md#macos-package).
+**Ruled out:** a small app that downloads the engine at first run, the app copying the engine's files itself instead of `install.sh` (two copies of the install logic).

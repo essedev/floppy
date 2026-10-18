@@ -1,6 +1,6 @@
 # Architecture
 
-Floppy is a shared remote disk for teams that edit video: on a Mac it shows up as a volume in the Finder, the files live on S3 object storage, and the people working on it need to know nothing else. This document collects the analysis so far and the reasons behind the decisions, which are listed in [DECISIONS.md](DECISIONS.md). The project is between a test package (one disk per Mac, metadata in SQLite inside each VM, tested on an OVH bucket in Milan) and the team architecture: a team's disks shared by every Mac, as folders of one Floppy disk in the Finder, metadata in a central Valkey with a replica in each Mac's VM, a control plane for sign-in and access, a menu bar app. The team architecture is drawn in [architecture.html](architecture.html) and proven in a local spike; its parts (control plane, engine, app and cask) are built and are being joined end to end.
+Floppy is a shared remote disk for teams that edit video: on a Mac it shows up as a volume in the Finder, the files live on S3 object storage, and the people working on it need to know nothing else. This document collects the analysis so far and the reasons behind the decisions, which are listed in [DECISIONS.md](DECISIONS.md). The project is between a test package (one disk per Mac, metadata in SQLite inside each VM, tested on an OVH bucket in Milan) and the team architecture: a team's disks shared by every Mac, as folders of one Floppy disk in the Finder, metadata in a central Valkey with a replica in each Mac's VM, a control plane for sign-in and access, a menu bar app. The team architecture is drawn in [architecture.html](architecture.html) and proven in a local spike; its parts (control plane, meta service, engine, app and cask) are built and work end to end on a local stack ([Team disks](#team-disks)); the first self-hosted instance and the first release are next.
 
 Prices and features of third-party services were checked on 06/10/2026, the alternatives again on 17/10/2026, and must be checked again before deciding.
 
@@ -63,17 +63,17 @@ Measured in the spike at a simulated 15 ms, from the Mac over SMB (DECISIONS #5,
 - **0001**: metadata reads from the local replica, writes in one round trip, read-your-writes (above).
 - **0002**: whole-block reads inside a sequential stream (DECISIONS #15).
 - **0003**: `juicefs config` and `juicefs format` take `ACCESS_KEY` and `SECRET_KEY` from the environment for an existing volume. Upstream they change only the flags passed on the command line (`ctx.LocalFlagNames()` in `cmd/config.go` and `cmd/format.go`, verified against Garage), so a team key rotation would put the secret in argv, visible in `ps`.
-- **Possibly 0004**: `juicefs mount` taking the S3 key from the environment, for per-person and per-Mac keys (DECISIONS #22), if a format with no stored key does not already mount with the AWS SDK's chain against Garage and OVH.
+- **No 0004 so far**: a format with no stored key, as in managed mode (DECISIONS #24), mounts with the device's S3 key from the environment through the AWS SDK's chain, verified on Garage; OVH is still to check.
 
 **Why Valkey and not PostgreSQL**: one round trip per write through server-side scripts, and native replication simple enough to run a replica in each VM. Valkey and not Redis: Redis moved to source-available licenses in 2024 and to AGPL as an option in 2025; Valkey is BSD and in Debian 13 (8.1.1). The price is durability, which has to be configured: every write on disk before the answer (`appendfsync always`), a replica in the datacenter, a daily `juicefs dump` (see Backup).
 
-**Versioning and Object Lock**: off on the test bucket. JuiceFS has its own trash; with versioning every block JuiceFS deletes or compacts stays in the bucket and is billed until it expires, and Object Lock would stop JuiceFS from deleting and compacting, so it stays off. With a team key versioning is recommended (DECISIONS #22): a revoked Mac that copied the key could delete blocks until the key is deleted at the provider, and versioning keeps them recoverable. A lifecycle rule expires old versions after 7 days, and the key's policy denies `s3:DeleteObjectVersion` and changes to versioning and lifecycle, or the copied key could erase the versions too. The control plane reads the bucket's versioning at every probe and shows it. With per-person or per-Mac keys a revoked key no longer exists, and versioning is optional.
+**Versioning and Object Lock**: off on the test bucket. JuiceFS has its own trash; with versioning every block JuiceFS deletes or compacts stays in the bucket and is billed until it expires, and Object Lock would stop JuiceFS from deleting and compacting, so it stays off. In manual mode versioning is recommended (DECISIONS #24): the disk's key is in its format, so a device that could see the disk, a read-only one included, could delete blocks with it until the key is rotated, and versioning keeps them recoverable. A lifecycle rule expires old versions after 7 days, and the key's policy denies `s3:DeleteObjectVersion` and changes to versioning and lifecycle, or the copied key could erase the versions too. The control plane reads the bucket's versioning at every probe and shows it. In managed mode a revoked device's key no longer exists, and versioning is optional.
 
 ## The cache
 
 The cache lives on each Mac's SSD, inside the Linux machine's disk, managed by the JuiceFS client. It is what makes the disk fast.
 
-- JuiceFS splits every file into 4 MB blocks. When a program reads a point of a video, only the blocks of that point are downloaded, and a copy stays in the cache. Next time they come from the SSD.
+- JuiceFS splits every file into blocks, 1 MB in Floppy's volumes (DECISIONS #15; JuiceFS's default is 4 MB). When a program reads a point of a video, only the blocks of that point are downloaded, and a copy stays in the cache. Next time they come from the SSD.
 - **How blocks get in**: by reading, with prefetch downloading ahead during playback; with `juicefs warmup <folder>`, which preloads a whole project; and by writing, but only with `--cache-large-write`, which is off by default: whoever uploads the footage has it cached, the others do not.
 - **They survive a restart**, until: the cache reaches `--cache-size` (the least recently used blocks go), free space drops below `--free-space-ratio` (default 10%), `--cache-expire` runs out if set, or they are freed by hand with `juicefs warmup --evict <folder>`. The blocks of a deleted file disappear at once on the Mac that deletes it; on the others they become orphans and are the first to go.
 - **`--free-space-ratio` does not protect the Mac**: it looks at the Linux machine's disk, not the Mac's. In the package the cache ceiling and the emergency eviction are computed on the Mac side (see [macOS package](#macos-package)).
@@ -261,7 +261,7 @@ Hence the Linux machine with SMB: no extension on the Mac. In the spike it was D
 
 The macOS module: a command (`macos/bin/floppy`), the engine the Tauri app drives. `scripts/build-engine.sh` assembles it with everything the VM needs and no secrets; the app carries it inside its bundle and installs it on first run, and until the team version configures the disk from the sign-in the tester zip (`scripts/package.sh <config.env>`) carries the same engine plus a `config.env`, installed with `bash install.sh` from the Terminal.
 
-- **Inside the app**: `scripts/build-app.sh` (`make app`) builds Floppy.app with Tauri and copies the engine into `Contents/Resources/engine`, with a `BUILD` file holding the hash of its files; the app grows from 6 to about 555 MB, the cask's DMG (LZMA) is about 410 MB. The bundle is signed ad hoc as a whole, without `--deep`: the Mach-O files inside keep their own signatures, and `limactl` keeps Lima's ad hoc signature with the `com.apple.security.virtualization` entitlement, without which the VM does not start. The build checks the entitlement after signing; a VZ VM was booted with the `limactl` copied out of the bundle. `SIGN_IDENTITY` signs with a real identity instead.
+- **Inside the app**: `scripts/build-app.sh` (`make app`) builds Floppy.app with Tauri and copies the engine into `Contents/Resources/engine`, with a `BUILD` file holding the hash of its files; the app grows from 6 to about 555 MB, the cask's DMG (LZMA) is about 410 MB. The bundle is signed ad hoc as a whole, without `--deep`: the Mach-O files inside keep their own signatures, and `limactl` keeps Lima's ad hoc signature with the `com.apple.security.virtualization` entitlement, without which the VM does not start. The build checks the entitlement after signing; a VZ VM was booted with the `limactl` copied out of the bundle. `SIGN_IDENTITY` signs with a real identity instead; `scripts/release-app.sh` uses "Floppy Self-Signed", a self-signed certificate in its own keychain made by `scripts/setup-signing.sh`, stable across versions so macOS sees the same app after an update and does not ask again for the device token in the Keychain.
 - **First run and updates** (`app/src-tauri/src/installer.rs`): the app runs the bundled `install.sh`, the same script as the zip, with `FLOPPY_HOME` pointing at the engine's home: it replaces `lima`, `bin` and `vm` in `~/.floppy`, keeps configuration, VM and volume, and runs `floppy setup`. Once it succeeds the app writes the bundle's `BUILD` into `~/.floppy/engine-build`; an engine with another build (an older app, or the zip) is offered as an update. The first-run window installs the engine on a fresh Mac and shows the progress; on a Mac that already has the disk the update waits for the user ("Update now" in the panel), because `setup` restarts JuiceFS and Samba in the VM and would break a copy in progress. `tauri dev` and a `FLOPPY_BIN` override carry no engine and install nothing.
 - **Homebrew** (DECISIONS #10): the cask's source is `packaging/homebrew/Casks/floppy.rb`; `scripts/release-app.sh` builds the DMG, tags, publishes the GitHub release and writes the cask with version and sha256 into the tap `essedev/homebrew-floppy` (`packaging/homebrew/render.sh`). Homebrew quarantines every cask download and no longer has `--no-quarantine`; Gatekeeper is enforced only on the official `homebrew/cask`, while a third-party tap may clear the flag. The cask does it for Floppy.app alone in `postflight_steps` (the declarative form `brew style` requires; Relay's tap does the same), and the engine copied out of the bundle inherits no flag. Since Homebrew 6 a third-party tap needs trust: the fully qualified `brew install --cask essedev/floppy/floppy` trusts that cask only. Uninstalling the cask quits and removes the app and leaves `~/.floppy`, whose VM holds the metadata; `zap` removes the app's own files and login item.
 
@@ -300,7 +300,7 @@ The engine of the team version, in `macos/` next to the single-user mode, which 
 ```json
 {
   "version": 1,
-  "meta_user": "dev-0192f0c4",
+  "meta_user": "floppy_d_0192f0c47d1e7a409e523c1d2b9a0f22",
   "meta_ca": null,
   "cache_max_mb": 102400,
   "reserve_mb": 20480,
@@ -310,7 +310,7 @@ The engine of the team version, in `macos/` next to the single-user mode, which 
       "folder": "Archivio 2025",
       "slug": "archivio-2025",
       "access": "read",
-      "meta_url": "rediss://archivio-2025.meta.example.com:6443/1",
+      "meta_url": "rediss://n4rq7xk2m5vb3hd6.meta.example.com:443/1",
       "bucket_url": "https://s3.eu-south.io.cloud.ovh.net/floppy-archivio-2025",
       "bucket_region": "eu-south-mil",
       "cache_expire_days": 30,
@@ -327,7 +327,7 @@ The engine of the team version, in `macos/` next to the single-user mode, which 
 | `cache_max_mb`, `reserve_mb` | The Mac-side cache ceiling and reserve (`CACHE_SIZE_MB` and `RESERVE_MB` of the single-user mode); defaults 102400 and 20480 |
 | `id` | The disk's id: lowercase letters, digits, hyphens. It names the disk's units, cache and files in the VM |
 | `folder` | The display name, the folder in `/Volumes/Floppy` (the rules of DECISIONS #20, unique without case) |
-| `slug` | Informative; the meta address already holds it |
+| `slug` | Informative: the volume's JuiceFS name, never shown. The meta address holds an opaque label, not the disk's name (DECISIONS #25) |
 | `access` | `read` (mounted `--read-only`) or `write` |
 | `meta_url` | `rediss://<name>:<port>/<db>`, no credentials, no query. A name, never an address: the proxy routes by SNI and the replica sends SNI only for a name (DECISIONS #25). `redis://` only for a local stack |
 | `bucket_url` | Optional: overrides the endpoint stored in the format (`juicefs mount --bucket`) |

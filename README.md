@@ -13,7 +13,7 @@ On macOS JuiceFS would need macFUSE's kernel extension, which means booting ever
 ```
 Finder  ->  SMB (private Mac-VM link)  ->  Samba + JuiceFS in a Lima VM  ->  S3 bucket
                                             cache on the Mac's SSD           metadata: SQLite in the VM (test)
-                                                                                       or PostgreSQL (shared)
+                                                                                       or Valkey, replica in the VM (team)
 ```
 
 ## Install
@@ -24,7 +24,7 @@ Floppy ships as a Homebrew cask: the menu bar app with the engine inside, so the
 brew install --cask essedev/floppy/floppy
 ```
 
-The tap (`essedev/homebrew-floppy`) is not published yet. The app is built with `make app` (`scripts/build-app.sh`), which needs Docker running because the patched JuiceFS is built and the Debian packages for the VM are fetched in containers. It produces `dist/app/Floppy.app` (about 555 MB: Lima, the Debian image, JuiceFS with Floppy's patches from `spike/juicefs-replica`, the Debian packages) and the DMG the cask downloads (about 410 MB). On first run the app installs the engine into `~/.floppy` and prepares the disk; after an upgrade it offers the engine's update. `scripts/release-app.sh` publishes a release and the cask (`packaging/homebrew`).
+The tap (`essedev/homebrew-floppy`) has no cask yet: the first release writes it. The app is built with `make app` (`scripts/build-app.sh`), which needs Docker running because the patched JuiceFS is built and the Debian packages for the VM are fetched in containers. It produces `dist/app/Floppy.app` (about 555 MB: Lima, the Debian image, JuiceFS with Floppy's patches from `spike/juicefs-replica`, the Debian packages) and the DMG the cask downloads (about 410 MB). On first run the app installs the engine into `~/.floppy` and prepares the disk; after an upgrade it offers the engine's update. `scripts/release-app.sh` publishes a release and the cask (`packaging/homebrew`).
 
 Until the team version configures the disk from the sign-in, testers get a zip built from a filled-in configuration, with the same engine:
 
