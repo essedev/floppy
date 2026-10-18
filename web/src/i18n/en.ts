@@ -377,11 +377,12 @@ export const en: Dict = {
     changeTo: 'Access to {disk}',
     pending: 'Not yet applied to their devices',
     pendingReadout: 'Waiting',
-    legend: 'A change applies at once to connected devices. The orange light means it has not arrived yet: it stays on until the disk’s database answers.',
-    notes: {
-      none: 'With None the disk does not show up in their Finder: no folder, no copy of the metadata.',
-      read: 'With Read the disk opens read only.',
-      lower: 'Lowering an access makes the app remount the disk; removing it, with manual storage, opens that disk’s key window.',
+    howTitle: 'How access works',
+    how: {
+      none: 'The disk does not show up in their Finder: no folder, no copy of the metadata.',
+      read: 'The disk opens read only.',
+      write: 'The disk opens and can be changed. Lowering the access makes the app remount it once its files are closed; removing it, with manual storage, opens that disk’s key window.',
+      pending: 'The change has not reached their devices yet: the light stays on until the disk’s database answers.',
     },
     colPerson: 'Person',
     everyone: 'Everyone',

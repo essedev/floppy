@@ -6,7 +6,8 @@
 
 import { Plus } from 'lucide-react'
 import { Link } from 'react-router'
-import { Avatar, Notice, Readout, SlotList, State } from '@/components/detail'
+import type { ReactNode } from 'react'
+import { Avatar, Notice, Readout, State, Well } from '@/components/detail'
 import { Faceplate } from '@/components/marks'
 import { EmptyState, PageHeader, QueryView, SkeletonRows } from '@/components/states'
 import { useI18n } from '@/i18n'
@@ -64,6 +65,30 @@ function Matrix({ disks, people, access, onError }: { disks: Disk[]; people: Per
   )
 }
 
+function Level({ name, note }: { name: ReactNode; note: string }) {
+  return (
+    <div className="grid content-start gap-1 text-sm">
+      <b className="font-semibold">{name}</b>
+      <span className="text-[13.5px] text-ink-2">{note}</span>
+    </div>
+  )
+}
+
+/** What each access level does, and what the lit light means, in a panel under the matrix. */
+function HowItWorks() {
+  const { t } = useI18n()
+  return (
+    <Well title={t.access.howTitle} className="mt-3.5">
+      <div className="grid gap-x-7 gap-y-4 md:grid-cols-2 xl:grid-cols-4">
+        <Level name={t.access.levels.none} note={t.access.how.none} />
+        <Level name={t.access.levels.read} note={t.access.how.read} />
+        <Level name={t.access.levels.write} note={t.access.how.write} />
+        <Level name={<State led="dl">{t.access.pendingReadout}</State>} note={t.access.how.pending} />
+      </div>
+    </Well>
+  )
+}
+
 /** The access page: people by disks. */
 export function AccessPage() {
   const { t } = useI18n()
@@ -108,10 +133,7 @@ export function AccessPage() {
                 {(accessList) => (
                   <>
                     <Matrix disks={diskList} people={peopleList.filter((p) => p.status !== 'removed')} access={accessList} onError={setFlash} />
-                    <div className="mt-6 grid max-w-[72ch] gap-3 text-[13.5px] text-ink-2">
-                      <p>{t.access.legend}</p>
-                      <SlotList items={[t.access.notes.none, t.access.notes.read, t.access.notes.lower]} />
-                    </div>
+                    <HowItWorks />
                   </>
                 )}
               </QueryView>

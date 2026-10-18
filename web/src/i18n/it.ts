@@ -384,11 +384,12 @@ export const it = {
     changeTo: 'Accesso a {disk}',
     pending: 'Non ancora applicato ai suoi dispositivi',
     pendingReadout: 'In attesa',
-    legend: 'Un cambio vale subito sui dispositivi collegati. La spia arancione vuol dire che non è ancora arrivato: resta accesa finché il database del disco non risponde.',
-    notes: {
-      none: 'Con Nessuno il disco non compare nel suo Finder: niente cartella, niente copia dei metadata.',
-      read: 'Con Lettura il disco si apre in sola lettura.',
-      lower: 'Se abbassi un accesso, l’app rimonta il disco; se lo togli, in archivio manuale si apre la finestra della chiave di quel disco.',
+    howTitle: 'Come funzionano gli accessi',
+    how: {
+      none: 'Il disco non compare nel suo Finder: niente cartella, niente copia dei metadata.',
+      read: 'Il disco si apre in sola lettura.',
+      write: 'Il disco si apre e si modifica. Se abbassi l’accesso, l’app lo rimonta appena i file sono chiusi; se lo togli, in archivio manuale si apre la finestra della chiave di quel disco.',
+      pending: 'Il cambio non è ancora arrivato ai suoi dispositivi: la spia resta accesa finché il database del disco non risponde.',
     },
     colPerson: 'Persona',
     everyone: 'Tutti',
