@@ -256,13 +256,17 @@ start_vm() {
 # without a reply: on a slow link a read can wait longer while JuiceFS
 # fetches blocks, and the Finder would get an I/O error. The limit is raised
 # for the name and for the address, the server of a share mounted by address.
+# The client also keeps a folder's listing for 30-60 s: a colleague's new file
+# reached the VM in 0.1 s and the Mac's listing 30 s later. One second costs
+# 0.1 s to list 300 files again, answered by the VM's local replica.
 set_smb_servers() {
-  local ip="$1" rest=""
+  local ip="$1" rest="" opts
+  opts=$'max_resp_timeout=600\ndir_cache_max=1\ndir_cache_min=1'
   [ -f "$NSMB_CONF" ] && rest=$(sed "/^$NSMB_BEGIN\$/,/^$NSMB_END\$/d" "$NSMB_CONF")
   {
     [ -n "$rest" ] && printf '%s\n' "$rest"
-    printf '%s\n[%s]\naddr=%s\nmax_resp_timeout=600\n[%s]\nmax_resp_timeout=600\n%s\n' \
-      "$NSMB_BEGIN" "$VM" "$ip" "$ip" "$NSMB_END"
+    printf '%s\n[%s]\naddr=%s\n%s\n[%s]\n%s\n%s\n' \
+      "$NSMB_BEGIN" "$VM" "$ip" "$opts" "$ip" "$opts" "$NSMB_END"
   } > "$NSMB_CONF.tmp"
   mv "$NSMB_CONF.tmp" "$NSMB_CONF"
 }

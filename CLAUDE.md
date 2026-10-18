@@ -87,7 +87,7 @@ FLOPPY_JUICEFS_DIST=spike/juicefs-replica/dist deploy/check/check.py   # the Dok
 
 **JuiceFS does not cache uploaded blocks** unless `--cache-large-write` is on (off by default). The docs assumed it and it was false.
 
-**macOS gives up on an SMB read after 30 s** and the Finder gets an I/O error. The command raises `max_resp_timeout` only for the VM's name and address, in a `# floppy begin/end` block of `~/Library/Preferences/nsmb.conf`: never rewrite that file whole, it holds the user's configuration. The same block maps the name to the address (`addr=`), which is how the share mounts as `//drive@floppy/Floppy`; `addr` is only a fallback, the SMB client resolves the name first, so a name that resolves is mounted by address (`share_server`).
+**macOS gives up on an SMB read after 30 s** and the Finder gets an I/O error. The command raises `max_resp_timeout` only for the VM's name and address, in a `# floppy begin/end` block of `~/Library/Preferences/nsmb.conf`: never rewrite that file whole, it holds the user's configuration. The same block maps the name to the address (`addr=`), which is how the share mounts as `//drive@floppy/Floppy`; `addr` is only a fallback, the SMB client resolves the name first, so a name that resolves is mounted by address (`share_server`). The block also cuts the client's folder cache to 1 s (`dir_cache_min`, `dir_cache_max`), or colleagues' new files reach the Mac 30 s late.
 
 **The site describes the finished product**: no status or "not published yet", no dates on measures, competitors by linkable facts only. The current state lives in README and ROADMAP.
 
