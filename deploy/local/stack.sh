@@ -181,7 +181,7 @@ cmd_up() {
 
 cmd_down() {
   [ -f "$env_file" ] || { echo "not set up" >&2; exit 0; }
-  dc down >/dev/null
+  dc --profile device down >/dev/null # e2e.py's second device too, or the network stays in use
   docker network rm "$network" >/dev/null 2>&1 || true
   echo "Floppy local stack down ($stack, volumes kept)."
 }
