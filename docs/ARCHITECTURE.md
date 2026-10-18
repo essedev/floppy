@@ -311,7 +311,7 @@ The engine of the team version, in `macos/` next to the single-user mode, which 
       "slug": "archivio-2025",
       "access": "read",
       "meta_url": "rediss://n4rq7xk2m5vb3hd6.meta.example.com:443/1",
-      "bucket_url": "https://s3.eu-south.io.cloud.ovh.net/floppy-archivio-2025",
+      "bucket_url": "https://s3.eu-south-mil.io.cloud.ovh.net/floppy-archivio-2025",
       "bucket_region": "eu-south-mil",
       "cache_expire_days": 30,
       "enabled": true
@@ -376,6 +376,8 @@ The engine of the team version, in `macos/` next to the single-user mode, which 
 Measured on the development Mac (17/10/2026) against the central side of `spike/metatls.py` run locally (Valkey 8.1.4 behind Traefik on one TLS port, Garage) and a VM installed from a package without `config.env`: install 50 s; the first `disks apply` of three disks 6 s (1 s inside the VM), all three in replica mode; after a VM restart they come back by themselves; with the master unreachable, offline in 10 s, reads go on, writes are refused, and replica mode is back 2-3 s after; 300-file listing from the Mac 0.57 s cold, 0.21 s warm.
 
 End to end on the development Mac (18/10/2026, `deploy/local/e2e.py`): the local instance of `deploy/local` (the production compose, Traefik with a private CA, Garage managed), a VM installed from the output of `scripts/build-engine.sh`, the admin web in Chrome and the app's own `Account` and `Core` driving the engine. Sign-in by code 0.6 s; both disks mounted in replica mode 5-10 s later, the read-only one refusing a write from the Mac with `EROFS`; 8 MB written from the Mac read back identical there and by a second device; a disk lowered to read in the web remounted read-only 70-72 s later (the macOS client had kept the file open), a write then refused with `EROFS`; a revocation in the web cleared the disks, the VM and `/Volumes/Floppy` in 2-3 s.
+
+In manual mode on OVH Object Storage in Milan (18/10/2026, `STACK=manual deploy/local/e2e.py`, the manual stack beside the managed one): one disk with a bucket and key pasted at creation, region `eu-south-mil` (OVH's name for Milan; its S3 endpoint also accepts `us-east-1` signatures, which the single-user zip relies on). The creation probe passed and recorded the disk as tested, the control plane formatted the volume on the bucket under its own prefix (path style, JuiceFS's default); the disk mounted in replica mode 40 s after sign-in on a development VM beside a real install, its share on `/Volumes/Floppy-1`; 48 MB written from the Mac at 55 MB/s including the fsync, read back cold (cache freed) at 43 MB/s inside the VM and 57 MB/s from the Mac with its cache off; the mount ran with `AWS_REGION=eu-south-mil` and logged no signature or region error; a second device read the same bytes; the disk's key, which is in the format, was in no file of the engine's home, no argv on the Mac and none in the VM; lowered to read, the disk remounted read-only in 7 s and refused a write with `EROFS`; the revocation cleared it in 15 s and the real install's share stayed mounted.
 
 ## Alternatives considered
 
