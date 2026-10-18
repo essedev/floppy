@@ -3,7 +3,7 @@ The storage probe: a test write with a key, before the control plane trusts it.
 
 Used when the bootstrap registers the first key, when a rotation starts and when an admin
 checks the storage settings. `S3StorageProber` writes and removes a small object with plain
-S3, path style (DECISIONS #4: no provider API); `FakeStorageProber` answers from fixed rules.
+S3, path style (DECISIONS #24: no provider API in the core); `FakeStorageProber` answers from fixed rules.
 """
 
 import asyncio

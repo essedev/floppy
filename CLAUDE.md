@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Floppy is a shared remote disk for teams on macOS that share big files, video first: it shows up in the Finder as **Floppy**, and the files live on S3 object storage (OVH) through JuiceFS. On macOS JuiceFS runs in a Lima VM (Debian) and reaches the Mac over SMB, because mounting it directly would need macFUSE's kernel extension. The engine is a bash command (`macos/bin/floppy`) shipped in a private zip. The team version is being built: the control plane in `server/`, its admin web in `web/`, the menu bar app in `app/`, the site in `site/`, shared tokens in `design/`; its engine (a Valkey replica per VM, the patched JuiceFS from `spike/juicefs-replica`) is proven in `spike/` and drawn in `docs/architecture.html`.
+Floppy is a shared remote disk for teams on macOS that share big files, video first: it shows up in the Finder as **Floppy**, each disk a folder, and the files live on S3 object storage through JuiceFS. On macOS JuiceFS runs in a Lima VM (Debian) and reaches the Mac over SMB, because mounting it directly would need macFUSE's kernel extension. The parts: the engine in `macos/` (the `floppy` command and the VM), the menu bar app in `app/` that ships it (Homebrew cask, `packaging/`), the control plane in `server/` with its admin web in `web/`, the meta service in `meta/` (one Valkey per disk), the deploy for Dokploy in `deploy/`, the site in `site/`, shared tokens in `design/`, and the spikes in `spike/` (the patched JuiceFS is `spike/juicefs-replica`).
 
 Public repository: code, comments, docs and commits in English; README.md is mirrored in README.it.md in the same commit.
 
@@ -9,7 +9,7 @@ Public repository: code, comments, docs and commits in English; README.md is mir
 The full glossary is in [docs/CONVENTIONS.md](docs/CONVENTIONS.md#glossary). The terms that matter most when changing code:
 
 - **Disk / Floppy**: what the user sees in the Finder. **Volume**: the JuiceFS filesystem behind it, with a name (`VOLUME_NAME`) and its metadata.
-- **Metadata**: in the test they live in SQLite **inside the VM** (`/var/lib/floppy/meta.db`): losing the VM makes the data in the bucket unreadable.
+- **Metadata**: per disk in its own Valkey on the meta service, with a replica in each VM that sees the disk; in the single-user zip, SQLite **inside the VM** (`/var/lib/floppy/meta.db`), so losing that VM makes its bucket unreadable.
 - **Cache**: blocks already downloaded, on the VM's disk. **Warmup** is "Make available" (`floppy warmup`), **evict** is "Free up space" (`floppy free`).
 - **The user**: someone editing with CapCut, not technical. **Simone**: who develops and decides.
 
@@ -100,7 +100,7 @@ FLOPPY_JUICEFS_DIST=spike/juicefs-replica/dist deploy/check/check.py   # the Dok
 
 **Unmount SMB with `-f` in scripts.** A gentle unmount can leave a stale session, and the next mount of the same share answers I/O errors.
 
-**The per-Mac Valkey user needs more than reads and writes**: INFO, HINCRBY and DEL on `ryw*` on the master and HGET on the replica, EVAL and EVALSHA for the optimistic writes, and PSYNC, REPLCONF, PING for its replica. A missing HINCRBY aborts every write transaction.
+**A device's Valkey user needs more than reads and writes**: INFO (the patch's probe), PSYNC, REPLCONF and PING for its replica, and on a writable disk `@transaction`, EVAL and EVALSHA for the optimistic writes; `-@dangerous` also drops INFO, PSYNC and REPLCONF, so they are added after it. The lists are in `spike/perdisk.py` and the server.
 
 ## Secrets
 
@@ -141,5 +141,5 @@ These are default rules for this repo: the global instructions sit below, and wh
 - [docs/ROADMAP.md](docs/ROADMAP.md): next steps.
 - [docs/CYCLES.md](docs/CYCLES.md): what was done and when.
 - [docs/architecture.html](docs/architecture.html): the team architecture (control plane, central Valkey with a replica per VM, login) as diagrams and flows; a proposal until it lands in ARCHITECTURE.md.
-- [.claude/rules/spike.md](.claude/rules/spike.md): the spike's commands and the measuring gotchas, loaded when a file in `spike/` is touched.
+- [.claude/rules/](.claude/rules/): `app.md`, `server.md`, `spike.md`, loaded when a file under their path is touched.
 - [docs/concepts/](docs/concepts/): HTML concepts with variants side by side, one file per design decision.

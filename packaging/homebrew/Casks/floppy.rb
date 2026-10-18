@@ -5,10 +5,10 @@ cask "floppy" do
   version "0.1.0"
   sha256 :no_check
 
-  url "https://github.com/essedev/fluix/releases/download/v#{version}/Floppy_#{version}_aarch64.dmg"
+  url "https://github.com/essedev/floppy/releases/download/v#{version}/Floppy_#{version}_aarch64.dmg"
   name "Floppy"
   desc "Shared remote disk for video teams, in the menu bar"
-  homepage "https://github.com/essedev/fluix"
+  homepage "https://github.com/essedev/floppy"
 
   depends_on arch: :arm64
   depends_on macos: :ventura

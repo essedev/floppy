@@ -8,7 +8,7 @@ The data-path spike is closed (CYCLES 8, DECISIONS #15): on a simulated 100 Mbps
 
 ## 2. Name
 
-Floppy is chosen and the repository is renamed (DECISIONS #14); GitHub serves it as `essedev/floppy`, and the old `essedev/fluix` address redirects. Left: the Italian marks from the 1990s on UIBM (FLOPPYNEWS in classes 9 and 42 first; no live FLOPPY mark for software in the EU), and the URLs that still name `essedev/fluix` (`site/src/brand.ts`, `packaging/homebrew/Casks/floppy.rb`, `docs/concepts/concept-d-onboarding.html`). Domains are set aside for now.
+Floppy is chosen and the repository is renamed (DECISIONS #14); GitHub serves it as `essedev/floppy`, and the old `essedev/fluix` address redirects. Left: the Italian marks from the 1990s on UIBM (FLOPPYNEWS in classes 9 and 42 first; no live FLOPPY mark for software in the EU). Domains are set aside for now.
 
 ## 3. Build
 

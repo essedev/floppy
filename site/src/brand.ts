@@ -23,7 +23,7 @@ export const brand = {
   /** What `brew install --cask` takes: the fully qualified name, which also
    *  grants Homebrew's tap trust to this cask alone. */
   caskRef: `essedev/${slug}/${slug}`,
-  repo: 'https://github.com/essedev/fluix',
+  repo: 'https://github.com/essedev/floppy',
   domain,
   /** The hosted service's admin web (web/), where the header's sign-in link goes. A
    *  self-hosted team signs in on its own instance's address instead. */
