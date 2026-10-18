@@ -4,16 +4,15 @@ The principle is the one in [ARCHITECTURE.md](ARCHITECTURE.md#guiding-principle)
 
 ## 1. The system online (next)
 
-The first instance runs on Dokploy (CYCLES 11): the control plane, the admin web and the meta service behind Dokploy's shared Traefik, one certificate per disk name, mail through SMTP, and the team's first disk in manual mode on OVH Milan with bucket versioning (old versions kept 7 days). Simone's Mac mounts it from the `v0.1.1` cask. Left, in order:
+The first instance runs on Dokploy (CYCLES 11): the control plane, the admin web and the meta service behind Dokploy's shared Traefik, one certificate per disk name, mail through SMTP, and the team's first disk in manual mode on OVH Milan with bucket versioning (old versions kept 7 days). Simone's Mac mounts it from the `v0.1.1` cask, and the spike's measures ran on it (ROADMAP 2). Left, in order:
 
 1. **Backups before real files**: PostgreSQL through Dokploy's scheduled backup to S3; the disk's metadata through a daily `juicefs dump` from the control plane, kept outside the bucket too, with a restore tried once. JuiceFS's own hourly metadata copy in the bucket stays, untested. A copy of the bucket on a second provider can wait while the team works on copies.
 2. **The team on it**: invitations from the admin web with access to the disk; each person installs with `brew install --cask essedev/floppy/floppy`, sets the instance's address and signs in.
-3. **The measures on OVH** on that instance (ROADMAP 2).
-4. **Small things seen on the way**: a change of access reaches the app at its next heartbeat, up to 60 s later; the Finder's sidebar may keep showing nothing after the share is remounted by name until the Finder is relaunched; a failed mount leaves a Finder dialog that blocks the engine until someone clicks OK; the SMB password between Mac and VM is in `osascript`'s arguments (to the Keychain).
+3. **Small things seen on the way**: a change of access reaches the app at its next heartbeat, up to 60 s later; the Finder's sidebar may keep showing nothing after the share is remounted by name until the Finder is relaunched; a failed mount leaves a Finder dialog that blocks the engine until someone clicks OK; the SMB password between Mac and VM is in `osascript`'s arguments (to the Keychain).
 
 ## 2. Data path on OVH
 
-The data-path spike is closed (CYCLES 8, DECISIONS #15): on a simulated 100 Mbps link cold reads over SMB reach 86-93% of the line, a cold seek 0.38 s, the first read after a jump 0.40 s. First numbers on OVH Milan from the manual-mode run: 55 MB/s written with fsync, 57 MB/s read cold from the Mac. Left: the same measures as the spike on the first instance, and, during a large copy, whether the file's mtime changes at every stat, which JuiceMount found stalls the macOS client for about 73 s on the file's lock.
+The data-path spike is closed (CYCLES 8, DECISIONS #15): on a simulated 100 Mbps link cold reads over SMB reach 86-93% of the line, a cold seek 0.38 s, the first read after a jump 0.40 s. On the first instance (ARCHITECTURE, Measured performance, 18/10/2026): cold reads at 41 MB/s, a cold seek 0.19 s, 20 s of playback started cold in 0.07 s without stalls, no mtime stall during a copy. Left: cold reads are a quarter of a 1.3 Gbps line (readahead against 20 ms to S3), and small files cost about 200 ms each to write; neither blocks the pilot.
 
 ## 3. Build
 

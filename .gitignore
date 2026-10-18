@@ -5,6 +5,7 @@ dist/
 !*.env.example
 .DS_Store
 spike/meta-bench.*.tsv
+spike/ovh-bench.*.tsv
 __pycache__/
 .claude/worktrees/
 .claude/settings.local.json

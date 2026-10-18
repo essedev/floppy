@@ -1,6 +1,6 @@
 # Architecture
 
-Floppy is a shared remote disk for teams that edit video: on a Mac it shows up as a volume in the Finder, the files live on S3 object storage, and the people working on it need to know nothing else. This document collects the analysis so far and the reasons behind the decisions, which are listed in [DECISIONS.md](DECISIONS.md). The project is between a test package (one disk per Mac, metadata in SQLite inside each VM, tested on an OVH bucket in Milan) and the team architecture: a team's disks shared by every Mac, as folders of one Floppy disk in the Finder, metadata in a central Valkey with a replica in each Mac's VM, a control plane for sign-in and access, a menu bar app. The team architecture is drawn in [architecture.html](architecture.html) and proven in a local spike; its parts (control plane, meta service, engine, app and cask) are built and work end to end on a local stack ([Team disks](#team-disks)), and the app is on Homebrew (`v0.1.0`); the first self-hosted instance is next.
+Floppy is a shared remote disk for teams that edit video: on a Mac it shows up as a volume in the Finder, the files live on S3 object storage, and the people working on it need to know nothing else. This document collects the analysis so far and the reasons behind the decisions, which are listed in [DECISIONS.md](DECISIONS.md). The project is between a test package (one disk per Mac, metadata in SQLite inside each VM, tested on an OVH bucket in Milan) and the team architecture: a team's disks shared by every Mac, as folders of one Floppy disk in the Finder, metadata in a central Valkey with a replica in each Mac's VM, a control plane for sign-in and access, a menu bar app. The team architecture is drawn in [architecture.html](architecture.html) and proven in a local spike; its parts (control plane, meta service, engine, app and cask) are built and work end to end on a local stack ([Team disks](#team-disks)), and the app is on Homebrew (`v0.1.0`); the first self-hosted instance runs on Dokploy.
 
 Prices and features of third-party services were checked on 06/10/2026, the alternatives again on 17/10/2026, and must be checked again before deciding.
 
@@ -97,6 +97,27 @@ The cache lives on each Mac's SSD, inside the Linux machine's disk, managed by t
 - **Playback holds up even out of cache**: 12.1 MB/s against the 7.5 a 60 Mbps clip needs.
 - **Scrubbing a clip never opened is slow**: almost a second per seek. Warmup removes it (3 ms). The data-path spike below cuts it with 1 MB blocks and a shorter readahead; to confirm here.
 - SMB still has a cost: the line gives about 21 MB/s, the Mac gets 12 cold.
+
+**On the first instance** (18/10/2026, `spike/ovh-bench.sh`): a team disk mounted by the app from the `v0.1.1` cask, its metadata on the meta service behind Traefik with the replica in the VM (replica mode, 0.5 s behind), its data in OVH Milan, both 20 ms away; a line of about 1.3 Gbps down and at least 700 Mbps up; clips of 455 MB, 60 s at 61 Mbps.
+
+| Operation | Measure |
+|---|---|
+| Copying a clip to the disk | 69-87 MB/s; `cp` returns with the upload done (the VM has sent the whole clip by then) |
+| Cold read from the Mac, 1 MB reads | 41.2 MB/s, no read over 0.25 s |
+| Cold read of a clip with `dd` | 40.4 MB/s |
+| Seek (1 MB read) not in cache | mean 0.19 s, max 0.29 s |
+| Scrubbing: first read after a jump | mean 0.13 s, max 0.24 s |
+| Warmup of a clip | 7 s (65 MB/s) |
+| Cold listing of 300 files | 0.38 s (0.11 s warm) |
+| Creating, renaming, deleting 100 small files | 20.1 s, 5.1 s, 2.9 s |
+| Writing 450 files of 4-64 KB | 88 s |
+| Opening 100 files and reading their first 64 KB, cold | 5.9 s |
+
+An editing session (the `edit` phase: a model of CapCut's access pattern, not a trace of it), cold: importing 3 clips 0.93 s; a filmstrip of 90 frames 15.7 s, no frame over 0.41 s; 20 s of playback at the clip's bitrate started in 0.07 s, with no read late by more than 0.15 s; a cut to another clip started in 0.30 s; jumps with a first frame in 0.17 s on average; a 300 KB autosave every 5 s, never over 0.41 s.
+
+- **Video works cold**: a cold read gives 5 times what a 61 Mbps clip needs, and seeks are half the spike's 100 Mbps numbers. It is a quarter of the line, though: with 20 ms to S3 the 4 MB readahead probably keeps too few blocks in flight. Not worth tuning until a need shows up.
+- **Small files are the slow path**: about 200 ms for each 64 KB file written, the metadata round trips plus one upload per file. 100 creates in 20 s against 13.7-17 s at 15 ms in the spike, so the replica behaves as measured there. A project folder with thousands of cache files takes minutes to copy.
+- **No mtime stall during a copy**: stat on the file being copied answered in 2.2-2.4 s at worst, and mtime moved once, never while the size stood still. JuiceMount's 73 s stall does not happen here.
 
 **Local spike, data path** (17/10/2026, `spike/data-bench.sh` and `t03` of `spike/acceptance.py`): 1 MB blocks, 4 MB readahead, the patched JuiceFS (DECISIONS #15). The link is one token bucket on everything Toxiproxy sends (`--profile shaped`) and 25 ms to S3; clips of 455 MB.
 
