@@ -850,6 +850,7 @@ def main(argv: list[str]) -> int:
             if out["done"]:
                 notify("removed", os.path.join(m.path, to))
                 notify("added", os.path.join(m.path, path))
+                record_rename(m.disk, to, path, os.path.join(m.path, path))
             print(json.dumps(out))
         except OSError as e:
             print(f"floppy-activity: {e.strerror}", file=sys.stderr)
@@ -862,6 +863,20 @@ def main(argv: list[str]) -> int:
         )
         return 2
     return 0
+
+
+def record_rename(disk: str | None, src: str, dst: str, now_at: str) -> None:
+    """
+    A rename made here, outside Samba, as the audit would have recorded it: the colleague
+    whose rename was undone learns it from this event (DECISIONS #27).
+    """
+    kind = "folder" if os.path.isdir(now_at) else "file"
+    with closing(connect()) as db, db:
+        db.execute(
+            "INSERT OR IGNORE INTO events (at, disk, op, kind, path, dest, size)"
+            " VALUES (?, ?, 'renamed', ?, ?, ?, NULL)",
+            (time.time(), disk, kind, src, dst),
+        )
 
 
 def notify(action: str, path: str) -> None:

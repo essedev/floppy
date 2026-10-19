@@ -430,6 +430,16 @@ class RenameBack(unittest.TestCase):
         with self.assertRaises(PermissionError):
             fa.rename_back(fa.Mount("a", "A", str(self.disk), False), "x", "Backstage Tosca")
 
+    def test_the_undo_is_recorded_as_a_rename(self):
+        fa.DB = Path(self.disk, "activity.db")
+        (self.disk / "Backstage").mkdir()
+        fa.record_rename("progetti", "Backstage Tosca", "Backstage", str(self.disk / "Backstage"))
+        e = fa.list_events(0, 10)["events"][0]
+        self.assertEqual(
+            (e["op"], e["kind"], e["path"], e["to"]),
+            ("renamed", "folder", "Backstage Tosca", "Backstage"),
+        )
+
     def test_paths_stay_inside_the_disk(self):
         for bad in ["", "/etc", "../x", "a/../../x", "a//b", "./a", None, 3]:
             self.assertIsNone(fa.inside(bad), bad)
