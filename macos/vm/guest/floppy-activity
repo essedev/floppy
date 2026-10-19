@@ -825,7 +825,10 @@ def main(argv: list[str]) -> int:
         if m is None:
             return 1
         try:
-            print(json.dumps(restore_many(m, args[1:], scan_trash(m.path))))
+            out = restore_many(m, args[1:], scan_trash(m.path))
+            for r in out["restored"]:
+                notify("added", os.path.join(m.path, r["path"]))
+            print(json.dumps(out))
         except OSError as e:
             print(f"floppy-activity: {e.strerror}", file=sys.stderr)
             return 1
@@ -843,7 +846,11 @@ def main(argv: list[str]) -> int:
         if m is None:
             return 1
         try:
-            print(json.dumps(rename_back(m, path, to)))
+            out = rename_back(m, path, to)
+            if out["done"]:
+                notify("removed", os.path.join(m.path, to))
+                notify("added", os.path.join(m.path, path))
+            print(json.dumps(out))
         except OSError as e:
             print(f"floppy-activity: {e.strerror}", file=sys.stderr)
             return 1
@@ -855,6 +862,18 @@ def main(argv: list[str]) -> int:
         )
         return 2
     return 0
+
+
+def notify(action: str, path: str) -> None:
+    """
+    Tells the Finder of a change made here, outside Samba: with `kernel change notify = no`
+    Samba no longer sees them by itself (floppy-notify). A failure only delays the window.
+    """
+    subprocess.run(  # noqa: S603 (a fixed binary; the path is passed as one argument)
+        ["/usr/local/sbin/floppy-notify", "trigger", action, path],
+        capture_output=True,
+        check=False,
+    )
 
 
 def mounted(disk_arg: str) -> Mount | None:

@@ -12,12 +12,13 @@ JUICEFS_VERSION=1.4.1
 # valkey-server: Debian 13's 8.1.1, the series of the meta service's 8.1.4
 # (the spike's masters); a replica of the same series replicates from it.
 # python3: floppy-activity; the Debian image has it, Samba does not depend on it.
-PACKAGES=(samba samba-vfs-modules fuse3 valkey-server jq python3)
+# python3-samba: floppy-notify talks to Samba's notifyd; Samba only recommends it.
+PACKAGES=(samba samba-vfs-modules fuse3 valkey-server jq python3 python3-samba)
 
 export DEBIAN_FRONTEND=noninteractive
 if ! command -v smbd >/dev/null || ! command -v fusermount3 >/dev/null \
     || ! command -v valkey-server >/dev/null || ! command -v jq >/dev/null \
-    || ! command -v python3 >/dev/null; then
+    || ! command -v python3 >/dev/null || ! python3 -c 'import samba.messaging' 2>/dev/null; then
   # The package ships the .debs as a local repository (an office DNS already
   # failed on a Debian host), so apt resolves against what the image has and
   # downloads nothing. deb.debian.org stays as a fallback.
@@ -63,6 +64,8 @@ install -m 755 floppy-disks /usr/local/sbin/floppy-disks
 install -m 644 smb.conf /etc/samba/smb.conf
 install -m 755 floppy-activity /usr/local/sbin/floppy-activity
 install -m 644 floppy-activity.service /etc/systemd/system/floppy-activity.service
+install -m 755 floppy-notify /usr/local/sbin/floppy-notify
+install -m 644 floppy-notify.service /etc/systemd/system/floppy-notify.service
 install -d /etc/systemd/system/smbd.service.d
 id drive >/dev/null 2>&1 || useradd -M -s /usr/sbin/nologin drive
 systemctl disable --now nmbd 2>/dev/null || true
@@ -110,5 +113,5 @@ if [ "$(lsattr -d /mnt/drive | cut -c5)" != i ]; then
   chattr +i /mnt/drive
 fi
 systemctl daemon-reload
-systemctl enable smbd floppy-activity
-systemctl restart smbd floppy-activity
+systemctl enable smbd floppy-activity floppy-notify
+systemctl restart smbd floppy-activity floppy-notify

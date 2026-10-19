@@ -221,6 +221,8 @@ write_disk() {
       echo "tls-ca-cert-file $ca"
     fi
     echo "replica-read-only yes"
+    # Key events of folders' entries and files' attributes, for floppy-notify.
+    echo 'notify-keyspace-events "Kgh$"'
     echo 'save ""'
     echo "appendonly no"
     # Local clients are the mount (as the device's user, which the patch reuses

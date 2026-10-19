@@ -1,0 +1,357 @@
+#!/usr/bin/python3
+"""
+Colleagues' changes in an open Finder window (ROADMAP, spike of 18/10/2026). Samba tells the
+Mac about the changes it makes itself; a file another Mac adds reaches this VM through the
+disk's metadata replica, which Samba never sees. This service listens to each team disk's
+local replica (key events, `notify-keyspace-events` in its config), keeps the listing of each
+folder a Finder window watches (`smbstatus --notify`) and, when a folder's entries or a file
+in it change, tells Samba's notifyd as smbd itself does (MSG_SMB_NOTIFY_TRIGGER).
+
+  floppy-notify run                                the service
+  floppy-notify trigger added|removed|modified P   one change of an absolute path, for
+                                                   changes made in the VM outside Samba
+
+It needs `kernel change notify = no` in smb.conf: otherwise notifyd drops a trigger sent from
+its own machine as already covered by inotify. JuiceFS's keys: `d<inode>` holds a folder's
+entries, `i<inode>` a file's attributes (its size grows with a copy); the inode is `st_ino`.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+import selectors
+import socket
+import struct
+import subprocess
+import sys
+import time
+from dataclasses import dataclass, field
+from pathlib import Path
+
+ROOT = "/mnt/drive"
+TEAM = Path("/etc/floppy/team")
+REPLICA_RUN = Path("/run/floppy-replica")
+MSG_SMB_NOTIFY_TRIGGER = 0x031B
+ACTIONS = {"added": 1, "removed": 2, "modified": 3}
+# FILE_NOTIFY_CHANGE_FILE_NAME | DIR_NAME | ATTRIBUTES | SIZE | LAST_WRITE
+FILTER = 0x1 | 0x2 | 0x4 | 0x8 | 0x10
+# How often the watched folders and the disks are read again.
+WATCHES_EVERY = 2.0
+DISKS_EVERY = 10.0
+# A folder's entries change in bursts (a copy of 48 clips): one listing per pause.
+SETTLE = 0.3
+# A file being copied changes its attributes at every block: its size, at most this often.
+GROWTH_EVERY = 2.0
+KEY = re.compile(rb"^__keyspace@\d+__:([di])(\d+)$")
+
+
+class Trigger:
+    """Samba's notifyd, reached as smbd reaches it."""
+
+    def __init__(self) -> None:
+        from samba import param  # noqa: PLC0415 (python3-samba, in the VM only)
+        from samba.messaging import Messaging  # noqa: PLC0415
+
+        lp = param.LoadParm()
+        lp.load_default()
+        self.msg = Messaging(lp_ctx=lp)
+
+    def send(self, action: str, path: str) -> int:
+        """Tells every notifyd that `path` changed; how many there were."""
+        now = time.time_ns()
+        blob = (
+            struct.pack("=qqII", now // 10**9, now % 10**9, ACTIONS[action], FILTER)
+            + os.fsencode(path)
+            + b"\0"
+        )
+        servers = self.msg.irpc_servers_byname("notify-daemon")
+        for s in servers:
+            self.msg.send(s, MSG_SMB_NOTIFY_TRIGGER, blob)
+        return len(servers)
+
+
+def watched(out: str) -> set[str]:
+    """
+    The folders Samba watches for a client, from `smbstatus --notify`: one line each,
+    `path\\pid\\filter\\subdir_filter`.
+    """
+    paths = set()
+    for line in out.splitlines():
+        parts = line.rsplit("\\", 3)
+        if len(parts) == 4 and parts[0].startswith(ROOT + "/"):
+            paths.add(parts[0])
+    return paths
+
+
+def read_watched() -> set[str] | None:
+    out = subprocess.run(
+        ["/usr/bin/smbstatus", "--notify"], capture_output=True, text=True, check=False
+    )
+    return watched(out.stdout) if out.returncode == 0 else None
+
+
+@dataclass
+class Disk:
+    """A team disk with a replica on this VM."""
+
+    id: str
+    folder: str
+    db: int
+    user: str
+    password: str
+
+    @property
+    def socket(self) -> Path:
+        return REPLICA_RUN / self.id / "valkey.sock"
+
+
+def disks() -> list[Disk]:
+    """The enabled team disks; none for the single-user volume, which has no replica."""
+    try:
+        conf = json.loads((TEAM / "disks.json").read_text())
+        secrets = json.loads((TEAM / "secrets.json").read_text())
+    except (OSError, ValueError):
+        return []
+    out = []
+    for d in conf.get("disks", []):
+        db = d.get("meta_url", "").rsplit("/", 1)[-1]
+        if d.get("enabled") and db.isdigit():
+            out.append(
+                Disk(d["id"], d["folder"], int(db), conf["meta_user"], secrets["meta_password"])
+            )
+    return out
+
+
+def resp(*parts: str) -> bytes:
+    """A command in Valkey's protocol."""
+    out = [b"*%d\r\n" % len(parts)]
+    for p in parts:
+        b = p.encode()
+        out.append(b"$%d\r\n%s\r\n" % (len(b), b))
+    return b"".join(out)
+
+
+class Reader:
+    """Valkey's replies off a socket, one at a time: enough for AUTH and pub/sub."""
+
+    def __init__(self) -> None:
+        self.buf = b""
+
+    def feed(self, data: bytes) -> None:
+        self.buf += data
+
+    def _line(self, at: int) -> tuple[bytes, int] | None:
+        end = self.buf.find(b"\r\n", at)
+        return None if end < 0 else (self.buf[at:end], end + 2)
+
+    def _one(self, at: int):
+        line = self._line(at)
+        if line is None:
+            return None
+        head, at = line
+        kind, rest = head[:1], head[1:]
+        if kind in (b"+", b"-", b":"):
+            return (kind + rest, at)
+        if kind == b"$":
+            n = int(rest)
+            if n < 0:
+                return (None, at)
+            if len(self.buf) < at + n + 2:
+                return None
+            return (self.buf[at : at + n], at + n + 2)
+        if kind == b"*":
+            items = []
+            for _ in range(int(rest)):
+                got = self._one(at)
+                if got is None:
+                    return None
+                item, at = got
+                items.append(item)
+            return (items, at)
+        raise ValueError(f"unexpected reply {head[:20]!r}")
+
+    def replies(self) -> list:
+        out = []
+        while True:
+            got = self._one(0)
+            if got is None:
+                return out
+            reply, used = got
+            self.buf = self.buf[used:]
+            out.append(reply)
+
+
+@dataclass
+class Folder:
+    """A watched folder and its entries, name to inode."""
+
+    path: str
+    entries: dict[str, int] = field(default_factory=dict)
+    due: float | None = None  # a listing owed after a change
+
+
+def listing(path: str) -> dict[str, int] | None:
+    try:
+        return {e.name: e.inode() for e in os.scandir(path)}
+    except OSError:
+        return None
+
+
+def diff(before: dict[str, int], after: dict[str, int]) -> list[tuple[str, str]]:
+    """What changed in a folder's entries: removed first, then added; a new inode is both."""
+    out = []
+    for name, ino in sorted(before.items()):
+        if after.get(name) != ino:
+            out.append(("removed", name))
+    for name, ino in sorted(after.items()):
+        if before.get(name) != ino:
+            out.append(("added", name))
+    return out
+
+
+class Watcher:
+    """The watched folders by inode, and the files in them by inode."""
+
+    def __init__(self, send) -> None:
+        self.send = send
+        self.folders: dict[int, Folder] = {}
+        self.files: dict[int, tuple[int, str]] = {}
+        self.grown: dict[int, float] = {}
+
+    def watch(self, paths: set[str]) -> None:
+        by_path = {f.path: ino for ino, f in self.folders.items()}
+        for path in set(by_path) - paths:
+            self._drop(by_path[path])
+        for path in paths - set(by_path):
+            try:
+                ino = os.stat(path).st_ino
+            except OSError:
+                continue
+            entries = listing(path)
+            if entries is not None:
+                self.folders[ino] = Folder(path, entries)
+                self._index(ino)
+
+    def _drop(self, ino: int) -> None:
+        self.folders.pop(ino, None)
+        self.files = {f: v for f, v in self.files.items() if v[0] != ino}
+
+    def _index(self, ino: int) -> None:
+        self.files = {f: v for f, v in self.files.items() if v[0] != ino}
+        for name, f in self.folders[ino].entries.items():
+            self.files[f] = (ino, name)
+
+    def event(self, kind: bytes, ino: int, now: float) -> None:
+        if kind == b"d" and ino in self.folders:
+            self.folders[ino].due = self.folders[ino].due or now + SETTLE
+        elif kind == b"i" and ino in self.files and now - self.grown.get(ino, 0) >= GROWTH_EVERY:
+            self.grown[ino] = now
+            folder, name = self.files[ino]
+            self.send("modified", os.path.join(self.folders[folder].path, name))
+
+    def settle(self, now: float) -> None:
+        for ino, f in list(self.folders.items()):
+            if f.due is None or f.due > now:
+                continue
+            f.due = None
+            after = listing(f.path)
+            if after is None:
+                continue
+            for action, name in diff(f.entries, after):
+                self.send(action, os.path.join(f.path, name))
+            f.entries = after
+            self._index(ino)
+
+    def next_due(self) -> float | None:
+        dues = [f.due for f in self.folders.values() if f.due is not None]
+        return min(dues) if dues else None
+
+
+def subscribe(d: Disk) -> socket.socket:
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s.settimeout(3)
+    s.connect(str(d.socket))
+    s.sendall(resp("AUTH", d.user, d.password))
+    reader = Reader()
+    while not (got := reader.replies()):
+        reader.feed(s.recv(4096))
+    if got[0] != b"+OK":
+        s.close()
+        raise OSError(f"the replica of {d.id} refused the login")
+    s.sendall(resp("PSUBSCRIBE", f"__keyspace@{d.db}__:d*", f"__keyspace@{d.db}__:i*"))
+    s.setblocking(False)
+    return s
+
+
+def run() -> None:
+    trigger = Trigger()
+    watcher = Watcher(trigger.send)
+    sel = selectors.DefaultSelector()
+    subscribed: dict[str, socket.socket] = {}
+    readers: dict[str, Reader] = {}
+    last_watch = last_disks = 0.0
+    while True:
+        now = time.monotonic()
+        if now - last_disks >= DISKS_EVERY:
+            last_disks = now
+            wanted = {d.id: d for d in disks()}
+            for gone in set(subscribed) - set(wanted):
+                sel.unregister(subscribed[gone])
+                subscribed.pop(gone).close()
+            for d in wanted.values():
+                if d.id in subscribed:
+                    continue
+                try:
+                    s = subscribe(d)
+                except OSError:
+                    continue  # the replica is starting or down: next round
+                subscribed[d.id], readers[d.id] = s, Reader()
+                sel.register(s, selectors.EVENT_READ, d.id)
+        if now - last_watch >= WATCHES_EVERY:
+            last_watch = now
+            paths = read_watched()
+            if paths is not None:
+                watcher.watch(paths)
+        due = watcher.next_due()
+        timeout = min(WATCHES_EVERY, max(0.0, due - now)) if due is not None else WATCHES_EVERY
+        for key, _ in sel.select(timeout):
+            disk_id, s = key.data, key.fileobj
+            try:
+                data = s.recv(65536)
+            except BlockingIOError:
+                continue
+            except OSError:
+                data = b""
+            if not data:
+                sel.unregister(s)
+                s.close()
+                subscribed.pop(disk_id, None)
+                last_disks = 0.0  # connect again soon
+                continue
+            readers[disk_id].feed(data)
+            for reply in readers[disk_id].replies():
+                if isinstance(reply, list) and len(reply) == 4 and reply[0] == b"pmessage":
+                    m = KEY.match(reply[2])
+                    if m:
+                        watcher.event(m[1], int(m[2]), time.monotonic())
+        watcher.settle(time.monotonic())
+
+
+def main(argv: list[str]) -> int:
+    if argv[:1] == ["run"] and len(argv) == 1:
+        run()
+    elif argv[:1] == ["trigger"] and len(argv) == 3 and argv[1] in ACTIONS:
+        if not argv[2].startswith(ROOT + "/"):
+            print(f"floppy-notify: {argv[2]} is not on the share", file=sys.stderr)
+            return 2
+        Trigger().send(argv[1], argv[2])
+    else:
+        print("usage: floppy-notify run | trigger added|removed|modified <path>", file=sys.stderr)
+        return 2
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
