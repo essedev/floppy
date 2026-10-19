@@ -760,6 +760,19 @@ cmd_free() {
   in_vm sudo fstrim / >/dev/null
 }
 
+# What this Mac did on its disks and the files it holds open for writing, JSON
+# out, from the VM's floppy-activity (DECISIONS #27).
+cmd_activity() {
+  local a
+  for a in "$@"; do
+    case "$a" in
+      --after|--limit) ;;
+      ''|*[!0-9]*) die "usage: floppy activity [--after ID] [--limit N]" ;;
+    esac
+  done
+  in_vm sudo /usr/local/sbin/floppy-activity list "$@"
+}
+
 cmd_uninstall() {
   if team; then
     log "This deletes the VM, the disks' cache and their replicas on this Mac."
@@ -789,8 +802,8 @@ cmd_uninstall() {
 }
 
 case "${1:-}" in
-  status|warmup|free) cmd="$1"; shift; "cmd_$cmd" "$@" ;;
+  status|warmup|free|activity) cmd="$1"; shift; "cmd_$cmd" "$@" ;;
   tick) shift; take_lock try || exit 0; cmd_tick "$@" ;;
   setup|start|stop|uninstall|disks) cmd="$1"; shift; take_lock wait; "cmd_$cmd" "$@" ;;
-  *) log "usage: floppy setup|start|stop|status [--json]|warmup <path>|free <path>|disks apply|disks clear|uninstall"; exit 2 ;;
+  *) log "usage: floppy setup|start|stop|status [--json]|warmup <path>|free <path>|activity [--after ID]|disks apply|disks clear|uninstall"; exit 2 ;;
 esac

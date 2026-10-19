@@ -19,7 +19,7 @@ The full glossary is in [docs/CONVENTIONS.md](docs/CONVENTIONS.md#glossary). The
 make check                               # the full quality pass; make lint: bash -n, shellcheck, prose language
 make app                                 # dist/app/Floppy.app and its DMG, the engine inside; needs Docker running
 scripts/release-app.sh                   # after a `chore(release): X.Y.Z` bump of app/package.json, tauri.conf.json, app/Cargo.toml: tag, GitHub release with notes from the commits (scripts/release-notes.sh), cask into essedev/homebrew-floppy (outward: only when Simone asks)
-~/.floppy/bin/floppy status                # setup|start|stop|status|warmup <path>|free <path>|uninstall
+~/.floppy/bin/floppy status                # setup|start|stop|status|warmup <path>|free <path>|activity|uninstall
 ~/.floppy/bin/floppy disks apply <secrets.json  # team disks from ~/.floppy/disks.json; `disks clear` on revocation
 FLOPPY_HOME=/tmp/fd FLOPPY_VM=floppy-dev macos/install.sh   # a development VM beside the real one
 

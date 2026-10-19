@@ -1,0 +1,160 @@
+[2026/10/19 06:45:48.720102,  1]   Floppy|create_file|ok|0x100081|dir|open|/mnt/drive/Progetti
+[2026/10/19 06:45:48.720630,  1]   Floppy|mkdirat|ok|/mnt/drive/Progetti/.::TMPNAME:D:347%18301774855721759420:Shoot
+[2026/10/19 06:45:48.720674,  1]   Floppy|renameat|ok|/mnt/drive/Progetti/.::TMPNAME:D:347%18301774855721759420:Shoot|/mnt/drive/Progetti/Shoot
+[2026/10/19 06:45:48.720720,  1]   Floppy|create_file|ok|0x81|dir|create|/mnt/drive/Progetti/Shoot
+[2026/10/19 06:45:48.721482,  1]   Floppy|create_file|ok|0x102|file|overwrite_if|/mnt/drive/Progetti/Shoot:com.apple.provenance
+[2026/10/19 06:45:48.784163,  1]   Floppy|create_file|ok|0x100080|dir|open|/mnt/drive/Progetti
+[2026/10/19 06:45:48.838299,  1]   Floppy|create_file|ok|0x100080|dir|open|/mnt/drive/Progetti
+[2026/10/19 06:45:49.145559,  1]   Floppy|create_file|ok|0x100081|dir|open|/mnt/drive/Progetti/Shoot
+[2026/10/19 06:45:49.187712,  1]   Floppy|create_file|ok|0x60087|file|create|/mnt/drive/Progetti/Shoot/clip.mov
+[2026/10/19 06:45:49.188885,  1]   Floppy|create_file|ok|0x100180|file|open|/mnt/drive/Progetti/Shoot/clip.mov
+[2026/10/19 06:45:49.189815,  1]   Floppy|create_file|ok|0x183|file|open_if|/mnt/drive/Progetti/Shoot/clip.mov:AFP_AfpInfo
+[2026/10/19 06:45:49.190471,  1]   Floppy|create_file|ok|0x103|file|open_if|/mnt/drive/Progetti/Shoot/clip.mov:AFP_AfpInfo
+[2026/10/19 06:45:49.191758,  1]   Floppy|create_file|ok|0x100081|dir|open|/mnt/drive/Progetti
+[2026/10/19 06:45:49.192474,  1]   Floppy|create_file|ok|0x80|file|open|/mnt/drive/Progetti/Shoot/clip.mov
+[2026/10/19 06:45:49.193108,  1]   Floppy|create_file|ok|0x100080|dir|open|/mnt/drive/Progetti
+[2026/10/19 06:45:49.195463,  1]   Floppy|create_file|ok|0x100081|dir|open|/mnt/drive/Progetti/Shoot
+[2026/10/19 06:45:49.196617,  1]   Floppy|create_file|ok|0x60087|file|create|/mnt/drive/Progetti/Shoot/.DS_Store
+[2026/10/19 06:45:49.197218,  1]   Floppy|create_file|ok|0x100081|dir|open|/mnt/drive/Progetti
+[2026/10/19 06:45:49.198208,  1]   Floppy|create_file|ok|0x100080|dir|open|/mnt/drive/Progetti
+[2026/10/19 06:45:49.199167,  1]   Floppy|create_file|ok|0x183|file|open_if|/mnt/drive/Progetti/Shoot/.DS_Store:AFP_AfpInfo
+[2026/10/19 06:45:49.199722,  1]   Floppy|create_file|ok|0x103|file|open_if|/mnt/drive/Progetti/Shoot/.DS_Store:AFP_AfpInfo
+[2026/10/19 06:45:49.200468,  1]   Floppy|create_file|ok|0x100080|file|open|/mnt/drive/Progetti/Shoot/.DS_Store
+[2026/10/19 06:45:49.201457,  1]   Floppy|create_file|ok|0x100081|dir|open|/mnt/drive/Progetti/Shoot
+[2026/10/19 06:45:49.201610,  1]   Floppy|create_file|ok|0x1|file|open|/mnt/drive/Progetti/Shoot/.DS_Store:AFP_AfpInfo
+[2026/10/19 06:45:49.201691,  1]   Floppy|create_file|ok|0x100080|dir|open|/mnt/drive/Progetti
+[2026/10/19 06:45:49.241784,  1]   Floppy|create_file|ok|0x100080|dir|open|/mnt/drive/Progetti
+[2026/10/19 06:45:49.251155,  1]   Floppy|create_file|ok|0x100081|dir|open|/mnt/drive/Progetti/Shoot
+[2026/10/19 06:45:49.251453,  1]   Floppy|create_file|ok|0x1|file|open|/mnt/drive/Progetti/Shoot/clip.mov:AFP_AfpInfo
+[2026/10/19 06:45:49.266167,  1]   Floppy|create_file|ok|0x110080|file|open|/mnt/drive/Progetti/Shoot/clip.mov:AFP_AfpInfo
+[2026/10/19 06:45:49.266878,  1]   Floppy|create_file|ok|0x102|file|overwrite_if|/mnt/drive/Progetti/Shoot/clip.mov:com.apple.provenance
+[2026/10/19 06:45:49.275049,  1]   Floppy|create_file|ok|0x100180|file|open|/mnt/drive/Progetti/Shoot/clip.mov
+[2026/10/19 06:45:49.275878,  1]   Floppy|create_file|ok|0x80|file|open|/mnt/drive/Progetti/Shoot/clip.mov
+[2026/10/19 06:45:49.276379,  1]   Floppy|create_file|ok|0x100080|dir|open|/mnt/drive/Progetti
+[2026/10/19 06:45:49.795325,  1]   Floppy|create_file|ok|0x100081|dir|open|/mnt/drive/Progetti
+[2026/10/19 06:45:49.797589,  1]   Floppy|create_file|ok|0x60087|file|overwrite_if|/mnt/drive/Progetti/Shoot/project.json
+[2026/10/19 06:45:49.801038,  1]   Floppy|create_file|ok|0x102|file|overwrite_if|/mnt/drive/Progetti/Shoot/project.json:com.apple.provenance
+[2026/10/19 06:45:49.802140,  1]   Floppy|create_file|ok|0x81|file|open|/mnt/drive/Progetti/Shoot/project.json:com.apple.provenance
+[2026/10/19 06:45:49.812953,  1]   Floppy|create_file|ok|0x100081|dir|open|/mnt/drive/Progetti
+[2026/10/19 06:45:50.112963,  1]   Floppy|create_file|ok|0x100081|dir|open|/mnt/drive/Progetti
+[2026/10/19 06:45:50.113548,  1]   Floppy|create_file|ok|0x60087|file|overwrite_if|/mnt/drive/Progetti/Shoot/.project.json.tmp
+[2026/10/19 06:45:50.115013,  1]   Floppy|create_file|ok|0x102|file|overwrite_if|/mnt/drive/Progetti/Shoot/.project.json.tmp:com.apple.provenance
+[2026/10/19 06:45:50.115626,  1]   Floppy|create_file|ok|0x81|file|open|/mnt/drive/Progetti/Shoot/.project.json.tmp:com.apple.provenance
+[2026/10/19 06:45:50.121294,  1]   Floppy|create_file|ok|0x100081|dir|open|/mnt/drive/Progetti
+[2026/10/19 06:45:50.121664,  1]   Floppy|create_file|ok|0x100081|dir|open|/mnt/drive/Progetti/Shoot
+[2026/10/19 06:45:50.122404,  1]   Floppy|create_file|ok|0x10000|file|open|/mnt/drive/Progetti/Shoot/project.json:com.apple.provenance:$DATA
+[2026/10/19 06:45:50.122427,  1]   Floppy|create_file|ok|0x110080|file|open|/mnt/drive/Progetti/Shoot/project.json
+[2026/10/19 06:45:50.122510,  1]   Floppy|unlinkat|ok|/mnt/drive/Progetti/Shoot/project.json
+[2026/10/19 06:45:50.123069,  1]   Floppy|create_file|ok|0x10000|file|open|/mnt/drive/Progetti/Shoot/.project.json.tmp:com.apple.provenance:$DATA
+[2026/10/19 06:45:50.123100,  1]   Floppy|create_file|ok|0x110080|file|open|/mnt/drive/Progetti/Shoot/.project.json.tmp
+[2026/10/19 06:45:50.123166,  1]   Floppy|renameat|ok|/mnt/drive/Progetti/Shoot/.project.json.tmp|/mnt/drive/Progetti/Shoot/project.json
+[2026/10/19 06:45:50.123474,  1]   Floppy|create_file|ok|0x100080|file|open|/mnt/drive/Progetti/Shoot/project.json
+[2026/10/19 06:45:50.123755,  1]   Floppy|create_file|ok|0x100081|dir|open|/mnt/drive/Progetti
+[2026/10/19 06:45:50.124262,  1]   Floppy|create_file|ok|0x81|file|open|/mnt/drive/Progetti/Shoot/project.json:com.apple.provenance
+[2026/10/19 06:45:50.126919,  1]   Floppy|create_file|ok|0x100081|dir|open|/mnt/drive/Progetti/Shoot
+[2026/10/19 06:45:50.167352,  1]   Floppy|create_file|ok|0x100081|dir|open|/mnt/drive/Progetti/Shoot
+[2026/10/19 06:45:50.435213,  1]   Floppy|create_file|ok|0x100081|dir|open|/mnt/drive/Progetti
+[2026/10/19 06:45:50.436653,  1]   Floppy|create_file|ok|0x100080|file|open|/mnt/drive/Progetti/Shoot/project.json
+[2026/10/19 06:45:50.437910,  1]   Floppy|create_file|ok|0x20087|file|open|/mnt/drive/Progetti/Shoot/project.json
+[2026/10/19 06:45:50.439537,  1]   Floppy|create_file|ok|0x81|file|open|/mnt/drive/Progetti/Shoot/project.json:com.apple.provenance
+[2026/10/19 06:45:50.441341,  1]   Floppy|create_file|ok|0x81|file|open|/mnt/drive/Progetti/Shoot/project.json:com.apple.provenance
+[2026/10/19 06:45:50.445077,  1]   Floppy|create_file|ok|0x100081|dir|open|/mnt/drive/Progetti/Shoot
+[2026/10/19 06:45:50.844119,  1]   Floppy|create_file|ok|0x100080|dir|open|/mnt/drive/Progetti
+[2026/10/19 06:45:50.891015,  1]   Floppy|create_file|ok|0x100081|dir|open|/mnt/drive/Progetti/Shoot
+[2026/10/19 06:45:50.931926,  1]   Floppy|create_file|ok|0x100080|file|open|/mnt/drive/Progetti/Shoot/clip.mov
+[2026/10/19 06:45:50.939969,  1]   Floppy|create_file|ok|0x10000|file|open|/mnt/drive/Progetti/Shoot/clip.mov:com.apple.provenance:$DATA
+[2026/10/19 06:45:50.940069,  1]   Floppy|create_file|ok|0x110080|file|open|/mnt/drive/Progetti/Shoot/clip.mov
+[2026/10/19 06:45:50.940262,  1]   Floppy|unlinkat|ok|/mnt/drive/Progetti/Shoot/clip.mov
+[2026/10/19 06:45:50.941645,  1]   Floppy|create_file|ok|0x100081|dir|open|/mnt/drive/Progetti
+[2026/10/19 06:45:50.951540,  1]   Floppy|create_file|ok|0x100081|dir|open|/mnt/drive/Progetti/Shoot
+[2026/10/19 06:45:50.957572,  1]   Floppy|create_file|ok|0x100080|dir|open|/mnt/drive/Progetti
+[2026/10/19 06:45:50.961969,  1]   Floppy|create_file|ok|0x60087|file|create|/mnt/drive/Progetti/Shoot/clip.mov
+[2026/10/19 06:45:50.992279,  1]   Floppy|create_file|ok|0x100081|dir|open|/mnt/drive/Progetti
+[2026/10/19 06:45:50.993545,  1]   Floppy|create_file|ok|0x100180|file|open|/mnt/drive/Progetti/Shoot/clip.mov
+[2026/10/19 06:45:50.994320,  1]   Floppy|create_file|ok|0x183|file|open_if|/mnt/drive/Progetti/Shoot/clip.mov:AFP_AfpInfo
+[2026/10/19 06:45:50.994886,  1]   Floppy|create_file|ok|0x103|file|open_if|/mnt/drive/Progetti/Shoot/clip.mov:AFP_AfpInfo
+[2026/10/19 06:45:50.997165,  1]   Floppy|create_file|ok|0x80|file|open|/mnt/drive/Progetti/Shoot/clip.mov
+[2026/10/19 06:45:50.997957,  1]   Floppy|create_file|ok|0x100080|dir|open|/mnt/drive/Progetti
+[2026/10/19 06:45:51.002022,  1]   Floppy|create_file|ok|0x100080|dir|open|/mnt/drive/Progetti
+[2026/10/19 06:45:51.020411,  1]   Floppy|create_file|ok|0x100081|dir|open|/mnt/drive/Progetti/Shoot
+[2026/10/19 06:45:51.020676,  1]   Floppy|create_file|ok|0x1|file|open|/mnt/drive/Progetti/Shoot/clip.mov:AFP_AfpInfo
+[2026/10/19 06:45:51.082693,  1]   Floppy|create_file|ok|0x110080|file|open|/mnt/drive/Progetti/Shoot/clip.mov:AFP_AfpInfo
+[2026/10/19 06:45:51.083526,  1]   Floppy|create_file|ok|0x102|file|overwrite_if|/mnt/drive/Progetti/Shoot/clip.mov:com.apple.provenance
+[2026/10/19 06:45:51.089225,  1]   Floppy|create_file|ok|0x100180|file|open|/mnt/drive/Progetti/Shoot/clip.mov
+[2026/10/19 06:45:51.090036,  1]   Floppy|create_file|ok|0x80|file|open|/mnt/drive/Progetti/Shoot/clip.mov
+[2026/10/19 06:45:51.090782,  1]   Floppy|create_file|ok|0x100080|dir|open|/mnt/drive/Progetti
+[2026/10/19 06:45:51.767144,  1]   Floppy|create_file|ok|0x100081|dir|open|/mnt/drive/Progetti/Shoot
+[2026/10/19 06:45:51.767883,  1]   Floppy|create_file|ok|0x100081|dir|open|/mnt/drive/Progetti/Shoot
+[2026/10/19 06:45:51.768568,  1]   Floppy|create_file|ok|0x10000|file|open|/mnt/drive/Progetti/Shoot/clip.mov:com.apple.provenance:$DATA
+[2026/10/19 06:45:51.768642,  1]   Floppy|create_file|ok|0x110080|file|open|/mnt/drive/Progetti/Shoot/clip.mov
+[2026/10/19 06:45:51.768768,  1]   Floppy|renameat|ok|/mnt/drive/Progetti/Shoot/clip.mov|/mnt/drive/Progetti/Shoot/take1.mov
+[2026/10/19 06:45:51.769320,  1]   Floppy|create_file|ok|0x100081|dir|open|/mnt/drive/Progetti
+[2026/10/19 06:45:51.769862,  1]   Floppy|create_file|ok|0x100081|dir|open|/mnt/drive/Progetti/Shoot
+[2026/10/19 06:45:51.781085,  1]   Floppy|create_file|ok|0x100081|dir|open|/mnt/drive/Progetti/Shoot
+[2026/10/19 06:45:51.783666,  1]   Floppy|create_file|ok|0x100080|dir|open|/mnt/drive/Progetti
+[2026/10/19 06:45:52.103681,  1]   Floppy|create_file|ok|0x100081|dir|open|/mnt/drive/Progetti/Shoot
+[2026/10/19 06:45:52.104962,  1]   Floppy|create_file|ok|0x60087|file|open_if|/mnt/drive/Progetti/Shoot/.hidden
+[2026/10/19 06:45:52.106984,  1]   Floppy|create_file|ok|0x102|file|overwrite_if|/mnt/drive/Progetti/Shoot/.hidden:com.apple.provenance
+[2026/10/19 06:45:52.107672,  1]   Floppy|create_file|ok|0x81|file|open|/mnt/drive/Progetti/Shoot/.hidden:com.apple.provenance
+[2026/10/19 06:45:52.112636,  1]   Floppy|create_file|ok|0x100081|dir|open|/mnt/drive/Progetti
+[2026/10/19 06:45:52.114176,  1]   Floppy|create_file|ok|0x10000|file|open|/mnt/drive/Progetti/Shoot/.hidden:com.apple.provenance:$DATA
+[2026/10/19 06:45:52.114212,  1]   Floppy|create_file|ok|0x110080|file|open|/mnt/drive/Progetti/Shoot/.hidden
+[2026/10/19 06:45:52.114330,  1]   Floppy|unlinkat|ok|/mnt/drive/Progetti/Shoot/.hidden
+[2026/10/19 06:45:52.118740,  1]   Floppy|create_file|ok|0x100081|dir|open|/mnt/drive/Progetti
+[2026/10/19 06:45:52.119196,  1]   Floppy|create_file|ok|0x100081|dir|open|/mnt/drive/Progetti/Shoot
+[2026/10/19 06:45:52.290357,  1]   Floppy|create_file|ok|0x100081|dir|open|/mnt/drive/Progetti/Shoot
+[2026/10/19 06:45:52.425251,  1]   Floppy|create_file|ok|0x100081|dir|open|/mnt/drive/Progetti
+[2026/10/19 06:45:52.426019,  1]   Floppy|create_file|ok|0x100081|dir|open|/mnt/drive/Progetti/Shoot
+[2026/10/19 06:45:52.426838,  1]   Floppy|mkdirat|ok|/mnt/drive/Progetti/Shoot/.::TMPNAME:D:347%18301774855721759420:Raw
+[2026/10/19 06:45:52.426898,  1]   Floppy|renameat|ok|/mnt/drive/Progetti/Shoot/.::TMPNAME:D:347%18301774855721759420:Raw|/mnt/drive/Progetti/Shoot/Raw
+[2026/10/19 06:45:52.426952,  1]   Floppy|create_file|ok|0x81|dir|create|/mnt/drive/Progetti/Shoot/Raw
+[2026/10/19 06:45:52.428054,  1]   Floppy|create_file|ok|0x102|file|overwrite_if|/mnt/drive/Progetti/Shoot/Raw:com.apple.provenance
+[2026/10/19 06:45:52.432114,  1]   Floppy|create_file|ok|0x100081|dir|open|/mnt/drive/Progetti
+[2026/10/19 06:45:52.433178,  1]   Floppy|create_file|ok|0x100081|dir|open|/mnt/drive/Progetti/Shoot/Raw
+[2026/10/19 06:45:52.433973,  1]   Floppy|create_file|ok|0x60087|file|open_if|/mnt/drive/Progetti/Shoot/Raw/a.mov
+[2026/10/19 06:45:52.435516,  1]   Floppy|create_file|ok|0x102|file|overwrite_if|/mnt/drive/Progetti/Shoot/Raw/a.mov:com.apple.provenance
+[2026/10/19 06:45:52.436306,  1]   Floppy|create_file|ok|0x81|file|open|/mnt/drive/Progetti/Shoot/Raw/a.mov:com.apple.provenance
+[2026/10/19 06:45:52.437037,  1]   Floppy|create_file|ok|0x100081|dir|open|/mnt/drive/Progetti/Shoot/Raw
+[2026/10/19 06:45:52.437795,  1]   Floppy|create_file|ok|0x100081|dir|open|/mnt/drive/Progetti/Shoot
+[2026/10/19 06:45:52.439229,  1]   Floppy|create_file|ok|0x60087|file|open_if|/mnt/drive/Progetti/Shoot/Raw/b.mov
+[2026/10/19 06:45:52.440174,  1]   Floppy|create_file|ok|0x100081|dir|open|/mnt/drive/Progetti/Shoot
+[2026/10/19 06:45:52.441294,  1]   Floppy|create_file|ok|0x102|file|overwrite_if|/mnt/drive/Progetti/Shoot/Raw/b.mov:com.apple.provenance
+[2026/10/19 06:45:52.441944,  1]   Floppy|create_file|ok|0x81|file|open|/mnt/drive/Progetti/Shoot/Raw/b.mov:com.apple.provenance
+[2026/10/19 06:45:52.761457,  1]   Floppy|create_file|ok|0x100081|dir|open|/mnt/drive/Progetti
+[2026/10/19 06:45:52.762185,  1]   Floppy|create_file|ok|0x100081|dir|open|/mnt/drive/Progetti
+[2026/10/19 06:45:52.764380,  1]   Floppy|create_file|ok|0x10000|file|open|/mnt/drive/Progetti/Shoot:com.apple.provenance:$DATA
+[2026/10/19 06:45:52.764413,  1]   Floppy|create_file|ok|0x110080|dir|open|/mnt/drive/Progetti/Shoot
+[2026/10/19 06:45:52.764536,  1]   Floppy|renameat|ok|/mnt/drive/Progetti/Shoot|/mnt/drive/Progetti/Shoot 2
+[2026/10/19 06:45:52.764918,  1]   Floppy|create_file|ok|0x100080|dir|open|/mnt/drive/Progetti
+[2026/10/19 06:45:52.765458,  1]   Floppy|create_file|ok|0x81|file|open|/mnt/drive/Progetti/Shoot 2:com.apple.provenance
+[2026/10/19 06:45:52.777257,  1]   Floppy|create_file|ok|0x100081|dir|open|/mnt/drive/Progetti
+[2026/10/19 06:45:52.817957,  1]   Floppy|create_file|ok|0x100081|dir|open|/mnt/drive/Progetti
+[2026/10/19 06:45:53.132906,  1]   Floppy|create_file|ok|0x100081|dir|open|/mnt/drive/Progetti/Shoot 2
+[2026/10/19 06:45:53.133893,  1]   Floppy|create_file|ok|0x100080|dir|open|/mnt/drive/Progetti
+[2026/10/19 06:45:53.192452,  1]   Floppy|create_file|ok|0x100081|dir|open|/mnt/drive/Progetti/Shoot 2
+[2026/10/19 06:45:53.192669,  1]   Floppy|create_file|ok|0x1|file|open|/mnt/drive/Progetti/Shoot 2/.DS_Store:AFP_AfpInfo
+[2026/10/19 06:45:53.193514,  1]   Floppy|create_file|ok|0x100080|file|open|/mnt/drive/Progetti/Shoot 2/.DS_Store
+[2026/10/19 06:45:53.194438,  1]   Floppy|create_file|ok|0x20087|file|open|/mnt/drive/Progetti/Shoot 2/.DS_Store
+[2026/10/19 06:45:53.195551,  1]   Floppy|create_file|ok|0x100081|dir|open|/mnt/drive/Progetti/Shoot 2
+[2026/10/19 06:45:53.195667,  1]   Floppy|create_file|ok|0x1|file|open|/mnt/drive/Progetti/Shoot 2/.DS_Store:AFP_AfpInfo
+[2026/10/19 06:45:53.229162,  1]   Floppy|create_file|ok|0x100080|dir|open|/mnt/drive/Progetti
+[2026/10/19 06:45:53.235326,  1]   Floppy|create_file|ok|0x10000|file|open|/mnt/drive/Progetti/Shoot 2/take1.mov:com.apple.provenance:$DATA
+[2026/10/19 06:45:53.235389,  1]   Floppy|create_file|ok|0x110080|file|open|/mnt/drive/Progetti/Shoot 2/take1.mov
+[2026/10/19 06:45:53.235539,  1]   Floppy|unlinkat|ok|/mnt/drive/Progetti/Shoot 2/take1.mov
+[2026/10/19 06:45:53.247044,  1]   Floppy|create_file|ok|0x100081|dir|open|/mnt/drive/Progetti
+[2026/10/19 06:45:53.247670,  1]   Floppy|create_file|ok|0x100081|dir|open|/mnt/drive/Progetti/Shoot 2
+[2026/10/19 06:45:53.276337,  1]   Floppy|create_file|ok|0x100080|dir|open|/mnt/drive/Progetti
+[2026/10/19 06:45:53.590199,  1]   Floppy|create_file|ok|0x100081|dir|open|/mnt/drive/Progetti/Shoot 2
+[2026/10/19 06:45:53.591350,  1]   Floppy|create_file|ok|0x100081|dir|open|/mnt/drive/Progetti/Shoot 2/Raw
+[2026/10/19 06:45:53.593519,  1]   Floppy|create_file|ok|0x10000|file|open|/mnt/drive/Progetti/Shoot 2/Raw/a.mov:com.apple.provenance:$DATA
+[2026/10/19 06:45:53.593610,  1]   Floppy|create_file|ok|0x110080|file|open|/mnt/drive/Progetti/Shoot 2/Raw/a.mov
+[2026/10/19 06:45:53.593815,  1]   Floppy|unlinkat|ok|/mnt/drive/Progetti/Shoot 2/Raw/a.mov
+[2026/10/19 06:45:53.595128,  1]   Floppy|create_file|ok|0x10000|file|open|/mnt/drive/Progetti/Shoot 2/Raw/b.mov:com.apple.provenance:$DATA
+[2026/10/19 06:45:53.595263,  1]   Floppy|create_file|ok|0x110080|file|open|/mnt/drive/Progetti/Shoot 2/Raw/b.mov
+[2026/10/19 06:45:53.595471,  1]   Floppy|unlinkat|ok|/mnt/drive/Progetti/Shoot 2/Raw/b.mov
+[2026/10/19 06:45:53.596268,  1]   Floppy|create_file|ok|0x100081|dir|open|/mnt/drive/Progetti/Shoot 2
+[2026/10/19 06:45:53.597591,  1]   Floppy|create_file|ok|0x10000|file|open|/mnt/drive/Progetti/Shoot 2/Raw:com.apple.provenance:$DATA
+[2026/10/19 06:45:53.597653,  1]   Floppy|create_file|ok|0x110080|dir|open|/mnt/drive/Progetti/Shoot 2/Raw
+[2026/10/19 06:45:53.597906,  1]   Floppy|unlinkat|ok|/mnt/drive/Progetti/Shoot 2/Raw
+[2026/10/19 06:45:53.605157,  1]   Floppy|create_file|ok|0x100081|dir|open|/mnt/drive/Progetti
+[2026/10/19 06:45:53.605841,  1]   Floppy|create_file|ok|0x100081|dir|open|/mnt/drive/Progetti/Shoot 2

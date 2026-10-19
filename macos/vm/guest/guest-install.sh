@@ -11,11 +11,13 @@ JUICEFS_VERSION=1.4.1
 
 # valkey-server: Debian 13's 8.1.1, the series of the meta service's 8.1.4
 # (the spike's masters); a replica of the same series replicates from it.
-PACKAGES=(samba samba-vfs-modules fuse3 valkey-server jq)
+# python3: floppy-activity; the Debian image has it, Samba does not depend on it.
+PACKAGES=(samba samba-vfs-modules fuse3 valkey-server jq python3)
 
 export DEBIAN_FRONTEND=noninteractive
 if ! command -v smbd >/dev/null || ! command -v fusermount3 >/dev/null \
-    || ! command -v valkey-server >/dev/null || ! command -v jq >/dev/null; then
+    || ! command -v valkey-server >/dev/null || ! command -v jq >/dev/null \
+    || ! command -v python3 >/dev/null; then
   # The package ships the .debs as a local repository (an office DNS already
   # failed on a Debian host), so apt resolves against what the image has and
   # downloads nothing. deb.debian.org stays as a fallback.
@@ -59,6 +61,8 @@ systemctl mask valkey-server >/dev/null 2>&1 || true
 install -d -m 700 /etc/floppy /var/lib/floppy /var/cache/floppy
 install -m 755 floppy-disks /usr/local/sbin/floppy-disks
 install -m 644 smb.conf /etc/samba/smb.conf
+install -m 755 floppy-activity /usr/local/sbin/floppy-activity
+install -m 644 floppy-activity.service /etc/systemd/system/floppy-activity.service
 install -d /etc/systemd/system/smbd.service.d
 id drive >/dev/null 2>&1 || useradd -M -s /usr/sbin/nologin drive
 systemctl disable --now nmbd 2>/dev/null || true
@@ -74,8 +78,8 @@ if [ -f config.env ]; then
   # shellcheck disable=SC2153 # set by config.env
   printf '%s\n%s\n' "$SMB_PASSWORD" "$SMB_PASSWORD" | smbpasswd -s -a drive >/dev/null
   systemctl daemon-reload
-  systemctl enable floppy-mount smbd
-  systemctl restart floppy-mount smbd
+  systemctl enable floppy-mount smbd floppy-activity
+  systemctl restart floppy-mount smbd floppy-activity
   exit 0
 fi
 
@@ -106,5 +110,5 @@ if [ "$(lsattr -d /mnt/drive | cut -c5)" != i ]; then
   chattr +i /mnt/drive
 fi
 systemctl daemon-reload
-systemctl enable smbd
-systemctl restart smbd
+systemctl enable smbd floppy-activity
+systemctl restart smbd floppy-activity

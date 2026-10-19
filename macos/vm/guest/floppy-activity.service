@@ -1,0 +1,11 @@
+[Unit]
+Description=Floppy disk activity, from Samba's audit log
+After=smbd.service
+
+[Service]
+ExecStart=/usr/local/sbin/floppy-activity run
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

@@ -14,7 +14,8 @@ lint: ## bash -n, shellcheck and the prose language check
 	shellcheck $(SCRIPTS)
 	python3 scripts/check-prose.py
 
-engine-test: ## The floppy command without a VM: engine lock, disks clear (fake limactl)
+engine-test: ## The floppy command without a VM (fake limactl), and floppy-activity on a recorded audit log
+	python3 macos/tests/activity_test.py
 	macos/tests/engine.sh
 
 app-check: ## The menu bar app: typecheck and build, frontend and Rust tests, clippy
