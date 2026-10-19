@@ -1,0 +1,9 @@
+# The Python that runs in the VM (floppy-activity) and its tests. Debian 13's VM has 3.13
+# and the spike's Debian 12 has 3.11: nothing newer than 3.11, or the formatter writes
+# syntax the VM cannot read.
+target-version = "py311"
+line-length = 100
+
+[lint]
+select = ["E", "F", "W", "I", "B", "S", "UP", "SIM", "RUF", "PL"]
+ignore = ["PLR0911", "PLR0912", "PLR0913", "PLR0915", "PLR2004"]
