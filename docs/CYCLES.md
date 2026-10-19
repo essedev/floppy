@@ -2,6 +2,17 @@
 
 Log of the work done, most recent first. Plans are in [ROADMAP.md](ROADMAP.md), the reasons behind the choices in [ARCHITECTURE.md](ARCHITECTURE.md).
 
+## 12. Two people on one disk (18-19/10/2026)
+
+- **Measured first** (ROADMAP): an open Finder window never showed a colleague's file, a clip being copied is visible at 0 bytes and grows in 64 MB steps, the Finder deletes at once and only JuiceFS's hidden trash keeps the file. Concept f decided the answers (DECISIONS #27).
+- **The trash**: `floppy trash` lists each disk's trash, a deleted folder as one entry, and puts entries back with `RENAME_NOREPLACE`, never over a file, as "name (ripristinato)" when the name is taken. The app's disk window has it as a tab.
+- **The activity**: Samba's `full_audit` in its own log, read by `floppy-activity` in the VM into events kept 30 days (the macOS client's 35 s leases, saves by rename and Samba 4.22's temporary folder names measured on a real audit log); the app sends the team disks' part to the control plane (`file_events`, migration 0005, the one table the application role may delete from) and takes back everyone's. The Activity tab groups close operations, says who, restores and undoes a rename from the row; the trash says who deleted.
+- **Live and undo**: "arriving" and "in use" on the panel's project rows, a warning when this Mac opens a file a colleague is still copying, notices with undo for a mass delete and a folder renamed, the colleague told when their rename is undone.
+- **The Finder at once** (DECISIONS #28): `floppy-notify` turns the replica's key events into Samba's own change notifications; a colleague's file appears in an open window in 0.6 s, against a control without it that stayed unchanged for 15 s.
+- **End to end with two devices**: `deploy/local/e2e.py` now has a colleague (the second device, mounted read-write) and the member's app with its activity; 20 steps pass. Found on the way: an undone rename left no event, a truncating open is recorded as written, the Finder's AppleScript reads the disk rather than the window, and the Mac keeps a folder for minutes after its window closed (178 s, then more than 300 s), which delays a lowered access as much.
+- **Updates under a mounted disk**: `floppy setup` restarted Samba every time, and a restarted Samba turns the Mac's open files into I/O errors; it now restarts only when its configuration or package changed, and the end to end run checks an update with a clip open and a Finder window open (the first update to this version still restarts it, for `kernel change notify`).
+- **Next**: deploy the control plane, release the app, CapCut in the pilot.
+
 ## 11. Online (18/10/2026)
 
 - **The first instance**: `deploy/docker-compose.yml` on a Dokploy host, built from the repository; the shared Traefik got only the provider block of `deploy/traefik/traefik.yml`, kept its default timeouts, and serves one certificate per disk name (`FLOPPY_META_CERT_SCOPE=host`), so no DNS token sits in it. The disks' names resolve to the host without the CDN proxy, which passes only HTTP. Behind the CDN the control plane believes `X-Forwarded-For` from the proxy's network and the CDN's ranges, so rate limits count the client. Mail through SMTP.
