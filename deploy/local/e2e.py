@@ -22,6 +22,14 @@ VM, the disks in the Finder, the app's Core and Account, the admin web in Chrome
   5. manual: the bucket holds the volume under its own prefix, the mount signs with the
      disk's region (no signature or region error in its log), and the disk's key reaches
      nothing on the Mac (disks file, engine home, argv) nor any argv in the VM;
+  5b. the disk's activity (DECISIONS #27, #28), the second device as a colleague who mounts A
+     read-write and reports as its app would: what the member's Mac does reaches the control
+     plane with its name; a colleague's folder rename becomes a notice in the member's app,
+     whose undo gives the folder its name back and reaches the colleague as an event; the
+     trash says who deleted a file and puts it back; a folder deleted from the Mac becomes a
+     notice whose undo restores it; opening a file the colleague is still copying warns, and
+     its end too; a colleague's file appears at once in an open Finder window, which a control
+     without floppy-notify shows it does not do by itself;
   6. the admin lowers A to read in the web: after the apply a write on A fails;
   7. the admin revokes the member's device in the web: the disks are cleared, nothing is left
      in the VM, the share is unmounted; any other install's share is still mounted.
@@ -265,9 +273,13 @@ class Device:
     def __init__(self, email: str):
         self.events: queue.Queue[dict] = queue.Queue()
         self.latest: dict[str, object] = {}
+        self.alerts: list[dict] = []
         self.log = open(STATE / "e2e-device.log", "w")
+        self.commands = STATE / "e2e-commands"
+        self.commands.write_text("")
         env = {**os.environ, "FLOPPY_HOME": HOME, "FLOPPY_VM": VM, "FLOPPY_E2E_SERVER": SERVER,
-               "FLOPPY_E2E_CONTAINER": CONTAINER, "FLOPPY_E2E_EMAIL": email}
+               "FLOPPY_E2E_CONTAINER": CONTAINER, "FLOPPY_E2E_EMAIL": email,
+               "FLOPPY_E2E_COMMANDS": str(self.commands)}
         self.proc = subprocess.Popen(
             ["cargo", "test", "--quiet", "account::e2e_engine::e2e_engine_device_against_the_local_stack",
              "--", "--ignored", "--nocapture", "--exact"],
@@ -282,6 +294,8 @@ class Device:
             if line.startswith("E2E "):
                 event = json.loads(line[4:])
                 self.latest[event["event"]] = event["data"]
+                if event["event"] == "alert":
+                    self.alerts.append(event["data"])
                 self.events.put(event)
 
     def wait(self, name: str, limit: float) -> object:
@@ -296,6 +310,20 @@ class Device:
                 raise Failed(f"the device test exited ({self.proc.returncode}) before {name}: see {self.log.name}")
             time.sleep(0.2)
         raise Failed(f"no {name} from the device within {limit:.0f} s")
+
+    def ask(self, line: str, answer: str, limit: float = 120) -> object:
+        """A command to the device's activity (undo, trash, restore, feed), and its answer."""
+        self.latest.pop(answer, None)
+        with open(self.commands, "a") as f:
+            f.write(line + "\n")
+        return self.wait(answer, limit)
+
+    def alert(self, kind: str, limit: float, **fields: object) -> dict:
+        """The first notification of `kind` whose fields match, waiting for it."""
+        def found():
+            return next((a for a in self.alerts if a["kind"] == kind
+                         and all(a.get(k) == v for k, v in fields.items())), None)
+        return wait(f"a {kind} notification", found, limit)
 
     def stop(self) -> None:
         if self.proc.poll() is None:
@@ -368,6 +396,73 @@ def second_device(email: str) -> dict:
     return {"id": grant["deviceId"], "token": token, **reg}
 
 
+class Colleague:
+    """The second device as a colleague: its mount in the container, and what its app reports."""
+
+    def __init__(self, token: str, disk_id: str, mnt: str, tag: str):
+        self.token, self.disk_id, self.mnt = token, disk_id, mnt
+        self.local_id = int(time.time() * 1000)
+        self.cursor = self.report()["cursor"]
+        self.seen: list[dict] = []
+
+    def sh(self, script: str) -> subprocess.CompletedProcess[str]:
+        return dc("exec", "-T", "device", "sh", "-c", script, check=False, timeout=120)
+
+    def report(self, events: list[dict] = (), writing: list[dict] = (), after: str | None = None) -> dict:
+        out = []
+        for e in events:
+            self.local_id += 1
+            out.append({"localId": self.local_id, "at": time.time(), "diskId": self.disk_id, "kind": "file", **e})
+        status, answer = http("POST", "/device/activity", {"events": out, "after": after,
+                                                          "writing": [{"diskId": self.disk_id, **w} for w in writing]},
+                              self.token)
+        if status != 200:
+            raise Failed(f"the colleague's activity report: HTTP {status} {answer}")
+        return answer
+
+    def news(self) -> list[dict]:
+        """Everything new on its disks since the last call, everyone's."""
+        answer = self.report(after=self.cursor)
+        self.cursor = answer["cursor"]
+        self.seen += answer["events"]
+        return self.seen
+
+
+# The Finder's own window, by name: what it draws, since asking the Finder for a folder's items
+# reads the disk afresh and says nothing of the window (the control proved it).
+WINDOW_ID_JS = """ObjC.import('CoreGraphics');
+function run(argv) {
+  const list = ObjC.deepUnwrap(ObjC.castRefToObject($.CGWindowListCopyWindowInfo($.kCGWindowListOptionOnScreenOnly, 0)));
+  const w = list.find(x => x.kCGWindowOwnerName === 'Finder' && x.kCGWindowName === argv[0]);
+  return w ? String(w.kCGWindowNumber) : '';
+}"""
+
+
+def finder_window(folder: str) -> str:
+    return run("/usr/bin/osascript", "-l", "JavaScript", "-e", WINDOW_ID_JS, os.path.basename(folder),
+               check=False).stdout.strip()
+
+
+def capture(window: str, name: str) -> bytes:
+    """That one window as the Finder draws it (never the screen), kept in the state folder."""
+    path = STATE / f"e2e-finder-{name}.png"
+    run("/usr/sbin/screencapture", "-x", "-o", f"-l{window}", str(path))
+    return path.read_bytes()
+
+
+def close_finder_window(folder: str) -> None:
+    run("/usr/bin/osascript", "-e",
+        f'tell application "Finder" to close (every window whose name is "{os.path.basename(folder)}")', check=False)
+
+
+def notice(device: "Device", kind: str, **fields: object) -> dict:
+    """The member's notice of `kind` whose fields match, waiting for it."""
+    def found():
+        return next((n for n in device.latest.get("notices") or [] if n["kind"] == kind  # type: ignore[union-attr]
+                     and all(n.get(k) == v for k, v in fields.items())), None)
+    return wait(f"a {kind} notice", found, 120)
+
+
 def key_on_the_mac(store: dict[str, str], device: "Device") -> list[str]:
     """Where the manual disk's key shows up on the Mac: files of the engine's home (the VM's
     own disk image aside), the device test's log, the argv of every process."""
@@ -388,6 +483,156 @@ def key_on_the_mac(store: dict[str, str], device: "Device") -> list[str]:
     if any(n.decode() in argv for n in needles):
         found.append("argv of a Mac process")
     return found
+
+
+def activity_steps(device: "Device", second: dict, disk_id: str, mac: str, mnt: str, tag: str,
+                   person: dict) -> None:
+    """Steps s09b to s09g: everything of DECISIONS #27 and #28 with two devices on disk A."""
+    colleague = Colleague(second["token"], disk_id, mnt, tag)
+    member = person["name"] or person["email"]
+
+    # This Mac's operations reach the control plane, with who did them.
+    t = time.monotonic()
+    folder = f"{mac}/Attivita {tag}"
+    os.mkdir(folder)
+    # Created as the Finder creates a copy (FILE_CREATE): a truncating open is recorded as written.
+    fd = os.open(f"{folder}/clip.mov", os.O_WRONLY | os.O_CREAT | os.O_EXCL)
+    os.write(fd, secrets.token_bytes(1024 * 1024))
+    os.close(fd)
+    os.rename(folder, f"{folder} rinominata")
+
+    def reported():
+        ev = [e for e in colleague.news() if e["by"]["name"] == member and not e["by"]["you"]]
+        ops = {(e["op"], e["path"].split("/")[0]) for e in ev}
+        want = {("created", f"Attivita {tag}"), ("renamed", f"Attivita {tag}")}
+        added = any(e["op"] == "added" and e["path"].endswith("/clip.mov") for e in ev)
+        return want <= ops and added and ev
+    ev = wait("this Mac's events on the control plane", reported, 180, 3)
+    record("s09b this Mac's folder, file and rename reach the control plane with the member's name", True,
+           time.monotonic() - t, f"{len(ev)} events, ops {sorted({e['op'] for e in ev})}")
+
+    # A colleague renames a folder: a notice in the member's app; its undo puts the name back.
+    t = time.monotonic()
+    old, new = f"Backstage {tag}", f"Backstage {tag} Tosca"
+    out = colleague.sh(f"mkdir -p '{mnt}/{old}' && echo x > '{mnt}/{old}/scena.mov' && mv '{mnt}/{old}' '{mnt}/{new}'")
+    if out.returncode != 0:
+        raise Failed(f"the colleague's rename: {out.stdout}{out.stderr}")
+    colleague.report([{"op": "renamed", "kind": "folder", "path": old, "to": new}])
+    alert = device.alert("renamed", 60, **{"from": old})
+    n = notice(device, "renamed", path=old)
+    undo = device.ask(f"undo {n['id']}", "undo")
+    back = wait("the old name back for the colleague",
+                lambda: colleague.sh(f"test -d '{mnt}/{old}' && test ! -e '{mnt}/{new}'").returncode == 0, 30)
+    heard = wait("the undo on the control plane", lambda: any(
+        e["op"] == "renamed" and e["path"] == new and e["to"] == old and e["by"]["name"] == member
+        for e in colleague.news()), 90, 3)
+    record("s09c a colleague's folder rename: a notice for the member, whose undo gives the name back",
+           alert["by"]["you"] is False and undo == {"error": None} and back and heard, time.monotonic() - t,
+           f"notification from {alert['by']['name']}, the colleague sees {old!r} again and the undo as an event")
+
+    # Who deleted, in the trash, and the file back.
+    t = time.monotonic()
+    out = colleague.sh(f"mkdir -p '{mnt}/Cestino {tag}' && head -c 65536 /dev/urandom > '{mnt}/Cestino {tag}/ripresa.mov' "
+                       f"&& sleep 1 && rm '{mnt}/Cestino {tag}/ripresa.mov'")
+    deleted_at = time.time()
+    colleague.report([{"op": "deleted", "path": f"Cestino {tag}/ripresa.mov", "size": 65536}])
+    time.sleep(6)  # the replica, then the report past the control plane's horizon
+    trash = device.ask("trash", "trash")
+    entry = next((e for d in trash.get("disks", []) if d["disk"] == disk_id  # type: ignore[union-attr]
+                  for e in d["entries"] if e["name"] == "ripresa.mov"), None)
+    restored = device.ask(f"restore {disk_id} {deleted_at} Cestino {tag}/ripresa.mov", "restore")
+    there = colleague.sh(f"test -s '{mnt}/Cestino {tag}/ripresa.mov'").returncode == 0
+    who = (entry or {}).get("by") or {}
+    record("s09d the trash says who deleted the colleague's file, and puts it back where it was",
+           bool(entry) and who.get("you") is False and len(restored.get("restored", [])) == 1 and there,  # type: ignore[union-attr]
+           time.monotonic() - t, f"by {who.get('name')}, restored {restored}")
+
+    # A folder deleted from the Mac: a notice whose undo puts it back.
+    t = time.monotonic()
+    mass = f"{mac}/Girato grezzo {tag}"
+    os.mkdir(mass)
+    for i in range(3):
+        with open(f"{mass}/A00{i}.mov", "wb") as f:
+            f.write(secrets.token_bytes(256 * 1024))
+    time.sleep(2)
+    import shutil
+    shutil.rmtree(mass)
+    alert = device.alert("mass_delete", 180, name=f"Girato grezzo {tag}")
+    n = notice(device, "mass_delete", name=f"Girato grezzo {tag}")
+    undo = device.ask(f"undo {n['id']}", "undo")
+    files = wait("the folder back on the Mac", lambda: os.path.isdir(mass) and sorted(os.listdir(mass)), 30)
+    record("s09e a folder deleted from the Mac: a notice whose undo restores it with its files",
+           undo == {"error": None} and files == ["A000.mov", "A001.mov", "A002.mov"], time.monotonic() - t,
+           f"{alert['files']} files in the notification, back: {files}")
+
+    # Opening a file the colleague is still copying warns, and so does its end.
+    t = time.monotonic()
+    live = f"Live {tag}"
+    colleague.sh(f"mkdir -p '{mnt}/{live}' && head -c 1048576 /dev/urandom > '{mnt}/{live}/arriva.mov'")
+    writing = [{"path": f"{live}/arriva.mov", "op": "added", "since": time.time() - 20, "size": 64 * 1024 * 1024}]
+    colleague.report(writing=writing)
+    wait("the file on the Mac", lambda: os.path.exists(f"{mac}/{live}/arriva.mov"), 30)
+    held = open(f"{mac}/{live}/arriva.mov", "rb")
+    held.read(4096)
+    end = time.monotonic() + 90
+    arriving = None
+    while time.monotonic() < end and arriving is None:
+        colleague.report(writing=writing)
+        arriving = next((a for a in device.alerts if a["kind"] == "arriving" and a["file"] == "arriva.mov"), None)
+        time.sleep(3)
+    colleague.report(writing=[])
+    arrived = device.alert("arrived", 60, folder=live) if arriving else None
+    held.close()
+    record("s09f opening a file the colleague is still copying warns, and its end too",
+           arriving is not None and arrived is not None, time.monotonic() - t,
+           f"{arriving} then {arrived}")
+
+    # A colleague's file in an open Finder window: with floppy-notify, and a control without it.
+    t = time.monotonic()
+    window = f"{mac}/{live}"
+    run("/usr/bin/open", window)
+    try:
+        win = wait("the Finder window", lambda: finder_window(window), 20)
+        time.sleep(4)  # floppy-notify reads the watched folders every 2 s
+        in_vm("systemctl stop floppy-notify")
+        before = capture(win, "control-before")
+        colleague.sh(f"echo control > '{mnt}/{live}/controllo.txt'")
+        time.sleep(15)
+        control = capture(win, "control-after") != before
+        in_vm("systemctl start floppy-notify")
+        time.sleep(5)
+        before = capture(win, "notify-before")
+        colleague.sh(f"echo colleague > '{mnt}/{live}/collega.txt'")
+        w = time.monotonic()
+        shown = None
+        while time.monotonic() - w < 20 and shown is None:
+            time.sleep(0.5)
+            if capture(win, "notify-after") != before:
+                shown = time.monotonic() - w
+        record("s09g a colleague's file appears in an open Finder window at once",
+               shown is not None and not control, time.monotonic() - t,
+               f"the window changed {shown:.1f} s after the colleague's file" if shown is not None else
+               "the window never changed in 20 s", )
+        record("s09g' without floppy-notify the window stays as it was (the control)", not control, 0,
+               "it changed by itself: the Finder refreshed without a notification" if control else
+               f"unchanged 15 s after the colleague's control file; images in {STATE}/e2e-finder-*.png")
+    finally:
+        close_finder_window(window)
+    # The Mac lets the folder go some time after the window closed; a remount waits for it.
+    t = time.monotonic()
+    folder_open = f"{os.path.basename(mac)}/{live}"
+    released = wait_quietly(lambda: folder_open not in in_vm("smbstatus -L 2>/dev/null; true"), 300, 5)
+    record("s09h the Mac lets the folder go after its Finder window closed", released, time.monotonic() - t,
+           f"after {time.monotonic() - t:.0f} s" if released else "still open after 300 s")
+
+
+def wait_quietly(predicate, limit: float, every: float) -> bool:
+    end = time.monotonic() + limit
+    while time.monotonic() < end:
+        if predicate():
+            return True
+        time.sleep(every)
+    return False
 
 
 def main() -> int:
@@ -563,7 +808,7 @@ def main() -> int:
                 f"grep -q ' {meta.group(1)}$' /etc/hosts || echo \"$ip {meta.group(1)}\" >> /etc/hosts; "
                 f"mkdir -p /mnt/{tag}; mountpoint -q /mnt/{tag} || juicefs mount "
                 f"\"rediss://$E2E_USER@{meta.group(1)}:{meta.group(2)}/{meta.group(3)}?tls-ca-cert-file=/certs/ca.crt\" "
-                f"/mnt/{tag} --read-only --no-usage-report -d --log /tmp/jfs-{tag}.log >/tmp/mount-{tag}.log 2>&1 "
+                f"/mnt/{tag} --no-usage-report -d --log /tmp/jfs-{tag}.log >/tmp/mount-{tag}.log 2>&1 "
                 f"|| {{ tail -3 /tmp/mount-{tag}.log; exit 1; }}; "
                 f"sha256sum '/mnt/{tag}/{name_a}' | cut -d' ' -f1")
             flags = [x for k in env for x in ("-e", k)]
@@ -573,6 +818,10 @@ def main() -> int:
                    seen == [digest], time.monotonic() - t,
                    f"through {meta.group(1).split('.')[0]}.meta:{meta.group(2)}, region {env['AWS_REGION']}"
                    if seen == [digest] else f"exit {out.returncode}: {(out.stdout + out.stderr)[-300:]}")
+
+            # 5b. The disk's activity, the colleague's changes, the notices and their undo.
+            if seen == [digest]:
+                activity_steps(device, second, ids[disk_a], f"{mount}/{disk_a}", f"/mnt/{tag}", tag, person)
 
             if store is not None:
                 # 5. Manual: the format on the bucket, the signature, where the key went.
@@ -619,7 +868,13 @@ def main() -> int:
             def lowered():
                 a = disk_of(engine_status(), ids[disk_a])
                 return a.get("state") == "mounted" and a.get("mounted_access") == "read" and not a.get("pending")
-            wait("A remounted read-only", lowered, 300, 2)
+            try:
+                wait("A remounted read-only", lowered, 300, 2)
+            except Failed as e:
+                # What keeps A busy: Samba's opens, then any process with a file on the mount.
+                busy = in_vm(f"smbstatus -L 2>/dev/null | grep -F {shlex.quote(disk_a)}; "
+                             f"fuser -vm {shlex.quote('/mnt/drive/' + disk_a)} 2>&1; true")
+                raise Failed(f"{e}; open on A: {busy.strip()[-1500:] or 'nothing'}") from e
             remounted = time.monotonic() - t
             err = write_fails(f"{mount}/{disk_a}/after-lower-{tag}.bin")
             with open(path_a, "rb") as f:

@@ -6,8 +6,12 @@
 //! side; this test signs the member in by code (read from the server's log, as
 //! in `e2e.rs`), then lets the worker and the checker run as in the app,
 //! printing one `E2E {json}` line on stdout for every change the driver waits
-//! for, until the device is revoked and its disks are cleared. Ignored by
-//! default; it refuses the real `~/.floppy`. Run with
+//! for, until the device is revoked and its disks are cleared. The app's
+//! activity service runs too: its notices and notifications are printed, and
+//! the driver asks for an undo, the trash or a restore by appending a line to
+//! `FLOPPY_E2E_COMMANDS` (`undo <notice id>`, `trash`, `restore <disk> <path>
+//! <time>`, `feed <disk>`). Ignored by default; it refuses the real
+//! `~/.floppy`. Run with
 //!
 //! ```text
 //! FLOPPY_HOME=/tmp/fe2e FLOPPY_VM=fe2e FLOPPY_E2E_SERVER=http://127.0.0.1:4583 \
@@ -20,6 +24,7 @@
 use super::e2e::{code_in, mail_to, mails_so_far};
 use super::*;
 use crate::account::secrets::MemoryStore;
+use crate::activity::{Activity, ActivityEvent, DeletedItem};
 use crate::core::Core;
 use crate::engine;
 use crate::team;
@@ -124,6 +129,21 @@ fn e2e_engine_device_against_the_local_stack() {
     );
     account.start_worker();
 
+    let activity_prefs = tempfile::tempdir().unwrap();
+    let activity = Activity::new(
+        Arc::clone(&core),
+        Arc::new(api::Http::new("Floppy/e2e-engine")),
+        Arc::clone(&account) as Arc<dyn crate::activity::Session>,
+        PrefsStore::new(activity_prefs.path()),
+        |event| match event {
+            ActivityEvent::Changed(s) => emit("notices", serde_json::to_value(&s.notices).unwrap()),
+            ActivityEvent::Alert(a) => emit("alert", serde_json::to_value(&a).unwrap()),
+        },
+    );
+    activity.start_worker();
+    let commands = std::env::var("FLOPPY_E2E_COMMANDS").ok();
+    let mut done_commands = 0;
+
     // The app at work: report every change of the disks file and of the
     // engine's view of the disks until the device is revoked.
     let end = Instant::now() + deadline();
@@ -143,6 +163,14 @@ fn e2e_engine_device_against_the_local_stack() {
         if last_error != status.engine_error {
             emit("engine_error", serde_json::json!(status.engine_error));
             last_error = status.engine_error.clone();
+        }
+        if let Some(path) = &commands {
+            let text = std::fs::read_to_string(path).unwrap_or_default();
+            let lines: Vec<&str> = text.lines().collect();
+            for line in lines.iter().skip(done_commands) {
+                command(&activity, &core, line);
+            }
+            done_commands = lines.len();
         }
         if let Phase::SignedOut { notice } = account.view().phase {
             assert_eq!(notice, Some(OutNotice::Revoked), "signed out, not revoked");
@@ -164,4 +192,56 @@ fn e2e_engine_device_against_the_local_stack() {
         }),
     );
     assert!(report.team_disks().is_empty(), "the VM has no disk left");
+}
+
+/// One of the driver's commands; its outcome is printed as `E2E {"event": <verb>}`.
+fn command(activity: &Activity, core: &Core, line: &str) {
+    let parts: Vec<&str> = line.splitn(4, ' ').collect();
+    match parts.as_slice() {
+        ["undo", id] => {
+            let out = activity.undo(id.parse().unwrap_or(0));
+            emit(
+                "undo",
+                serde_json::json!({ "error": out.err().map(|e| e.to_string()) }),
+            );
+        }
+        ["trash"] => {
+            let out = core.trash().map(|mut r| {
+                activity.who(&mut r);
+                r
+            });
+            emit(
+                "trash",
+                match out {
+                    Ok(r) => serde_json::to_value(r).unwrap(),
+                    Err(e) => serde_json::json!({ "error": e.to_string() }),
+                },
+            );
+        }
+        ["restore", disk, at, path] => {
+            let item = DeletedItem {
+                path: path.to_string(),
+                at: at.parse().unwrap_or(0.0),
+            };
+            let out = activity.restore_deleted(Some(disk), &[item]);
+            emit(
+                "restore",
+                match out {
+                    Ok(v) => serde_json::to_value(v).unwrap(),
+                    Err(e) => serde_json::json!({ "error": e.to_string() }),
+                },
+            );
+        }
+        ["feed", disk] => {
+            let out = activity.feed(Some(disk), None);
+            emit(
+                "feed",
+                match out {
+                    Ok(p) => serde_json::to_value(p).unwrap(),
+                    Err(e) => serde_json::json!({ "error": e.to_string() }),
+                },
+            );
+        }
+        _ => emit("unknown_command", serde_json::json!(line)),
+    }
 }
