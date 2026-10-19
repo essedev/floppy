@@ -512,7 +512,7 @@ export const it = {
     gone: "La sua cartella non c'è più: torna in cima al disco",
     you: "Tu",
     unknown: "non registrato",
-    unknownTitle: "Chi l'ha cancellato non risulta da questo Mac",
+    unknownTitle: "Chi l'ha cancellato non risulta: è successo prima che Floppy lo registrasse, o il server del team non risponde",
     restore: "Ripristina",
     restoreCopy: "Ripristina come copia",
     restoreFolder: "Ripristina la cartella",
@@ -528,6 +528,156 @@ export const it = {
     open: "Cestino",
   },
 
+  /** The disk window around the two tabs (DECISIONS #27). */
+  disk: {
+    tabs: "Schede",
+    activity: "Attività",
+    trash: "Cestino",
+  },
+
+  activity: {
+    open: "Attività",
+    loading: "Leggo l'attività…",
+    refresh: "Aggiorna",
+    retry: "Riprova",
+    peopleLabel: "Persona",
+    everyone: "Tutti",
+    typeLabel: "Tipo",
+    types: { all: "Tutto", add: "Aggiunti", ren: "Rinominati e spostati", del: "Cancellati e sostituiti" },
+    now: "Adesso",
+    you: "Tu",
+    someone: "Qualcuno",
+    /** The verb's person: "Tu hai", "Marco ha". */
+    has: (you: boolean) => (you ? "hai" : "ha"),
+    created: (has: string, name: string) => `${has} creato la cartella ${name}`,
+    added: (has: string, n: number, name: string) => `${has} aggiunto ${n === 1 ? name : `${n} file`}`,
+    written: (has: string, n: number, name: string) => `${has} modificato ${n === 1 ? name : `${n} file`}`,
+    replaced: (has: string, n: number, name: string) => `${has} sostituito ${n === 1 ? name : `${n} file`}`,
+    deletedFolder: (has: string, name: string) => `${has} cancellato la cartella ${name}`,
+    deleted: (has: string, n: number, name: string) => `${has} cancellato ${n === 1 ? name : `${n} file`}`,
+    renamed: (has: string, from: string, to: string) => `${has} rinominato ${from} in ${to}`,
+    moved: (has: string, name: string, where: string) => `${has} spostato ${name} in ${where}`,
+    inFolder: (folder: string) => `in ${folder}`,
+    fromFolder: (folder: string) => `da ${folder}`,
+    files: (n: number, size: string | null) => [n === 1 ? "1 file" : `${n} file`, size].filter(Boolean).join(" · "),
+    previousInTrash: "La versione precedente è nel cestino",
+    showFiles: "Mostra i file",
+    hideFiles: "Nascondi i file",
+    andMore: (n: number) => `e altri ${n}`,
+    restore: "Ripristina",
+    restoreFolder: "Ripristina la cartella",
+    restoreFiles: (n: number) => `Ripristina i ${n} file`,
+    restoring: "Ripristino…",
+    restored: (n: number) => (n === 1 ? "Ripristinato" : `Ripristinati ${n} elementi`),
+    inTrash: "Nel cestino",
+    undoRename: "Annulla rinomina",
+    undoing: "Rimetto il nome…",
+    renamedBack: "Nome di prima rimesso",
+    showInFinder: "Mostra nel Finder",
+    confirm: {
+      title: "Rimettere il nome di prima?",
+      body: (by: string, name: string) =>
+        `La cartella torna ${name} e ${by} riceve un avviso. Se nel frattempo ha già ricollegato i suoi progetti, a lui si scollegano di nuovo.`,
+      confirm: "Rimetti il nome",
+      cancel: "Annulla",
+    },
+    refusal: {
+      taken: (name: string) => `«${name}» è già usato da un'altra cartella: rinominala prima, poi riprova.`,
+      gone: "La cartella non ha più quel nome: qualcuno l'ha già cambiato di nuovo.",
+      no_folder: "La cartella in cui stava non c'è più.",
+      not_in_trash: "Non è più nel cestino: forse l'ha già ripristinato qualcun altro, o è scaduto.",
+    },
+    failed: "Non è riuscito.",
+    copying: (who: string, you: boolean, name: string) => `${who} ${you ? "stai" : "sta"} copiando ${name}`,
+    writing: (who: string, you: boolean, name: string) => `${who} ${you ? "stai" : "sta"} scrivendo ${name}`,
+    soFar: (size: string, speed: string | null) => (speed ? `${size} finora, circa ${speed}/s` : `${size} finora`),
+    offline: (time: string) =>
+      `Il server del team non risponde dalle ${time}: qui ci sono solo le operazioni di questo Mac. I colleghi tornano appena risponde.`,
+    local: "Qui ci sono le operazioni di questo Mac.",
+    empty: {
+      title: (disk: string) => `Ancora niente su ${disk}`,
+      body: "Qui compare chi aggiunge, rinomina, sposta e cancella file, per 30 giorni.",
+    },
+    noMatch: { title: "Niente con questi filtri", clear: "Togli i filtri" },
+    more: "Mostra le precedenti",
+    foot: "Le operazioni vicine della stessa persona nella stessa cartella sono un evento solo: copiare 48 clip è una riga, non 48. Chi ha il disco in sola lettura vede l'attività ma non ripristina e non annulla. L'attività resta 30 giorni.",
+  },
+
+  /** Colleagues' files on the projects' rows of the panel. */
+  live: {
+    arriving: "In arrivo",
+    inUse: "In uso",
+    from: (by: string, line: string) => `Da ${by}: ${line}`,
+    files: (n: number, by: string) => `${n} file in arrivo da ${by}`,
+    writing: (by: string, name: string) => `${by} sta scrivendo ${name}`,
+    disk: (n: number, by: string) => `${n === 1 ? "1 file" : `${n} file`} in arrivo da ${by}`,
+  },
+
+  /** The activity's notices in the panel, each with its undo. */
+  activityNotices: {
+    massDelete: {
+      title: (name: string | null, files: number, disk: string) =>
+        name ? `Hai cancellato ${name} da ${disk}` : `Hai cancellato ${files} file da ${disk}`,
+      body: (name: string | null, files: number) =>
+        name
+          ? `La cartella, con ${files === 1 ? "1 file" : `${files} file`}, resta nel cestino: puoi rimetterla com'era.`
+          : "Restano nel cestino: puoi rimetterli com'erano.",
+      undo: (name: string | null, files: number) => (name ? "Ripristina la cartella" : `Ripristina i ${files} file`),
+      done: (name: string | null, files: number) => (name ? `${name} è di nuovo al suo posto` : `Ripristinati ${files} file`),
+    },
+    renamed: {
+      title: (by: string, name: string) => `${by} ha rinominato ${name}`,
+      movedTitle: (by: string, name: string) => `${by} ha spostato ${name}`,
+      body: (to: string) => `Ora è ${to}. I progetti CapCut che usano quei video li cercano ancora al nome di prima: vanno ricollegati.`,
+      movedBody: (where: string) => `Ora è in ${where}. I progetti CapCut che usano quei video li cercano ancora dov'erano: vanno ricollegati.`,
+      mineTitle: (from: string, to: string) => `Hai rinominato ${from} in ${to}`,
+      mineMovedTitle: (name: string, where: string) => `Hai spostato ${name} in ${where}`,
+      mineBody: "Chi usa quei video in CapCut dovrà ricollegarli. Se è stato un errore, rimetti com'era.",
+      undo: "Annulla rinomina",
+      undoMine: "Annulla",
+      ok: "Ho capito",
+      done: "Nome di prima rimesso",
+      doneBody: (name: string, by: string | null) => (by ? `${name} ha di nuovo il suo nome e ${by} lo sa.` : `${name} ha di nuovo il suo nome.`),
+    },
+    renamedBack: {
+      title: (by: string) => `${by} ha rimesso il nome di prima`,
+      body: (from: string, to: string) => `${from} è tornata ${to}: i progetti CapCut la ritrovano come prima.`,
+    },
+    working: "Un momento…",
+    fine: "Va bene",
+    close: "Chiudi",
+    showInFinder: "Mostra nel Finder",
+    failed: "Non è riuscito:",
+  },
+
+  /** macOS notifications about the disks' activity: they inform, the undo is in the panel. */
+  alerts: {
+    massDelete: (name: string | null, files: number, disk: string) => ({
+      title: name ? `Hai cancellato ${name} da ${disk}` : `Hai cancellato ${files} file da ${disk}`,
+      body: "Resta tutto nel cestino: lo ripristini dal pannello di Floppy.",
+    }),
+    renamed: (by: string, from: string, to: string) => ({
+      title: `${by} ha rinominato ${from}`,
+      body: `Ora è ${to}: i progetti CapCut che usano quei video vanno ricollegati. Apri Floppy per annullare.`,
+    }),
+    renamedMine: (from: string, to: string) => ({
+      title: `Hai rinominato ${from} in ${to}`,
+      body: "Chi usa quei video in CapCut dovrà ricollegarli. Puoi annullare dal pannello di Floppy.",
+    }),
+    renamedBack: (by: string, from: string, to: string) => ({
+      title: `${by} ha rimesso il nome di prima`,
+      body: `${from} è tornata ${to}.`,
+    }),
+    arriving: (by: string, file: string, folder: string, size: string | null) => ({
+      title: `${file} non è ancora completo`,
+      body: `${by} lo sta copiando in ${folder}${size ? `: per ora ci sono ${size}` : ""}. Se lo importi adesso in CapCut si ferma lì. Ti avviso quando ha finito.`,
+    }),
+    arrived: (by: string, folder: string) => ({
+      title: `${by} ha finito di copiare in ${folder}`,
+      body: "I file sono completi: se ne avevi importato uno a metà in CapCut, importalo di nuovo.",
+    }),
+  },
+
   errors: {
     busy: "Floppy sta già facendo un'altra operazione: aspetta che finisca.",
     not_mounted: "Il disco non è montato.",
@@ -537,6 +687,9 @@ export const it = {
     no_bundle: "Questa copia dell'app non contiene il motore di Floppy.",
     not_team: "Questo Mac non usa ancora i dischi del team.",
     no_such_disk: "Questo disco non c'è più su questo Mac.",
+    not_in_trash: "Non è più nel cestino: forse l'ha già ripristinato qualcun altro, o è scaduto.",
+    no_such_notice: "Questo avviso non c'è più.",
+    server: "Il server del team non ha risposto.",
     engine: "Il comando di Floppy non ha risposto.",
     io: "Qualcosa non ha funzionato sul Mac.",
     auth_busy: "Floppy sta già facendo un passo dell'accesso: aspetta che finisca.",

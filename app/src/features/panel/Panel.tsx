@@ -8,10 +8,13 @@
 
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { ChevronRight, Ellipsis, ExternalLink, Folder as FolderIcon, Power, RefreshCw, Settings, Trash2 } from "lucide-react";
+import { ChevronRight, Ellipsis, ExternalLink, Folder as FolderIcon, History, Power, RefreshCw, Settings, Trash2 } from "lucide-react";
 import { Faceplate } from "@/components/Faceplate";
 import { Button, Confirm, Led, Notice, Readout, SlotMark } from "@/components/ui";
 import { useAuth } from "@/features/account/hooks";
+import { diskArrivals, projectLive } from "@/features/activity/activity";
+import { useActivitySnapshot } from "@/features/activity/hooks";
+import { ActivityNotices, alertText } from "@/features/activity/notices";
 import { lostAccess } from "@/features/account/view";
 import { faceFor, isBusy } from "@/features/disk/face";
 import { keys, useAppInfo, useCountdown, useDiskAction, useFolders, useStatus } from "@/features/disk/hooks";
@@ -19,7 +22,7 @@ import { diskLook, noDisksCase, teamOf } from "@/features/disk/team";
 import { it } from "@/i18n/it";
 import { backend } from "@/lib/backend";
 import { gb, gbUnit } from "@/lib/format";
-import type { CommandError, DiskStatus, DiskView, Folder, TeamView } from "@/lib/types";
+import type { CommandError, DiskStatus, DiskView, Folder, LiveFile, TeamView } from "@/lib/types";
 
 const WITH_SPACE = new Set(["connected", "unreachable", "starting", "stopping"]);
 const WITH_DISKS = new Set(["connected", "unreachable", "starting", "no_disks"]);
@@ -58,6 +61,14 @@ export function Panel() {
       }),
     [],
   );
+  useEffect(
+    () =>
+      backend.onAlert((a) => {
+        const text = alertText(a);
+        void backend.notify(text.title, text.body);
+      }),
+    [],
+  );
 
   return (
     <div ref={root} className="panel flex w-[352px] flex-col overflow-hidden rounded-[20px] bg-surface" aria-label={it.panel.label}>
@@ -67,6 +78,7 @@ export function Panel() {
             <Faceplate {...faceFor(status)} />
           </div>
           <StatusSection status={status} />
+          <ActivityNotices />
           <RevokedSection />
           {WITH_SPACE.has(status.state) && status.space?.cache_used_mb != null && <SpaceSection status={status} />}
           {team && !team.refused_single ? (
@@ -386,8 +398,9 @@ function LegendRow({ color, label, value }: { color: string; label: string; valu
 }
 
 /** The projects at the top of the disk, or inside one team disk (`path`, nested in its row). */
-function FolderList({ status, path }: { status: DiskStatus; path?: string }) {
+function FolderList({ status, path, disk }: { status: DiskStatus; path?: string; disk?: string }) {
   const folders = useFolders(status.state === "connected" && !!status.mount_point, path);
+  const live = useActivitySnapshot().data?.live ?? [];
   const [open, setOpen] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<string | null>(null);
   const warmup = useDiskAction<string>(backend.warmup);
@@ -417,6 +430,7 @@ function FolderList({ status, path }: { status: DiskStatus; path?: string }) {
       <FolderRow
         key={f.path}
         folder={f}
+        live={disk ? projectLive(live, disk, f.name) : null}
         working={status.job?.path === f.path}
         open={open === f.path}
         confirming={confirm === f.path}
@@ -520,6 +534,8 @@ interface DiskRowProps {
 
 function DiskRow({ disk, status, applying, menuOpen, expanded, onMenu, onCloseMenu, onExpand }: DiskRowProps) {
   const look = diskLook(disk, applying);
+  const live: LiveFile[] = useActivitySnapshot().data?.live ?? [];
+  const arriving = disk.path ? diskArrivals(live, disk.id) : null;
   const [confirm, setConfirm] = useState<"off" | "free" | null>(null);
   const toggle = useDiskAction<boolean>((on) => backend.setDiskEnabled(disk.id, on));
   const free = useDiskAction<string>(backend.free);
@@ -531,7 +547,7 @@ function DiskRow({ disk, status, applying, menuOpen, expanded, onMenu, onCloseMe
     <>
       <div className={`flex min-h-12 items-center rounded-[10px] pr-1 pl-3 hover:bg-raised ${menuOpen || confirm ? "bg-raised" : ""}`}>
         <span className="mr-[9px] -ml-px flex">
-          <Led state={working ? "dl" : (look.led ?? undefined)} blink={working || look.blink} />
+          <Led state={working || arriving ? "dl" : (look.led ?? undefined)} blink={working || !!arriving || look.blink} />
         </span>
         <div className="min-w-0 flex-1 py-1.5">
           <div className="flex items-baseline gap-2">
@@ -555,7 +571,7 @@ function DiskRow({ disk, status, applying, menuOpen, expanded, onMenu, onCloseMe
             </button>
             <Readout className="ml-auto shrink-0 text-[11px]">{working ? it.folders.working : look.readout}</Readout>
           </div>
-          <span className="mt-px block text-[12px] leading-[1.35] text-ink-2">{look.line}</span>
+          <span className="mt-px block text-[12px] leading-[1.35] text-ink-2">{arriving ? `${arriving} · ${look.line}` : look.line}</span>
         </div>
         <button
           type="button"
@@ -589,7 +605,16 @@ function DiskRow({ disk, status, applying, menuOpen, expanded, onMenu, onCloseMe
               <MenuItem
                 onClick={() => {
                   onCloseMenu();
-                  void backend.openTrash(disk.id);
+                  void backend.openDisk(disk.id, "activity");
+                }}
+                aside={<History size={14} strokeWidth={1.7} aria-hidden="true" />}
+              >
+                {it.activity.open}
+              </MenuItem>
+              <MenuItem
+                onClick={() => {
+                  onCloseMenu();
+                  void backend.openDisk(disk.id, "trash");
                 }}
                 aside={<Trash2 size={14} strokeWidth={1.7} aria-hidden="true" />}
               >
@@ -654,13 +679,15 @@ function DiskRow({ disk, status, applying, menuOpen, expanded, onMenu, onCloseMe
           <ActionError error={failure} />
         </div>
       )}
-      {expanded && disk.path && <FolderList status={status} path={disk.path} />}
+      {expanded && disk.path && <FolderList status={status} path={disk.path} disk={disk.id} />}
     </>
   );
 }
 
 interface FolderRowProps {
   folder: Folder;
+  /** A colleague copying into it or writing in it. */
+  live: { kind: "arriving" | "in_use"; line: string } | null;
   working: boolean;
   open: boolean;
   confirming: boolean;
@@ -679,15 +706,22 @@ function FolderRow(p: FolderRowProps) {
   return (
     <>
       <div className={`flex min-h-9 items-center rounded-[10px] pr-1 pl-3 hover:bg-raised ${active ? "bg-raised" : ""}`}>
-        {p.working ? (
+        {p.working || p.live ? (
           <span className="mr-[9px] -ml-px flex">
-            <Led state="dl" blink />
+            <Led state="dl" blink={p.working || p.live?.kind === "arriving"} />
           </span>
         ) : (
           <SlotMark />
         )}
-        <span className="min-w-0 flex-1 truncate text-[13px]">{p.folder.name}</span>
-        {p.working && <Readout className="mr-1 text-[11px]">{it.folders.working}</Readout>}
+        <span className="min-w-0 flex-1 py-1">
+          <span className="block truncate text-[13px]">{p.folder.name}</span>
+          {p.live && !p.working && <span className="block truncate text-[12px] leading-[1.35] text-ink-2">{p.live.line}</span>}
+        </span>
+        {p.working ? (
+          <Readout className="mr-1 text-[11px]">{it.folders.working}</Readout>
+        ) : (
+          p.live && <Readout className="mr-1 ml-2 shrink-0 text-[11px]">{p.live.kind === "arriving" ? it.live.arriving : it.live.inUse}</Readout>
+        )}
         <button
           type="button"
           className="grid size-[30px] place-items-center rounded-lg border-0 bg-transparent text-ink-2 hover:bg-sunken hover:text-ink"
@@ -772,17 +806,28 @@ function Footer({ status, version }: { status: DiskStatus; version: string | und
       )}
       <footer className="flex items-center gap-1.5 py-2.5 pr-2.5 pl-5 text-[12px] text-ink-3">
         <span className="mr-auto font-ro text-[12px]">{version ? it.version(version) : it.product}</span>
-        {/* The team's disks open their trash from their own menu. */}
+        {/* The team's disks open their activity and trash from their own menu. */}
         {status.mode === "single" && status.state === "connected" && (
-          <button
-            type="button"
-            className="grid size-[30px] place-items-center rounded-lg border-0 bg-transparent text-ink-2 hover:bg-sunken hover:text-ink"
-            aria-label={it.trash.open}
-            title={it.trash.open}
-            onClick={() => void backend.openTrash()}
-          >
-            <Trash2 size={16} strokeWidth={1.7} aria-hidden="true" />
-          </button>
+          <>
+            <button
+              type="button"
+              className="grid size-[30px] place-items-center rounded-lg border-0 bg-transparent text-ink-2 hover:bg-sunken hover:text-ink"
+              aria-label={it.activity.open}
+              title={it.activity.open}
+              onClick={() => void backend.openDisk(null, "activity")}
+            >
+              <History size={16} strokeWidth={1.7} aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              className="grid size-[30px] place-items-center rounded-lg border-0 bg-transparent text-ink-2 hover:bg-sunken hover:text-ink"
+              aria-label={it.trash.open}
+              title={it.trash.open}
+              onClick={() => void backend.openDisk(null, "trash")}
+            >
+              <Trash2 size={16} strokeWidth={1.7} aria-hidden="true" />
+            </button>
+          </>
         )}
         <button
           type="button"

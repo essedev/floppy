@@ -7,6 +7,7 @@
 //! device/service.py.
 
 use super::server;
+use crate::engine::{Op, TrashKind};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
@@ -511,9 +512,237 @@ impl ControlPlane for Http {
     }
 }
 
+/// Who did something on a disk: the person's name, and whether it is this
+/// Mac's own person.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PersonRef {
+    pub name: String,
+    pub you: bool,
+}
+
+/// One of this Mac's events as `POST /device/activity` takes it; times are
+/// Unix seconds, which the server reads as UTC.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EventIn {
+    pub local_id: u64,
+    pub at: f64,
+    pub disk_id: String,
+    pub op: Op,
+    pub kind: TrashKind,
+    pub path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub to: Option<String>,
+    pub size: Option<u64>,
+}
+
+/// A file this Mac is writing on a team disk.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WritingIn {
+    pub disk_id: String,
+    pub path: String,
+    pub op: Op,
+    pub since: f64,
+    pub size: Option<u64>,
+}
+
+/// `POST /device/activity`: the new events, what is being written, the cursor.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ActivityRequest {
+    pub events: Vec<EventIn>,
+    pub writing: Vec<WritingIn>,
+    pub after: Option<String>,
+}
+
+/// An event on a disk as the server keeps it; `at` is ISO 8601 in UTC.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteEvent {
+    pub id: String,
+    pub disk_id: String,
+    pub at: String,
+    pub op: Op,
+    pub kind: TrashKind,
+    pub path: String,
+    pub to: Option<String>,
+    pub size: Option<u64>,
+    pub by: PersonRef,
+    /// Reported by this Mac: `localId` is its own record's id.
+    pub this_device: bool,
+    pub local_id: u64,
+}
+
+/// A file another Mac is writing on a disk this Mac sees.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteWriting {
+    pub disk_id: String,
+    pub path: String,
+    pub op: Op,
+    pub since: String,
+    pub size: Option<u64>,
+    pub by: PersonRef,
+}
+
+/// What changed on this Mac's disks since its cursor, and what others write.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ActivityAnswer {
+    pub events: Vec<RemoteEvent>,
+    pub cursor: String,
+    pub more: bool,
+    pub writing: Vec<RemoteWriting>,
+}
+
+/// `GET /device/activity`: a page of one disk's history, newest first.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ActivityPage {
+    pub events: Vec<RemoteEvent>,
+    pub before: Option<String>,
+}
+
+/// A trash entry, for `POST /device/activity/deletes`.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct DeleteQuery {
+    pub path: String,
+    pub at: f64,
+}
+
+/// `POST /device/activity/deletes`: who deleted each of a disk's entries.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeletesRequest {
+    pub disk_id: String,
+    pub items: Vec<DeleteQuery>,
+}
+
+#[derive(Deserialize)]
+struct DeletesAnswer {
+    items: Vec<Option<PersonRef>>,
+}
+
+/// The activity calls (DECISIONS #27); `Http` in the app, fakes in the tests.
+pub trait ActivityApi: Send + Sync {
+    fn activity(
+        &self,
+        server: &str,
+        token: &str,
+        report: &ActivityRequest,
+    ) -> Result<ActivityAnswer, ApiError>;
+    fn activity_history(
+        &self,
+        server: &str,
+        token: &str,
+        disk_id: &str,
+        before: Option<&str>,
+    ) -> Result<ActivityPage, ApiError>;
+    /// Who deleted each entry, in the order asked; None where no event says.
+    fn activity_deletes(
+        &self,
+        server: &str,
+        token: &str,
+        req: &DeletesRequest,
+    ) -> Result<Vec<Option<PersonRef>>, ApiError>;
+}
+
+/// How many events a history page asks for.
+pub const HISTORY_PAGE: u32 = 100;
+
+impl ActivityApi for Http {
+    fn activity(
+        &self,
+        server: &str,
+        token: &str,
+        report: &ActivityRequest,
+    ) -> Result<ActivityAnswer, ApiError> {
+        let url = server::endpoint(server, "/device/activity");
+        let (_, body) = self.send("POST", &url, Some(token), Some(Self::value(report)?))?;
+        Self::json(&body)
+    }
+
+    fn activity_history(
+        &self,
+        server: &str,
+        token: &str,
+        disk_id: &str,
+        before: Option<&str>,
+    ) -> Result<ActivityPage, ApiError> {
+        let mut url = url::Url::parse(&server::endpoint(server, "/device/activity"))
+            .map_err(|e| ApiError::Unexpected(e.to_string()))?;
+        {
+            let mut q = url.query_pairs_mut();
+            q.append_pair("diskId", disk_id)
+                .append_pair("limit", &HISTORY_PAGE.to_string());
+            if let Some(b) = before {
+                q.append_pair("before", b);
+            }
+        }
+        let (_, body) = self.send("GET", url.as_str(), Some(token), None)?;
+        Self::json(&body)
+    }
+
+    fn activity_deletes(
+        &self,
+        server: &str,
+        token: &str,
+        req: &DeletesRequest,
+    ) -> Result<Vec<Option<PersonRef>>, ApiError> {
+        let url = server::endpoint(server, "/device/activity/deletes");
+        let (_, body) = self.send("POST", &url, Some(token), Some(Self::value(req)?))?;
+        Ok(Self::json::<DeletesAnswer>(&body)?.items)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The activity's shapes exactly as the server's models serialize them.
+    #[test]
+    fn speaks_the_activity_contract() {
+        let sent = serde_json::to_value(ActivityRequest {
+            events: vec![EventIn {
+                local_id: 1792395950001,
+                at: 1792395950.25,
+                disk_id: "d1".into(),
+                op: Op::Deleted,
+                kind: TrashKind::File,
+                path: "Girato/a.mov".into(),
+                to: None,
+                size: Some(12),
+            }],
+            writing: vec![WritingIn {
+                disk_id: "d1".into(),
+                path: "Girato/b.mov".into(),
+                op: Op::Added,
+                since: 1792395900.0,
+                size: None,
+            }],
+            after: None,
+        })
+        .unwrap();
+        assert_eq!(
+            sent,
+            serde_json::json!({"events":[{"localId":1792395950001_u64,"at":1792395950.25,"diskId":"d1",
+                "op":"deleted","kind":"file","path":"Girato/a.mov","size":12}],
+                "writing":[{"diskId":"d1","path":"Girato/b.mov","op":"added","since":1792395900.0,"size":null}],
+                "after":null})
+        );
+        let answer: ActivityAnswer = serde_json::from_str(
+            r#"{"events":[{"id":"0192f0c4-0000-7000-8000-000000000009","diskId":"d1","at":"2026-10-19T10:00:00.250000Z",
+            "op":"renamed","kind":"folder","path":"Backstage","to":"Backstage Tosca","size":null,
+            "by":{"name":"Marco","you":false},"thisDevice":false,"localId":7}],
+            "cursor":"abc","more":false,
+            "writing":[{"diskId":"d1","path":"Girato/c.mov","op":"added","since":"2026-10-19T09:59:00Z","size":512,
+            "by":{"name":"Marco","you":false},"reportedAt":"2026-10-19T10:00:00Z"}]}"#,
+        )
+        .unwrap();
+        assert_eq!(answer.events[0].to.as_deref(), Some("Backstage Tosca"));
+        assert_eq!(answer.writing[0].by.name, "Marco");
+    }
 
     #[test]
     fn reads_the_error_contract() {

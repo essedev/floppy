@@ -1,5 +1,5 @@
 //! The windows (declared in tauri.conf.json): the panel under the menu bar
-//! icon, Settings, the trash and the first run. The app lives in the menu bar
+//! icon, Settings, the disk window (activity and trash) and the first run. The app lives in the menu bar
 //! (accessory, no Dock icon) and shows in the Dock only while one of the
 //! others is open.
 
@@ -8,7 +8,8 @@ use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, Rect, Runtime};
 pub const PANEL: &str = "panel";
 pub const SETTINGS: &str = "settings";
 pub const WELCOME: &str = "welcome";
-pub const TRASH: &str = "trash";
+/// A disk's activity and trash, one tab each (DECISIONS #27).
+pub const DISK: &str = "disk";
 
 /// The panel's width in points, as in the concept.
 pub const PANEL_WIDTH: f64 = 352.0;
@@ -44,7 +45,7 @@ pub fn hide(app: &AppHandle<impl Runtime>, label: &str) {
     if let Some(w) = app.get_webview_window(label) {
         let _ = w.hide();
     }
-    let any_open = [SETTINGS, WELCOME, TRASH]
+    let any_open = [SETTINGS, WELCOME, DISK]
         .iter()
         .filter(|l| **l != label)
         .filter_map(|l| app.get_webview_window(l))

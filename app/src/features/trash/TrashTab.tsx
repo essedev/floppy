@@ -1,11 +1,11 @@
 /**
- * The trash window (concept-f-trash-activity 1B, DECISIONS #27): the disks this
- * Mac has mounted on the left, the chosen disk's trash by day on the right,
- * with search, deleted and replaced apart, and a restore that never writes
- * over a file. It reads the engine, so it works with the control plane down.
+ * The disk window's trash tab (concept-f-trash-activity 1B, DECISIONS #27):
+ * the disk's trash by day, with search, deleted and replaced apart, and a
+ * restore that never writes over a file. It reads the engine, so it works with
+ * the control plane down; who deleted what comes from it when it answers.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { File, Film, Folder, RefreshCw, RotateCcw, Search } from "lucide-react";
 import { Button, Led, Notice, SlotMark } from "@/components/ui";
@@ -25,52 +25,30 @@ import {
   timeOf,
 } from "@/features/trash/trash";
 
-const trashKey = ["trash"] as const;
+export const trashKey = ["trash"] as const;
 
-export function TrashWindow() {
+/** One disk's trash; `search` starts the search box filled (from the Activity tab). */
+export function TrashTab({ disk, search }: { disk: string | null; search?: string }) {
   const trash = useQuery({ queryKey: trashKey, queryFn: backend.getTrash, refetchOnWindowFocus: true, retry: false });
-  const [chosen, setChosen] = useState<string | null>(null);
-  useEffect(() => backend.onTrashDisk((d) => setChosen(d ?? null)), []);
-  const disks = trash.data?.disks ?? [];
-  const current = disks.find((d) => diskKey(d) === chosen) ?? disks[0];
-
+  if (trash.isPending) return <p className="m-0 p-6 text-[13px] text-ink-2">{it.trash.loading}</p>;
+  if (trash.isError) {
+    return (
+      <div className="flex flex-col items-start gap-3 p-6">
+        <Notice led="err">{errorText(trash.error as unknown as CommandError)}</Notice>
+        <Button onClick={() => void trash.refetch()}>{it.trash.retry}</Button>
+      </div>
+    );
+  }
+  const current = trash.data.disks.find((d) => d.disk === disk);
+  if (!current) return <Empty title={it.trash.noDisks.title} body={it.trash.noDisks.body} />;
   return (
-    <main className="flex h-screen bg-surface text-ink">
-      <aside className="flex w-[210px] shrink-0 flex-col gap-1 border-r border-line px-2.5 pt-4 pb-3">
-        <h2 className="m-0 mb-1 ml-2 text-[11px] font-semibold tracking-[0.1em] text-ink-3 uppercase">{it.trash.disks}</h2>
-        {disks.map((d) => (
-          <button
-            key={diskKey(d)}
-            type="button"
-            aria-pressed={d === current}
-            onClick={() => setChosen(diskKey(d))}
-            className={`flex items-center gap-2 rounded-lg border-0 px-2.5 py-2 text-left text-[13px] ${
-              d === current ? "bg-raised font-semibold" : "bg-transparent hover:bg-sunken"
-            }`}
-          >
-            <span className="min-w-0 flex-1">
-              <span className="block truncate">{diskName(d)}</span>
-              {!d.writable && <small className="block text-[11.5px] font-normal text-ink-2">{it.trash.readOnly}</small>}
-            </span>
-            <span className="font-ro text-[11.5px] text-ink-2">{d.entries.length}</span>
-          </button>
-        ))}
-      </aside>
-      <section className="min-w-0 flex-1 overflow-y-auto">
-        {trash.isPending ? (
-          <p className="m-0 p-6 text-[13px] text-ink-2">{it.trash.loading}</p>
-        ) : trash.isError ? (
-          <div className="flex flex-col items-start gap-3 p-6">
-            <Notice led="err">{errorText(trash.error as unknown as CommandError)}</Notice>
-            <Button onClick={() => void trash.refetch()}>{it.trash.retry}</Button>
-          </div>
-        ) : !current ? (
-          <Empty title={it.trash.noDisks.title} body={it.trash.noDisks.body} />
-        ) : (
-          <DiskTrash key={diskKey(current)} disk={current} refreshing={trash.isFetching} onRefresh={() => void trash.refetch()} />
-        )}
-      </section>
-    </main>
+    <DiskTrash
+      key={`${diskKey(current)}:${search ?? ""}`}
+      disk={current}
+      search={search ?? ""}
+      refreshing={trash.isFetching}
+      onRefresh={() => void trash.refetch()}
+    />
   );
 }
 
@@ -81,12 +59,13 @@ function errorText(e: CommandError | null | undefined): string {
 
 interface DiskTrashProps {
   disk: TrashDisk;
+  search: string;
   refreshing: boolean;
   onRefresh: () => void;
 }
 
-function DiskTrash({ disk, refreshing, onRefresh }: DiskTrashProps) {
-  const [q, setQ] = useState("");
+function DiskTrash({ disk, search, refreshing, onRefresh }: DiskTrashProps) {
+  const [q, setQ] = useState(search);
   const [kind, setKind] = useState<KindFilter>("all");
   // What this window restored stays on screen, with its Finder button, after a refresh.
   const [done, setDone] = useState<Record<string, { entry: TrashEntry; restored: Restored }>>({});
@@ -243,10 +222,10 @@ function Row({ entry, disk, done, onDone }: RowProps) {
         ) : (
           <>
             <span
-              className={`w-[92px] shrink-0 truncate text-[12.5px] ${entry.by_this_mac ? "text-ink" : "text-ink-3"}`}
-              title={entry.by_this_mac ? undefined : it.trash.unknownTitle}
+              className={`w-[92px] shrink-0 truncate text-[12.5px] ${entry.by_this_mac || entry.by ? "text-ink" : "text-ink-3"}`}
+              title={entry.by_this_mac || entry.by ? undefined : it.trash.unknownTitle}
             >
-              {entry.by_this_mac ? it.trash.you : it.trash.unknown}
+              {entry.by_this_mac || entry.by?.you ? it.trash.you : (entry.by?.name ?? it.trash.unknown)}
             </span>
             <span className="w-[44px] shrink-0 font-ro text-[11.5px] text-ink-2">{timeOf(entry.deleted_at)}</span>
             <span className="w-[64px] shrink-0 text-right font-ro text-[11.5px] text-ink-2">{bytes(entry.size)}</span>

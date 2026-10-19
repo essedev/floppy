@@ -194,6 +194,9 @@ export interface CommandError {
     | "no_bundle"
     | "not_team"
     | "no_such_disk"
+    | "not_in_trash"
+    | "no_such_notice"
+    | "server"
     | "engine"
     | "io"
     | "auth_busy"
@@ -220,6 +223,8 @@ export interface TrashEntry {
   by_this_mac: boolean;
   /** A folder's files. */
   files?: number | null;
+  /** Who deleted it, from the control plane when this Mac did not. */
+  by?: PersonRef | null;
 }
 
 /** One disk's trash; `disk` is null for the single-user volume. */
@@ -250,6 +255,100 @@ export interface Restored {
   moved: boolean;
   /** Its path on this Mac, while the disk is mounted. */
   finder_path: string | null;
+}
+
+/** Who did something on a disk; `you` for this Mac's own person (account/api.rs). */
+export interface PersonRef {
+  name: string;
+  you: boolean;
+}
+
+/** What happened to a file or folder (engine.rs, `Op`). */
+export type Op = "created" | "added" | "written" | "replaced" | "renamed" | "deleted";
+
+/** An event of the Activity tab (activity.rs, `FeedEvent`). */
+export interface FeedEvent {
+  id: string;
+  disk: string | null;
+  /** Unix seconds. */
+  at: number;
+  op: Op;
+  kind: "file" | "folder";
+  /** Relative to the disk. */
+  path: string;
+  to: string | null;
+  size: number | null;
+  by: PersonRef;
+  this_mac: boolean;
+}
+
+/** A file being written now (activity.rs, `LiveFile`): `added` arrives, the others are in use. */
+export interface LiveFile {
+  disk: string | null;
+  path: string;
+  op: Op;
+  since: number;
+  size: number | null;
+  /** Bytes a second since it was opened. */
+  speed: number | null;
+  by: PersonRef;
+  this_mac: boolean;
+}
+
+/** A page of a disk's activity, newest first. */
+export interface FeedPage {
+  events: FeedEvent[];
+  before: string | null;
+  /** Colleagues' events are in. */
+  shared: boolean;
+  /** Since when the control plane has not answered. */
+  offline_since_ms: number | null;
+  live: LiveFile[];
+}
+
+/** Something deleted, as an undo puts it back. */
+export interface DeletedItem {
+  path: string;
+  at: number;
+}
+
+/** A notice in the panel with its undo (activity.rs, `ActivityNotice`). */
+export type ActivityNotice = {
+  id: number;
+  /** The disk's folder in the Finder; null for the single-user volume. */
+  folder: string | null;
+  can_undo: boolean;
+  state: "open" | "working" | "done" | "failed";
+  /** `taken`, `gone`, `no_folder`, `not_in_trash` or the engine's message. */
+  error: string | null;
+  finder_path: string | null;
+} & (
+  | { kind: "mass_delete"; disk: string | null; items: DeletedItem[]; name: string | null; files: number; bytes: number; at: number }
+  | { kind: "renamed"; disk: string | null; path: string; to: string; by: PersonRef; at: number }
+  | { kind: "renamed_back"; disk: string | null; path: string; to: string; by: PersonRef }
+);
+
+/** The notices and what is being written now. */
+export interface ActivitySnapshot {
+  notices: ActivityNotice[];
+  live: LiveFile[];
+}
+
+/** A notification about the disks' activity, worded by the dictionary (activity.rs, `Alert`). */
+export type Alert =
+  | { kind: "mass_delete"; folder: string | null; name: string | null; files: number }
+  | { kind: "renamed"; by: PersonRef; from: string; to: string }
+  | { kind: "renamed_back"; by: string; from: string; to: string }
+  | { kind: "arriving"; by: string; file: string; folder: string; size: number | null }
+  | { kind: "arrived"; by: string; folder: string };
+
+/** Why a rename could not be undone (engine.rs, `RenameBackRefusal`). */
+export type RenameRefusal = "gone" | "taken" | "no_folder";
+
+/** Which disk and tab the disk window opens on. */
+export interface DiskWindowTarget {
+  disk: string | null;
+  tab: "activity" | "trash";
 }
 
 /** What a restore put back and what it could not (core.rs, `RestoreView`). */

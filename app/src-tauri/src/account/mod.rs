@@ -481,6 +481,21 @@ impl Account {
         }
     }
 
+    /// The server and device token while this Mac is signed in and
+    /// registered, for the activity's calls.
+    pub fn device(&self) -> Option<crate::activity::DeviceAuth> {
+        let inner = self.lock();
+        match (&inner.phase, &inner.record) {
+            (Phase::SignedIn { .. }, Some(r)) if r.registered => {
+                Some(crate::activity::DeviceAuth {
+                    server: r.server.clone(),
+                    token: r.device_token.clone(),
+                })
+            }
+            _ => None,
+        }
+    }
+
     /// What the windows show now.
     pub fn view(&self) -> AuthView {
         Self::compose(&self.lock())

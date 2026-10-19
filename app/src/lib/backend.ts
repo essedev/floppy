@@ -10,13 +10,28 @@ import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import * as autostart from "@tauri-apps/plugin-autostart";
 import * as notification from "@tauri-apps/plugin-notification";
 import { mockBackend } from "@/lib/mock";
-import type { AppInfo, AuthView, DiskStatus, Folder, Notice, RestoreResult, SetupProgress, TrashReport } from "@/lib/types";
+import type {
+  ActivitySnapshot,
+  Alert,
+  AppInfo,
+  AuthView,
+  DeletedItem,
+  DiskStatus,
+  DiskWindowTarget,
+  FeedPage,
+  Folder,
+  Notice,
+  RenameRefusal,
+  RestoreResult,
+  SetupProgress,
+  TrashReport,
+} from "@/lib/types";
 
 type Unlisten = () => void;
 
 /** Everything the views ask of the native side. */
 export interface Backend {
-  /** Which window this is: panel, settings, trash or welcome. */
+  /** Which window this is: panel, settings, disk or welcome. */
   view(): string;
   getStatus(): Promise<DiskStatus>;
   refresh(): Promise<void>;
@@ -39,10 +54,22 @@ export interface Backend {
   getTrash(): Promise<TrashReport>;
   /** Puts a trash entry back, never over a file; `disk` is null for the single-user volume. */
   restoreTrash(disk: string | null, ids: string[]): Promise<RestoreResult>;
-  /** Opens the trash window, on one disk when given. */
-  openTrash(disk?: string | null): Promise<void>;
-  /** The disk the trash window was asked to show. */
-  onTrashDisk(cb: (disk: string | null) => void): Unlisten;
+  /** Opens the disk window on a tab, on one disk when given. */
+  openDisk(disk: string | null, tab: DiskWindowTarget["tab"]): Promise<void>;
+  /** The disk and tab the disk window was asked to show. */
+  onDiskWindow(cb: (t: DiskWindowTarget) => void): Unlisten;
+  /** A page of a disk's activity, newest first; `disk` null for the single-user volume. */
+  getActivity(disk: string | null, before: string | null): Promise<FeedPage>;
+  /** The panel's notices and what is being written now, also sent as "activity". */
+  getActivitySnapshot(): Promise<ActivitySnapshot>;
+  onActivity(cb: (s: ActivitySnapshot) => void): Unlisten;
+  onAlert(cb: (a: Alert) => void): Unlisten;
+  /** Puts back from the trash what events deleted. */
+  restoreDeleted(disk: string | null, items: DeletedItem[]): Promise<RestoreResult>;
+  /** Gives `to` its name of before, `path`; the refusal, or null when done. */
+  renameBack(disk: string | null, path: string, to: string): Promise<RenameRefusal | null>;
+  undoNotice(id: number): Promise<void>;
+  dismissNotice(id: number): Promise<void>;
   getSetup(): Promise<SetupProgress>;
   runSetup(): Promise<void>;
   /** Installs or updates the engine from the app, then sets it up. */
@@ -102,8 +129,16 @@ const tauriBackend: Backend = {
   revealInFinder: (path) => invoke("reveal_in_finder", { path }),
   getTrash: () => invoke("get_trash"),
   restoreTrash: (disk, ids) => invoke("restore_trash", { disk, ids }),
-  openTrash: (disk) => invoke("open_trash", { disk: disk ?? null }),
-  onTrashDisk: (cb) => subscribe("trash-disk", cb),
+  openDisk: (disk, tab) => invoke("open_disk", { disk, tab }),
+  onDiskWindow: (cb) => subscribe("disk-window", cb),
+  getActivity: (disk, before) => invoke("get_activity", { disk, before }),
+  getActivitySnapshot: () => invoke("get_activity_snapshot"),
+  onActivity: (cb) => subscribe("activity", cb),
+  onAlert: (cb) => subscribe("alert", cb),
+  restoreDeleted: (disk, items) => invoke("restore_deleted", { disk, items }),
+  renameBack: (disk, path, to) => invoke("rename_back", { disk, path, to }),
+  undoNotice: (id) => invoke("undo_notice", { id }),
+  dismissNotice: (id) => invoke("dismiss_notice", { id }),
   getSetup: () => invoke("get_setup"),
   runSetup: () => invoke("run_setup"),
   installEngine: () => invoke("install_engine"),

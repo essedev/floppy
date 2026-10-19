@@ -2,8 +2,10 @@
 //! calls them through `src/lib/backend.ts`.
 
 use crate::account::{Account, AuthView, Refused};
+use crate::activity::{Activity, ActivitySnapshot, DeletedItem, FeedPage};
 use crate::core::{Core, CoreError, DiskStatus, Folder, RestoreView, SetupProgress};
 use crate::engine::JobKind;
+use crate::engine::RenameBackRefusal;
 use crate::engine::TrashReport;
 use crate::prefs::PrefsStore;
 use crate::windows;
@@ -30,6 +32,9 @@ impl From<CoreError> for CommandError {
             CoreError::NoBundle => "no_bundle",
             CoreError::NotTeam => "not_team",
             CoreError::NoSuchDisk => "no_such_disk",
+            CoreError::NotInTrash => "not_in_trash",
+            CoreError::NoSuchNotice => "no_such_notice",
+            CoreError::Server(_) => "server",
             CoreError::Engine(_) => "engine",
         };
         CommandError {
@@ -127,14 +132,87 @@ pub async fn list_folders(
         .map_err(CommandError::from)
 }
 
-/// Every mounted disk's trash.
+type ActivityState<'a> = State<'a, Arc<Activity>>;
+
+/// Every mounted disk's trash, with who deleted what when the control plane knows.
 #[tauri::command]
-pub async fn get_trash(core: CoreState<'_>) -> Result<TrashReport, CommandError> {
-    let core = Arc::clone(&core);
-    tauri::async_runtime::spawn_blocking(move || core.trash())
+pub async fn get_trash(
+    core: CoreState<'_>,
+    activity: ActivityState<'_>,
+) -> Result<TrashReport, CommandError> {
+    let (core, activity) = (Arc::clone(&core), Arc::clone(&activity));
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut report = core.trash()?;
+        activity.who(&mut report);
+        Ok(report)
+    })
+    .await
+    .map_err(io_error)?
+}
+
+/// A page of a disk's activity; `disk` is null for the single-user volume.
+#[tauri::command]
+pub async fn get_activity(
+    activity: ActivityState<'_>,
+    disk: Option<String>,
+    before: Option<String>,
+) -> Result<FeedPage, CommandError> {
+    let activity = Arc::clone(&activity);
+    tauri::async_runtime::spawn_blocking(move || activity.feed(disk.as_deref(), before.as_deref()))
         .await
         .map_err(io_error)?
         .map_err(CommandError::from)
+}
+
+/// The panel's notices and what is being written now.
+#[tauri::command]
+pub fn get_activity_snapshot(activity: ActivityState) -> ActivitySnapshot {
+    activity.snapshot()
+}
+
+/// Puts back what an event deleted, from the trash.
+#[tauri::command]
+pub async fn restore_deleted(
+    activity: ActivityState<'_>,
+    disk: Option<String>,
+    items: Vec<DeletedItem>,
+) -> Result<RestoreView, CommandError> {
+    let activity = Arc::clone(&activity);
+    tauri::async_runtime::spawn_blocking(move || activity.restore_deleted(disk.as_deref(), &items))
+        .await
+        .map_err(io_error)?
+        .map_err(CommandError::from)
+}
+
+/// Undoes a rename from the feed; the refusal when the old name is taken or
+/// the folder is gone.
+#[tauri::command]
+pub async fn rename_back(
+    activity: ActivityState<'_>,
+    disk: Option<String>,
+    path: String,
+    to: String,
+) -> Result<Option<RenameBackRefusal>, CommandError> {
+    let activity = Arc::clone(&activity);
+    tauri::async_runtime::spawn_blocking(move || activity.rename_back(disk.as_deref(), &path, &to))
+        .await
+        .map_err(io_error)?
+        .map_err(CommandError::from)
+}
+
+/// Runs a notice's undo.
+#[tauri::command]
+pub async fn undo_notice(activity: ActivityState<'_>, id: u64) -> Result<(), CommandError> {
+    let activity = Arc::clone(&activity);
+    tauri::async_runtime::spawn_blocking(move || activity.undo(id))
+        .await
+        .map_err(io_error)?
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn dismiss_notice(activity: ActivityState, id: u64) {
+    activity.dismiss(id);
 }
 
 /// Puts trash entries back; `disk` is null for the single-user volume.
@@ -296,11 +374,24 @@ pub fn open_settings(app: AppHandle) {
     windows::show(&app, windows::SETTINGS);
 }
 
-/// Opens the trash window, on one disk when `disk` is given.
+/// Which disk and tab the disk window opens on.
+#[derive(Debug, Clone, Serialize)]
+pub struct DiskWindowTarget {
+    pub disk: Option<String>,
+    /// `activity` or `trash`.
+    pub tab: String,
+}
+
+/// Opens the disk window on a tab, on one disk when `disk` is given.
 #[tauri::command]
-pub fn open_trash(app: AppHandle, disk: Option<String>) {
-    windows::show(&app, windows::TRASH);
-    let _ = app.emit_to(windows::TRASH, "trash-disk", disk);
+pub fn open_disk(app: AppHandle, disk: Option<String>, tab: String) {
+    windows::show(&app, windows::DISK);
+    let tab = if tab == "trash" {
+        tab
+    } else {
+        "activity".to_string()
+    };
+    let _ = app.emit_to(windows::DISK, "disk-window", DiskWindowTarget { disk, tab });
 }
 
 #[tauri::command]

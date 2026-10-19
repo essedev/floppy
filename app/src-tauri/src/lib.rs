@@ -5,6 +5,7 @@
 //! to Tauri.
 
 mod account;
+mod activity;
 mod commands;
 mod core;
 mod engine;
@@ -16,6 +17,7 @@ mod tray;
 mod windows;
 
 use crate::account::{Account, AccountEvent, Timing, api, secrets};
+use crate::activity::{Activity, ActivityEvent};
 use crate::core::{Core, Event};
 use std::sync::Arc;
 use tauri::menu::{Menu, MenuItem};
@@ -39,6 +41,24 @@ fn on_event(app: &tauri::AppHandle, tray: &tray::TrayState, event: Event) {
         Event::Notify(notice) => {
             let _ = app.emit_to(windows::PANEL, "notify", &notice);
         }
+    }
+}
+
+fn on_activity(app: &tauri::AppHandle, event: ActivityEvent) {
+    match event {
+        ActivityEvent::Changed(snapshot) => {
+            let _ = app.emit("activity", &snapshot);
+        }
+        // The panel's webview words it with the dictionary and posts it.
+        ActivityEvent::Alert(alert) => {
+            let _ = app.emit_to(windows::PANEL, "alert", &alert);
+        }
+    }
+}
+
+impl activity::Session for Account {
+    fn device(&self) -> Option<activity::DeviceAuth> {
+        Account::device(self)
     }
 }
 
@@ -124,7 +144,13 @@ pub fn run() {
             commands::reveal_in_finder,
             commands::get_trash,
             commands::restore_trash,
-            commands::open_trash,
+            commands::open_disk,
+            commands::get_activity,
+            commands::get_activity_snapshot,
+            commands::restore_deleted,
+            commands::rename_back,
+            commands::undo_notice,
+            commands::dismiss_notice,
             commands::get_setup,
             commands::run_setup,
             commands::install_engine,
@@ -190,11 +216,12 @@ pub fn run() {
             let version = app.package_info().version.to_string();
             let macos = macos_version();
             let account_handle = app.handle().clone();
+            let http = Arc::new(api::Http::new(&format!("Floppy/{version} (macOS {macos})")));
             let account = Account::new(
-                Arc::new(api::Http::new(&format!("Floppy/{version} (macOS {macos})"))),
+                Arc::clone(&http) as Arc<dyn api::ControlPlane>,
                 Arc::new(secrets::Keychain),
                 Arc::clone(&core) as Arc<dyn account::TeamDisks>,
-                prefs,
+                prefs.clone(),
                 api::Versions {
                     app_version: version,
                     macos_version: macos,
@@ -203,6 +230,16 @@ pub fn run() {
                 move |event| on_account(&account_handle, event),
             );
             account.start_worker();
+            let activity_handle = app.handle().clone();
+            let activity = Activity::new(
+                Arc::clone(&core),
+                http,
+                Arc::clone(&account) as Arc<dyn activity::Session>,
+                prefs,
+                move |event| on_activity(&activity_handle, event),
+            );
+            activity.start_worker();
+            app.manage(activity);
             app.manage(account);
 
             if let Some(panel) = app.get_webview_window(windows::PANEL) {

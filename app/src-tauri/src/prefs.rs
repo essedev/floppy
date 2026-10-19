@@ -18,6 +18,22 @@ pub struct Prefs {
     /// The team disks of a signed-out Mac are still to be cleared off it
     /// (`floppy disks clear` failed or was interrupted): retried.
     pub disks_clear_owed: bool,
+    /// Where the disks' activity is, between launches (`activity`).
+    pub activity: ActivityPrefs,
+}
+
+/// How far the activity got: what was read from the engine and sent, and
+/// the control plane's cursor.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ActivityPrefs {
+    /// The last engine event already seen: those after it may notify.
+    pub local_seen: Option<u64>,
+    /// The last engine event the control plane stored.
+    pub local_sent: u64,
+    pub cursor: Option<String>,
+    /// The control plane the two above belong to.
+    pub server: Option<String>,
 }
 
 /// Reads and writes `Prefs` at one path; clones share the write lock.

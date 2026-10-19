@@ -210,6 +210,12 @@ pub enum CoreError {
     NotTeam,
     #[error("no such disk on this Mac")]
     NoSuchDisk,
+    #[error("not in the trash")]
+    NotInTrash,
+    #[error("no such notice")]
+    NoSuchNotice,
+    #[error("the server did not answer: {0}")]
+    Server(String),
     #[error(transparent)]
     Engine(#[from] EngineError),
 }
@@ -580,9 +586,36 @@ impl Core {
         list_folders(Path::new(&dir), LIST_TIMEOUT)
     }
 
+    /// The engine can answer `floppy activity`: a disk is mounted and no job
+    /// is changing the VM.
+    pub fn activity_ready(&self) -> bool {
+        self.vm_free().is_ok() && self.mount_point().is_some()
+    }
+
+    /// The folder a team disk has in the Finder; None for the single-user
+    /// volume or a disk this Mac does not know.
+    pub fn disk_folder(&self, disk: Option<&str>) -> Option<String> {
+        let id = disk?;
+        self.status()
+            .team?
+            .disks
+            .into_iter()
+            .find(|d| d.id == id)
+            .map(|d| d.folder)
+    }
+
+    /// How this Mac has a disk mounted; the single-user volume is writable.
+    pub fn disk_access(&self, disk: Option<&str>) -> Option<Access> {
+        let Some(id) = disk else {
+            return self.mount_point().map(|_| Access::Write);
+        };
+        let d = self.status().team?.disks.into_iter().find(|d| d.id == id)?;
+        d.mounted_access.or(Some(d.access))
+    }
+
     /// Refuses while a job installs, sets up, starts or stops the VM: the
     /// trash is read and changed inside it.
-    fn vm_free(&self) -> Result<(), CoreError> {
+    pub fn vm_free(&self) -> Result<(), CoreError> {
         let inner = self.lock();
         match inner.job.as_ref().map(|j| j.info.kind) {
             Some(

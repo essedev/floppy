@@ -35,11 +35,11 @@
         "center": true
       },
       {
-        "label": "trash",
-        "title": "Cestino",
+        "label": "disk",
+        "title": "Attività e cestino",
         "width": 880,
-        "height": 600,
-        "minWidth": 640,
+        "height": 640,
+        "minWidth": 760,
         "minHeight": 400,
         "visible": false,
         "center": true

@@ -38,7 +38,7 @@ cd site && pnpm dev            # pnpm build, pnpm check
 
 # Menu bar app (Tauri; reads `floppy status --json`, so a change there changes app/src-tauri/src/engine.rs)
 cd app && FLOPPY_BIN=/path/to/fake-floppy pnpm tauri dev   # without FLOPPY_BIN: ~/.floppy/bin/floppy
-cd app && pnpm dev             # views in a browser: ?view=panel|settings|trash|welcome&scenario=... (sign-in: &stage=signin&scenario=auth_<state>)
+cd app && pnpm dev             # views in a browser: ?view=panel|settings|disk|welcome&scenario=... (disk: &tab=activity|trash) (sign-in: &stage=signin&scenario=auth_<state>)
 cd app/src-tauri && FLOPPY_E2E_SERVER=<url> FLOPPY_E2E_CONTAINER=<server container> cargo test e2e -- --ignored --test-threads=1   # sign-in and team disks against a server stack (setup in account/e2e.rs)
 app/scripts/render-marks.sh    # tray PNGs and app icons from design/mark/
 

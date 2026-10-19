@@ -491,6 +491,9 @@ pub struct TrashEntry {
     /// A folder's files.
     #[serde(default)]
     pub files: Option<u64>,
+    /// Who deleted it, from the control plane when this Mac did not.
+    #[serde(default)]
+    pub by: Option<crate::account::api::PersonRef>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
@@ -549,6 +552,132 @@ pub fn restore(bin: &Path, disk: Option<&str>, ids: &[&str]) -> Result<RestoreRe
     let mut args = vec!["trash", "restore", disk.unwrap_or("-")];
     args.extend_from_slice(ids);
     let done = run(bin, &args, RESTORE_TIMEOUT)?;
+    if !done.status.success() {
+        return Err(failed(&done));
+    }
+    parse_json(&done.stdout)
+}
+
+/// `floppy activity` reads the VM's database and asks Samba what is open.
+pub const ACTIVITY_TIMEOUT: Duration = Duration::from_secs(20);
+/// How many events one `floppy activity` returns at most.
+pub const ACTIVITY_PAGE: u64 = 1000;
+
+/// What happened to a file or folder, as the VM records it (DECISIONS #27).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Op {
+    /// A folder made.
+    Created,
+    /// A new file written to the end.
+    Added,
+    /// An existing file written in place.
+    Written,
+    /// A save by rename or a Finder "Replace": the old version is in the trash.
+    Replaced,
+    Renamed,
+    Deleted,
+}
+
+/// One thing this Mac did on a disk, from `floppy activity`.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub struct LocalEvent {
+    /// Increasing in the VM's database: what `--after` takes.
+    pub id: u64,
+    /// Unix seconds, the VM's clock.
+    pub at: f64,
+    /// Null for the single-user volume.
+    pub disk: Option<String>,
+    pub op: Op,
+    pub kind: TrashKind,
+    /// Relative to the disk.
+    pub path: String,
+    /// Where a rename or a move took it.
+    #[serde(default)]
+    pub to: Option<String>,
+    /// Bytes, for files; a deleted file's comes from its trash entry.
+    #[serde(default)]
+    pub size: Option<u64>,
+}
+
+/// A file this Mac is writing now.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub struct Writing {
+    pub disk: Option<String>,
+    pub path: String,
+    /// `added` for a new file arriving, `written` or `replaced` for one in use.
+    pub op: Op,
+    /// When it was opened, Unix seconds.
+    pub since: f64,
+    /// Bytes so far; null when it is already gone.
+    pub size: Option<u64>,
+}
+
+/// A file this Mac has open, read or written. Never sent anywhere.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+pub struct OpenFile {
+    pub disk: Option<String>,
+    pub path: String,
+}
+
+/// What `floppy activity` prints.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub struct ActivityReport {
+    pub events: Vec<LocalEvent>,
+    /// The last id returned, or `--after` when there was nothing new.
+    pub last: u64,
+    pub writing: Vec<Writing>,
+    pub open: Vec<OpenFile>,
+}
+
+/// This Mac's events after `after`, and what it writes and has open now.
+pub fn activity(bin: &Path, after: u64) -> Result<ActivityReport, EngineError> {
+    let (after, limit) = (after.to_string(), ACTIVITY_PAGE.to_string());
+    let done = run(
+        bin,
+        &["activity", "--after", &after, "--limit", &limit],
+        ACTIVITY_TIMEOUT,
+    )?;
+    if !done.status.success() {
+        return Err(failed(&done));
+    }
+    parse_json(&done.stdout)
+}
+
+/// Why a rename could not be undone.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RenameBackRefusal {
+    /// Nothing is at the new name any more.
+    Gone,
+    /// Something else has the old name now.
+    Taken,
+    /// The folder it was in is gone.
+    NoFolder,
+}
+
+/// What `floppy activity rename-back` prints.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+pub struct RenamedBack {
+    pub done: bool,
+    pub reason: Option<RenameBackRefusal>,
+}
+
+/// Gives `to` its name of before, `path`, never over what holds that name.
+/// The paths travel on stdin: names reach the VM through a shell.
+pub fn rename_back(
+    bin: &Path,
+    disk: Option<&str>,
+    path: &str,
+    to: &str,
+) -> Result<RenamedBack, EngineError> {
+    let body = serde_json::json!({ "path": path, "to": to }).to_string();
+    let done = run_with_input(
+        bin,
+        &["activity", "rename-back", disk.unwrap_or("-")],
+        Some(body.as_bytes()),
+        ACTIVITY_TIMEOUT,
+    )?;
     if !done.status.success() {
         return Err(failed(&done));
     }
@@ -1188,6 +1317,39 @@ echo "{\"restored\": [{\"id\": \"$4\", \"disk\": $([ "$3" = - ] && echo null || 
         assert_eq!(r.failed[0].id, "h/3-4");
         let single = restore(&bin, None, &["h/1-2"]).unwrap();
         assert_eq!(single.restored[0].disk, None);
+    }
+
+    #[test]
+    fn reads_the_activity() {
+        let dir = tempfile::tempdir().unwrap();
+        let bin = fake(
+            dir.path(),
+            r#"[ "$*" = "activity --after 7 --limit 1000" ] || exit 2
+echo '{"events": [{"id": 8, "at": 1792395950.25, "disk": "progetti", "op": "renamed", "kind": "folder", "path": "Backstage", "to": "Backstage Tosca"}, {"id": 9, "at": 1792395951.0, "disk": null, "op": "deleted", "kind": "file", "path": "a.mov", "size": 12}], "last": 9, "writing": [{"disk": "progetti", "path": "Girato/c.mov", "op": "added", "since": 1792395900.0, "size": null}], "open": [{"disk": "progetti", "path": "Girato/d.mov"}]}'"#,
+        );
+        let a = activity(&bin, 7).unwrap();
+        assert_eq!(a.last, 9);
+        assert_eq!(a.events[0].op, Op::Renamed);
+        assert_eq!(a.events[0].to.as_deref(), Some("Backstage Tosca"));
+        assert_eq!(
+            (a.events[1].disk.as_deref(), a.events[1].size),
+            (None, Some(12))
+        );
+        assert_eq!(a.writing[0].op, Op::Added);
+        assert_eq!(a.open[0].path, "Girato/d.mov");
+    }
+
+    #[test]
+    fn renames_back_with_the_paths_on_stdin() {
+        let dir = tempfile::tempdir().unwrap();
+        let bin = fake(
+            dir.path(),
+            r#"[ "$*" = "activity rename-back progetti" ] || exit 2
+[ "$(cat)" = '{"path":"Backstage","to":"Back'"'"'stage Tosca"}' ] || exit 3
+echo '{"disk": "progetti", "path": "Backstage", "to": "x", "done": false, "reason": "taken"}'"#,
+        );
+        let r = rename_back(&bin, Some("progetti"), "Backstage", "Back'stage Tosca").unwrap();
+        assert_eq!((r.done, r.reason), (false, Some(RenameBackRefusal::Taken)));
     }
 
     #[test]

@@ -4,16 +4,37 @@
  * Playwright: `?view=panel|settings|welcome&scenario=<name>`. The account has
  * its own scenarios, `auth_<phase or error>` (signed in otherwise), and steps
  * through them on clicks: code 123456 signs in, any other is wrong. The team
- * version's are `team_<case>`. The trash window (`view=trash`) has
- * `trash_empty`, `trash_error` and `trash_none`. The app itself never uses
- * this module. Folder names come from concept-a-panel and concept-f.
+ * version's are `team_<case>`, `team_activity` with the activity's notices
+ * and a colleague's copy arriving. The disk window (`view=disk&tab=activity|trash`)
+ * shows three team disks; its scenarios are `trash_empty`, `trash_error`,
+ * `trash_none`, `activity_offline`, `activity_local` and `activity_empty`. The
+ * app itself never uses this module. Folder names come from concept-a-panel
+ * and concept-f.
  */
 
 import type { Backend } from "@/lib/backend";
-import type { AuthView, DiskStatus, DiskView, Folder, Notice, RestoreResult, SetupProgress, TeamView, TrashEntry, TrashReport } from "@/lib/types";
+import type {
+  ActivityNotice,
+  ActivitySnapshot,
+  AuthView,
+  DiskStatus,
+  DiskView,
+  FeedEvent,
+  FeedPage,
+  Folder,
+  LiveFile,
+  Notice,
+  PersonRef,
+  RestoreResult,
+  SetupProgress,
+  TeamView,
+  TrashEntry,
+  TrashReport,
+} from "@/lib/types";
 
 const params = new URLSearchParams(globalThis.location?.search ?? "");
-const scenario = params.get("scenario") ?? "connected";
+const view = params.get("view") ?? "panel";
+const scenario = params.get("scenario") ?? (view === "disk" ? "disk_team" : "connected");
 
 const GB = 1024;
 const base: DiskStatus = {
@@ -146,7 +167,19 @@ const SCENARIOS: Record<string, Partial<DiskStatus>> = {
     ...team({ disks: teamBase.disks.map((d) => ({ ...d, ...off })) }),
   },
   team_single: { ...team({ refused_single: true }), mode: "single" },
+  team_activity: team(),
 };
+// The disk window looks at the team's disks of concept-f.
+const diskTeam = team({
+  disks: [
+    disk("Progetti", { id: "progetti", cache_used_mb: 12.4 * GB }),
+    disk("Archivio 2025", { access: "read", mounted_access: "read", cache_used_mb: 812 }),
+    disk("Consegne", { cache_used_mb: 1.1 * GB }),
+  ],
+});
+for (const k of ["disk_team", "trash_empty", "trash_error", "trash_none", "activity_offline", "activity_local", "activity_empty"]) {
+  SCENARIOS[k] = diskTeam;
+}
 
 let status: DiskStatus = { ...base, ...(SCENARIOS[scenario] ?? {}) };
 let setup: SetupProgress = {
@@ -277,14 +310,14 @@ const NO_TRASH = { disk: "consegne", folder: "Consegne", writable: true, trash_d
 const TRASH: TrashReport = {
   disks: [
     {
-      disk: "pastificio-moretti-spot-natale",
+      disk: "progetti",
       folder: "Progetti",
       writable: true,
       trash_days: 7,
       entries: [
         gone("t1", "Girato grezzo", "Pastificio Moretti - Spot Natale", 0.4 * H, 46.8 * 1024 * MB, { kind: "folder", files: 120, by_this_mac: true }),
-        gone("t2", "Musica_licenze.xlsx", "Pastificio Moretti - Spot Natale/Documenti", 5 * H, 84 * 1024, { replaced: true }),
-        gone("t3", "Intervista_enologo.mov", "Cantine Arnaldi - Vendemmia/Girato", 6 * H, 3.9 * 1024 * MB),
+        gone("t2", "Musica_licenze.xlsx", "Pastificio Moretti - Spot Natale/Documenti", 5 * H, 84 * 1024, { replaced: true, by: { name: "Marco Bassi", you: false } }),
+        gone("t3", "Intervista_enologo.mov", "Cantine Arnaldi - Vendemmia/Girato", 6 * H, 3.9 * 1024 * MB, { by: { name: "Marco Bassi", you: false } }),
         gone("t4", "Drone_vigneto_02.mov", "Cantine Arnaldi - Vendemmia/Girato", 26 * H, 2.2 * 1024 * MB),
         gone("t5", "Sottotitoli_IT.srt", "Fondazione Lirica - Backstage Tosca/Export", 28 * H, 12 * 1024, { replaced: true, by_this_mac: true }),
         gone("t6", "Spot_Natale_v2.mp4", null, 30 * H, 1.4 * 1024 * MB, { by_this_mac: true }),
@@ -308,9 +341,141 @@ const trashReport = (): TrashReport =>
       ? { disks: [NO_TRASH] }
       : TRASH;
 
+const MARCO: PersonRef = { name: "Marco Bassi", you: false };
+const SIMONE: PersonRef = { name: "Simone", you: false };
+const YOU: PersonRef = { name: "Giulia Ferri", you: true };
+let feedId = 0;
+/** An event `ago` hours before now on Progetti. */
+function happened(ago: number, by: PersonRef, op: FeedEvent["op"], path: string, over: Partial<FeedEvent> = {}): FeedEvent {
+  feedId += 1;
+  return { id: `m${feedId}`, disk: "progetti", at: Date.now() / 1000 - ago * H, op, kind: "file", path, to: null, size: null, by, this_mac: by.you, ...over };
+}
+const FEED: FeedEvent[] = [
+  happened(0.4, YOU, "deleted", "Pastificio Moretti - Spot Natale/Girato grezzo", { kind: "folder" }),
+  ...Array.from({ length: 120 }, (_, i) =>
+    happened(0.4 + i / 36000, YOU, "deleted", `Pastificio Moretti - Spot Natale/Girato grezzo/A00${1 + (i % 3)}_C${String(i + 1).padStart(3, "0")}_1017.mov`, {
+      size: 390 * MB + i * MB,
+    }),
+  ),
+  happened(1.6, MARCO, "renamed", "Fondazione Lirica - Backstage", { kind: "folder", to: "Fondazione Lirica - Backstage Tosca" }),
+  ...Array.from({ length: 48 }, (_, i) =>
+    happened(4 + i / 120, YOU, "added", `Cantine Arnaldi - Vendemmia/Girato/A002_C${String(i + 1).padStart(3, "0")}_1018.mov`, { size: 470 * MB }),
+  ),
+  happened(5, MARCO, "replaced", "Pastificio Moretti - Spot Natale/Documenti/Musica_licenze.xlsx", { size: 84 * 1024 }),
+  happened(6, MARCO, "deleted", "Cantine Arnaldi - Vendemmia/Girato/Intervista_enologo.mov", { size: 3.9 * 1024 * MB }),
+  happened(7, SIMONE, "renamed", "Logo_cliente.png", { to: "Showreel 2026/Grafiche/Logo_cliente.png" }),
+  happened(26, SIMONE, "deleted", "Cantine Arnaldi - Vendemmia/Girato/Drone_vigneto_02.mov", { size: 2.2 * 1024 * MB }),
+  happened(27, SIMONE, "created", "Showreel 2026/Grafiche", { kind: "folder" }),
+];
+const started = Date.now() / 1000;
+/** What colleagues are writing now: a clip growing in 64 MB steps, an export. */
+function liveNow(): LiveFile[] {
+  const now = Date.now() / 1000;
+  const size = (512 + Math.floor((now - started) / 8) * 64) * MB;
+  return [
+    {
+      disk: "progetti",
+      path: "Cantine Arnaldi - Vendemmia/Girato/A001_C014_1017.mov",
+      op: "added",
+      since: now - 64,
+      size,
+      speed: size / (now - started + 64),
+      by: MARCO,
+      this_mac: false,
+    },
+    {
+      disk: "progetti",
+      path: "Fondazione Lirica - Backstage Tosca/Export/Backstage_finale.mp4",
+      op: "written",
+      since: now - 300,
+      size: 1.2 * 1024 * MB,
+      speed: null,
+      by: SIMONE,
+      this_mac: false,
+    },
+    // The panel's team disks in team_activity: Showreel 2026 shows it on Cantine's row.
+    {
+      disk: "showreel-2026",
+      path: "Cantine Arnaldi - Vendemmia/Girato/A001_C014_1017.mov",
+      op: "added",
+      since: now - 64,
+      size,
+      speed: size / (now - started + 64),
+      by: MARCO,
+      this_mac: false,
+    },
+  ];
+}
+const noticeBase = { can_undo: true, state: "open", error: null, finder_path: null } as const;
+let notices: ActivityNotice[] =
+  scenario === "team_activity"
+    ? [
+        {
+          ...noticeBase,
+          id: 1,
+          kind: "mass_delete",
+          folder: "Pastificio Moretti - Spot Natale",
+          disk: "pastificio-moretti-spot-natale",
+          items: [{ path: "Girato grezzo", at: started - 60 }],
+          name: "Girato grezzo",
+          files: 120,
+          bytes: 46.8 * 1024 * MB,
+          at: started - 60,
+        },
+        {
+          ...noticeBase,
+          id: 2,
+          kind: "renamed",
+          folder: "Showreel 2026",
+          disk: "showreel-2026",
+          path: "Fondazione Lirica - Backstage",
+          to: "Fondazione Lirica - Backstage Tosca",
+          by: MARCO,
+          at: started - 120,
+        },
+        {
+          ...noticeBase,
+          id: 3,
+          kind: "renamed_back",
+          can_undo: false,
+          folder: "Showreel 2026",
+          disk: "showreel-2026",
+          path: "Clienti",
+          to: "Clienti 2026",
+          by: SIMONE,
+        },
+      ]
+    : [];
+const activityListeners = new Set<(s: ActivitySnapshot) => void>();
+const snapshot = (): ActivitySnapshot => ({ notices, live: scenario === "team_activity" || view === "disk" ? liveNow() : [] });
+function publishActivity(next: ActivityNotice[]) {
+  notices = next;
+  activityListeners.forEach((cb) => cb(snapshot()));
+}
+if (scenario === "team_activity" || view === "disk") setInterval(() => publishActivity(notices), 8000);
+const setNotice = (id: number, over: Partial<ActivityNotice>) =>
+  publishActivity(notices.map((x) => (x.id === id ? ({ ...x, ...over } as ActivityNotice) : x)));
+const feedPage = (disk: string | null, before: string | null): FeedPage => {
+  const events = scenario === "activity_empty" || disk !== "progetti" ? [] : FEED;
+  const mine = events.filter((e) => e.by.you);
+  const offline = scenario === "activity_offline";
+  const local = scenario === "activity_local";
+  const list = offline || local ? mine : events;
+  // Two pages, to show "Mostra le precedenti".
+  const cut = list.findIndex((e) => e.at < Date.now() / 1000 - 24 * H);
+  const page = before ? list.slice(cut) : cut > 0 ? list.slice(0, cut) : list;
+  return {
+    events: page,
+    before: !before && cut > 0 ? "older" : null,
+    shared: !offline && !local,
+    offline_since_ms: offline ? Date.now() - 20 * 60_000 : null,
+    live: liveNow().filter((l) => l.disk === disk),
+  };
+};
+
 /** The browser stand-in for the Tauri backend. */
 export const mockBackend: Backend = {
-  view: () => params.get("view") ?? "panel",
+  view: () => view,
   getStatus: async () => status,
   refresh: async () => publish({}),
   start: async () => {
@@ -375,8 +540,44 @@ export const mockBackend: Backend = {
         resolve(out);
       }),
     ),
-  openTrash: async () => {},
-  onTrashDisk: () => () => {},
+  openDisk: async () => {},
+  onDiskWindow: (cb) => {
+    const tab = params.get("tab");
+    if (tab === "trash" || tab === "activity") later(0, () => cb({ disk: params.get("disk"), tab }));
+    return () => {};
+  },
+  getActivity: (disk, before) =>
+    new Promise((resolve) => later(300, () => resolve(feedPage(disk, before)))),
+  getActivitySnapshot: async () => snapshot(),
+  onActivity: (cb) => listen(activityListeners, cb),
+  onAlert: () => () => {},
+  restoreDeleted: (disk, items) =>
+    new Promise<RestoreResult>((resolve) =>
+      later(700, () =>
+        resolve({
+          restored: items.map((i, n) => ({
+            id: `x${n}`,
+            disk,
+            path: i.path,
+            name: i.path.split("/").pop() ?? i.path,
+            renamed: false,
+            moved: false,
+            finder_path: `/Volumes/Floppy/Progetti/${i.path}`,
+          })),
+          failed: [],
+        }),
+      ),
+    ),
+  renameBack: (_disk, path) => new Promise((resolve) => later(600, () => resolve(path.startsWith("Fondazione") ? null : "taken"))),
+  undoNotice: async (id) => {
+    setNotice(id, { state: "working" });
+    later(900, () => {
+      const x = notices.find((y) => y.id === id);
+      const path = x && "path" in x ? x.path : x && x.kind === "mass_delete" ? x.items[0]!.path : "";
+      setNotice(id, { state: "done", finder_path: `/Volumes/Floppy/${x?.folder ?? ""}/${path}` });
+    });
+  },
+  dismissNotice: async (id) => publishActivity(notices.filter((x) => x.id !== id)),
   getSetup: async () => setup,
   runSetup: async () => {
     publishSetup({ running: true, step: 1, done: false, error: null });
