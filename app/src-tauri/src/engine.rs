@@ -447,6 +447,99 @@ pub fn clear(bin: &Path) -> Result<(), EngineError> {
     Ok(())
 }
 
+/// Listing the trash resolves each deleted entry's folder with one `juicefs info` in the VM.
+pub const TRASH_TIMEOUT: Duration = Duration::from_secs(60);
+/// A restore renames entries in the VM's metadata; a large folder is many renames.
+pub const RESTORE_TIMEOUT: Duration = Duration::from_secs(5 * 60);
+
+/// What `floppy trash` prints: every mounted disk's trash (DECISIONS #27).
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub struct TrashReport {
+    pub disks: Vec<TrashDisk>,
+}
+
+/// One disk's trash; `disk` is null for the single-user volume.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub struct TrashDisk {
+    pub disk: Option<String>,
+    pub folder: Option<String>,
+    /// False when this Mac mounts the disk read-only: nothing can be restored.
+    pub writable: bool,
+    pub trash_days: u32,
+    pub entries: Vec<TrashEntry>,
+}
+
+/// A deleted file or folder, or the version a save replaced.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub struct TrashEntry {
+    /// "<hour>/<parent inode>-<inode>": what `floppy trash restore` takes.
+    pub id: String,
+    pub name: String,
+    pub kind: TrashKind,
+    /// The folder it was in, relative to the disk ("" at the top); null when that
+    /// folder is gone, and the entry comes back at the top.
+    pub from: Option<String>,
+    /// Unix seconds.
+    pub deleted_at: f64,
+    pub expires_at: f64,
+    /// Bytes; a folder's is everything deleted inside it.
+    pub size: u64,
+    /// A file of the same name is where it was: this is an older version.
+    pub replaced: bool,
+    /// This Mac's activity has the delete.
+    pub by_this_mac: bool,
+    /// A folder's files.
+    #[serde(default)]
+    pub files: Option<u64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TrashKind {
+    File,
+    Folder,
+}
+
+/// What `floppy trash restore` prints: where the entry is now.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+pub struct Restored {
+    pub disk: Option<String>,
+    /// Relative to the disk.
+    pub path: String,
+    pub name: String,
+    /// The name was taken: it came back as "name (ripristinato)".
+    pub renamed: bool,
+    /// Its folder was gone: it came back at the top of the disk.
+    pub moved: bool,
+}
+
+fn parse_json<T: serde::de::DeserializeOwned>(stdout: &str) -> Result<T, EngineError> {
+    serde_json::from_str(json_line(stdout)?).map_err(|e| EngineError::Parse(e.to_string()))
+}
+
+/// Every mounted disk's trash, from `floppy trash`.
+pub fn trash(bin: &Path) -> Result<TrashReport, EngineError> {
+    let done = run(bin, &["trash"], TRASH_TIMEOUT)?;
+    if !done.status.success() {
+        return Err(failed(&done));
+    }
+    parse_json(&done.stdout)
+}
+
+/// Puts a trash entry back, never over a file: `floppy trash restore <disk> <id>`,
+/// with `-` for the single-user volume.
+pub fn restore(bin: &Path, disk: Option<&str>, id: &str) -> Result<Restored, EngineError> {
+    let done = run(
+        bin,
+        &["trash", "restore", disk.unwrap_or("-"), id],
+        RESTORE_TIMEOUT,
+    )?;
+    if !done.status.success() {
+        return Err(failed(&done));
+    }
+    parse_json(&done.stdout)
+}
+
 /// The line that explains a failure: the command's own `floppy: ...` message
 /// when there is one, else the last line it printed.
 pub fn last_message(stderr: &str) -> Option<String> {
@@ -1045,6 +1138,51 @@ echo '{"version":1,"configured":true,"installed":true,"stopped":true,"vm":"stopp
         assert_eq!(
             status(&bin).unwrap_err(),
             EngineError::Failed("the VM is not responding".into())
+        );
+    }
+
+    const TRASH: &str = r#"{"disks": [{"disk": "progetti", "folder": "Progetti", "writable": true, "trash_days": 7, "entries": [{"id": "2026-10-19-07/2050-2051", "name": "Girato", "kind": "folder", "from": "Cantine", "deleted_at": 1792395950.3, "expires_at": 1792998000.0, "size": 4, "replaced": false, "by_this_mac": true, "files": 2}, {"id": "2026-10-19-07/2055-2060", "name": "musica.xlsx", "kind": "file", "from": null, "deleted_at": 1792396089.6, "expires_at": 1792998000.0, "size": 3, "replaced": true, "by_this_mac": false}]}]}"#;
+
+    #[test]
+    fn reads_the_trash() {
+        let dir = tempfile::tempdir().unwrap();
+        let bin = fake(dir.path(), &format!("[ \"$*\" = trash ] && echo '{TRASH}'"));
+        let t = trash(&bin).unwrap();
+        let d = &t.disks[0];
+        assert_eq!(
+            (d.disk.as_deref(), d.writable, d.trash_days),
+            (Some("progetti"), true, 7)
+        );
+        assert_eq!(d.entries[0].kind, TrashKind::Folder);
+        assert_eq!(d.entries[0].files, Some(2));
+        assert_eq!(d.entries[1].from, None);
+        assert_eq!(d.entries[1].files, None);
+    }
+
+    #[test]
+    fn restores_with_the_disk_or_a_dash() {
+        let dir = tempfile::tempdir().unwrap();
+        let bin = fake(
+            dir.path(),
+            r#"[ "$1 $2" = "trash restore" ] || exit 2
+echo "{\"disk\": $([ "$3" = - ] && echo null || echo "\"$3\""), \"path\": \"Cantine/$4\", \"name\": \"x\", \"renamed\": true, \"moved\": false}""#,
+        );
+        let r = restore(&bin, Some("progetti"), "2026-10-19-07/1-2").unwrap();
+        assert_eq!(r.disk.as_deref(), Some("progetti"));
+        assert_eq!(r.path, "Cantine/2026-10-19-07/1-2");
+        assert_eq!(restore(&bin, None, "h/1-2").unwrap().disk, None);
+    }
+
+    #[test]
+    fn a_failed_restore_says_why() {
+        let dir = tempfile::tempdir().unwrap();
+        let bin = fake(
+            dir.path(),
+            "echo 'floppy-activity: the disk is read-only on this Mac: x' >&2; exit 1",
+        );
+        assert_eq!(
+            restore(&bin, Some("archivio"), "h/1-2").unwrap_err(),
+            EngineError::Failed("floppy-activity: the disk is read-only on this Mac: x".into())
         );
     }
 

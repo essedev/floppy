@@ -200,3 +200,52 @@ export interface CommandError {
     | "auth_state";
   message: string;
 }
+
+/** A deleted file or folder, or the version a save replaced (engine.rs, `TrashEntry`). */
+export interface TrashEntry {
+  /** What a restore takes: "<hour>/<parent inode>-<inode>". */
+  id: string;
+  name: string;
+  kind: "file" | "folder";
+  /** The folder it was in, relative to the disk ("" at the top); null when that folder is gone. */
+  from: string | null;
+  /** Unix seconds. */
+  deleted_at: number;
+  expires_at: number;
+  /** Bytes; a folder's is everything deleted inside it. */
+  size: number;
+  /** A file of the same name is where it was: this is an older version. */
+  replaced: boolean;
+  /** This Mac's activity has the delete. */
+  by_this_mac: boolean;
+  /** A folder's files. */
+  files?: number | null;
+}
+
+/** One disk's trash; `disk` is null for the single-user volume. */
+export interface TrashDisk {
+  disk: string | null;
+  folder: string | null;
+  /** false when this Mac has the disk read-only. */
+  writable: boolean;
+  trash_days: number;
+  entries: TrashEntry[];
+}
+
+export interface TrashReport {
+  disks: TrashDisk[];
+}
+
+/** A trash entry back on the disk (core.rs, `RestoredView`). */
+export interface Restored {
+  disk: string | null;
+  /** Relative to the disk. */
+  path: string;
+  name: string;
+  /** The name was taken: it came back as "name (ripristinato)". */
+  renamed: boolean;
+  /** Its folder was gone: it came back at the top of the disk. */
+  moved: boolean;
+  /** Its path on this Mac, while the disk is mounted. */
+  finder_path: string | null;
+}

@@ -8,7 +8,7 @@
 
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { ChevronRight, Ellipsis, ExternalLink, Folder as FolderIcon, Power, RefreshCw, Settings } from "lucide-react";
+import { ChevronRight, Ellipsis, ExternalLink, Folder as FolderIcon, Power, RefreshCw, Settings, Trash2 } from "lucide-react";
 import { Faceplate } from "@/components/Faceplate";
 import { Button, Confirm, Led, Notice, Readout, SlotMark } from "@/components/ui";
 import { useAuth } from "@/features/account/hooks";
@@ -587,6 +587,15 @@ function DiskRow({ disk, status, applying, menuOpen, expanded, onMenu, onCloseMe
                 {it.disks.showInFinder}
               </MenuItem>
               <MenuItem
+                onClick={() => {
+                  onCloseMenu();
+                  void backend.openTrash(disk.id);
+                }}
+                aside={<Trash2 size={14} strokeWidth={1.7} aria-hidden="true" />}
+              >
+                {it.trash.open}
+              </MenuItem>
+              <MenuItem
                 disabled={busy}
                 onClick={() => {
                   onCloseMenu();
@@ -763,6 +772,18 @@ function Footer({ status, version }: { status: DiskStatus; version: string | und
       )}
       <footer className="flex items-center gap-1.5 py-2.5 pr-2.5 pl-5 text-[12px] text-ink-3">
         <span className="mr-auto font-ro text-[12px]">{version ? it.version(version) : it.product}</span>
+        {/* The team's disks open their trash from their own menu. */}
+        {status.mode === "single" && status.state === "connected" && (
+          <button
+            type="button"
+            className="grid size-[30px] place-items-center rounded-lg border-0 bg-transparent text-ink-2 hover:bg-sunken hover:text-ink"
+            aria-label={it.trash.open}
+            title={it.trash.open}
+            onClick={() => void backend.openTrash()}
+          >
+            <Trash2 size={16} strokeWidth={1.7} aria-hidden="true" />
+          </button>
+        )}
         <button
           type="button"
           className="grid size-[30px] place-items-center rounded-lg border-0 bg-transparent text-ink-2 hover:bg-sunken hover:text-ink"

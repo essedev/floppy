@@ -1,8 +1,8 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "The panel, Settings and the first-run window",
-  "windows": ["panel", "settings", "welcome"],
+  "description": "The panel, Settings, the trash and the first-run window",
+  "windows": ["panel", "settings", "trash", "welcome"],
   "permissions": [
     "core:default",
     "core:window:allow-set-size",

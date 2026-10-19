@@ -4,12 +4,13 @@
  * Playwright: `?view=panel|settings|welcome&scenario=<name>`. The account has
  * its own scenarios, `auth_<phase or error>` (signed in otherwise), and steps
  * through them on clicks: code 123456 signs in, any other is wrong. The team
- * version's are `team_<case>`. The app itself never uses this module. Folder
- * names come from concept-a-panel.
+ * version's are `team_<case>`. The trash window (`view=trash`) has
+ * `trash_empty`, `trash_error` and `trash_none`. The app itself never uses
+ * this module. Folder names come from concept-a-panel and concept-f.
  */
 
 import type { Backend } from "@/lib/backend";
-import type { AuthView, DiskStatus, DiskView, Folder, Notice, SetupProgress, TeamView } from "@/lib/types";
+import type { AuthView, DiskStatus, DiskView, Folder, Notice, Restored, SetupProgress, TeamView, TrashEntry, TrashReport } from "@/lib/types";
 
 const params = new URLSearchParams(globalThis.location?.search ?? "");
 const scenario = params.get("scenario") ?? "connected";
@@ -265,6 +266,48 @@ function publishAuth(next: AuthView): AuthView {
 const settle = (next: AuthView) =>
   new Promise<AuthView>((resolve) => later(700, () => resolve(publishAuth(next))));
 
+const H = 3600;
+const MB = 1024 * 1024;
+/** A trash entry deleted `ago` seconds before now, from concept-f's lists. */
+function gone(id: string, name: string, from: string | null, ago: number, size: number, over: Partial<TrashEntry> = {}): TrashEntry {
+  const at = Date.now() / 1000 - ago;
+  return { id, name, kind: "file", from, deleted_at: at, expires_at: at + 7 * 24 * H, size, replaced: false, by_this_mac: false, ...over };
+}
+const NO_TRASH = { disk: "consegne", folder: "Consegne", writable: true, trash_days: 7, entries: [] };
+const TRASH: TrashReport = {
+  disks: [
+    {
+      disk: "pastificio-moretti-spot-natale",
+      folder: "Progetti",
+      writable: true,
+      trash_days: 7,
+      entries: [
+        gone("t1", "Girato grezzo", "Pastificio Moretti - Spot Natale", 0.4 * H, 46.8 * 1024 * MB, { kind: "folder", files: 120, by_this_mac: true }),
+        gone("t2", "Musica_licenze.xlsx", "Pastificio Moretti - Spot Natale/Documenti", 5 * H, 84 * 1024, { replaced: true }),
+        gone("t3", "Intervista_enologo.mov", "Cantine Arnaldi - Vendemmia/Girato", 6 * H, 3.9 * 1024 * MB),
+        gone("t4", "Drone_vigneto_02.mov", "Cantine Arnaldi - Vendemmia/Girato", 26 * H, 2.2 * 1024 * MB),
+        gone("t5", "Sottotitoli_IT.srt", "Fondazione Lirica - Backstage Tosca/Export", 28 * H, 12 * 1024, { replaced: true, by_this_mac: true }),
+        gone("t6", "Spot_Natale_v2.mp4", null, 30 * H, 1.4 * 1024 * MB, { by_this_mac: true }),
+        gone("t7", "Logo_cliente_old.png", "", 6 * 24 * H, 640 * 1024),
+      ],
+    },
+    {
+      disk: "archivio-2025",
+      folder: "Archivio 2025",
+      writable: false,
+      trash_days: 7,
+      entries: [gone("a1", "Backup_progetto.zip", "Cantine Arnaldi", 3 * 24 * H, 7.1 * 1024 * MB)],
+    },
+    NO_TRASH,
+  ],
+};
+const trashReport = (): TrashReport =>
+  scenario === "trash_none"
+    ? { disks: [] }
+    : scenario === "trash_empty"
+      ? { disks: [NO_TRASH] }
+      : TRASH;
+
 /** The browser stand-in for the Tauri backend. */
 export const mockBackend: Backend = {
   view: () => params.get("view") ?? "panel",
@@ -307,6 +350,24 @@ export const mockBackend: Backend = {
     later(1500, () => publish({ state: "connected", job: null, team: status.team && { ...status.team, restart_needed: false } }));
   },
   openInFinder: async () => {},
+  revealInFinder: async () => {},
+  getTrash: () =>
+    new Promise<TrashReport>((resolve, reject) =>
+      later(400, () => (scenario === "trash_error" ? reject({ code: "engine", message: "the VM is not responding" }) : resolve(trashReport()))),
+    ),
+  restoreTrash: (disk, id) =>
+    new Promise<Restored>((resolve, reject) =>
+      later(600, () => {
+        const d = TRASH.disks.find((x) => x.disk === disk);
+        const e = d?.entries.find((x) => x.id === id);
+        if (!d || !e) return reject({ code: "engine", message: "floppy-activity: not in the trash: " + id });
+        const name = e.replaced ? e.name.replace(/(\.[^.]+)?$/, " (ripristinato)$1") : e.name;
+        const dir = e.from ?? "";
+        resolve({ disk, path: dir ? `${dir}/${name}` : name, name, renamed: e.replaced, moved: e.from === null, finder_path: `/Volumes/Floppy/${d.folder}/${dir}` });
+      }),
+    ),
+  openTrash: async () => {},
+  onTrashDisk: () => () => {},
   getSetup: async () => setup,
   runSetup: async () => {
     publishSetup({ running: true, step: 1, done: false, error: null });

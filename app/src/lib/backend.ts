@@ -10,13 +10,13 @@ import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import * as autostart from "@tauri-apps/plugin-autostart";
 import * as notification from "@tauri-apps/plugin-notification";
 import { mockBackend } from "@/lib/mock";
-import type { AppInfo, AuthView, DiskStatus, Folder, Notice, SetupProgress } from "@/lib/types";
+import type { AppInfo, AuthView, DiskStatus, Folder, Notice, Restored, SetupProgress, TrashReport } from "@/lib/types";
 
 type Unlisten = () => void;
 
 /** Everything the views ask of the native side. */
 export interface Backend {
-  /** Which window this is: panel, settings or welcome. */
+  /** Which window this is: panel, settings, trash or welcome. */
   view(): string;
   getStatus(): Promise<DiskStatus>;
   refresh(): Promise<void>;
@@ -33,6 +33,16 @@ export interface Backend {
   /** Stops and starts Floppy, for the memory its disks want. */
   restart(): Promise<void>;
   openInFinder(path?: string): Promise<void>;
+  /** Shows a file on the disk in the Finder, selected. */
+  revealInFinder(path: string): Promise<void>;
+  /** Every mounted disk's trash (DECISIONS #27). */
+  getTrash(): Promise<TrashReport>;
+  /** Puts a trash entry back, never over a file; `disk` is null for the single-user volume. */
+  restoreTrash(disk: string | null, id: string): Promise<Restored>;
+  /** Opens the trash window, on one disk when given. */
+  openTrash(disk?: string | null): Promise<void>;
+  /** The disk the trash window was asked to show. */
+  onTrashDisk(cb: (disk: string | null) => void): Unlisten;
   getSetup(): Promise<SetupProgress>;
   runSetup(): Promise<void>;
   /** Installs or updates the engine from the app, then sets it up. */
@@ -89,6 +99,11 @@ const tauriBackend: Backend = {
   setDiskEnabled: (id, enabled) => invoke("set_disk_enabled", { id, enabled }),
   restart: () => invoke("restart_disk"),
   openInFinder: (path) => invoke("open_in_finder", { path: path ?? null }),
+  revealInFinder: (path) => invoke("reveal_in_finder", { path }),
+  getTrash: () => invoke("get_trash"),
+  restoreTrash: (disk, id) => invoke("restore_trash", { disk, id }),
+  openTrash: (disk) => invoke("open_trash", { disk: disk ?? null }),
+  onTrashDisk: (cb) => subscribe("trash-disk", cb),
   getSetup: () => invoke("get_setup"),
   runSetup: () => invoke("run_setup"),
   installEngine: () => invoke("install_engine"),

@@ -2,14 +2,15 @@
 //! calls them through `src/lib/backend.ts`.
 
 use crate::account::{Account, AuthView, Refused};
-use crate::core::{Core, CoreError, DiskStatus, Folder, SetupProgress};
+use crate::core::{Core, CoreError, DiskStatus, Folder, RestoredView, SetupProgress};
 use crate::engine::JobKind;
+use crate::engine::TrashReport;
 use crate::prefs::PrefsStore;
 use crate::windows;
 use serde::Serialize;
 use std::process::Command;
 use std::sync::Arc;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Emitter, State};
 
 /// An error the frontend renders from its dictionary by `code`.
 #[derive(Debug, Serialize)]
@@ -124,6 +125,41 @@ pub async fn list_folders(
         .await
         .map_err(io_error)?
         .map_err(CommandError::from)
+}
+
+/// Every mounted disk's trash.
+#[tauri::command]
+pub async fn get_trash(core: CoreState<'_>) -> Result<TrashReport, CommandError> {
+    let core = Arc::clone(&core);
+    tauri::async_runtime::spawn_blocking(move || core.trash())
+        .await
+        .map_err(io_error)?
+        .map_err(CommandError::from)
+}
+
+/// Puts a trash entry back; `disk` is null for the single-user volume.
+#[tauri::command]
+pub async fn restore_trash(
+    core: CoreState<'_>,
+    disk: Option<String>,
+    id: String,
+) -> Result<RestoredView, CommandError> {
+    let core = Arc::clone(&core);
+    tauri::async_runtime::spawn_blocking(move || core.restore(disk.as_deref(), &id))
+        .await
+        .map_err(io_error)?
+        .map_err(CommandError::from)
+}
+
+/// Shows a file in the Finder, selected (`open -R`); only on the disk.
+#[tauri::command]
+pub fn reveal_in_finder(core: CoreState, path: String) -> Result<(), CommandError> {
+    let target = core.disk_path(&path)?;
+    Command::new("/usr/bin/open")
+        .args(["-R", &target])
+        .spawn()
+        .map(|_| ())
+        .map_err(io_error)
 }
 
 /// Opens the disk, or a folder on it, in the Finder.
@@ -258,6 +294,13 @@ pub async fn auth_set_server(
 #[tauri::command]
 pub fn open_settings(app: AppHandle) {
     windows::show(&app, windows::SETTINGS);
+}
+
+/// Opens the trash window, on one disk when `disk` is given.
+#[tauri::command]
+pub fn open_trash(app: AppHandle, disk: Option<String>) {
+    windows::show(&app, windows::TRASH);
+    let _ = app.emit_to(windows::TRASH, "trash-disk", disk);
 }
 
 #[tauri::command]

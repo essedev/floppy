@@ -35,6 +35,16 @@
         "center": true
       },
       {
+        "label": "trash",
+        "title": "Cestino",
+        "width": 880,
+        "height": 600,
+        "minWidth": 640,
+        "minHeight": 400,
+        "visible": false,
+        "center": true
+      },
+      {
         "label": "welcome",
         "title": "Floppy",
         "width": 440,

@@ -16,7 +16,7 @@ use crate::account::credentials::DiskCredentials;
 use crate::account::{MountReport, TeamDisks};
 use crate::engine::{
     self, Access, DiskState, EngineDisk, EngineError, EngineReport, JobKind, MetaMode, Mode,
-    Pending, Problem, Replica, RunState, Space,
+    Pending, Problem, Replica, Restored, RunState, Space, TrashReport,
 };
 use crate::installer::{InstallNeed, Installer};
 use crate::team::{self, DisksFile, Rejected};
@@ -173,6 +173,15 @@ pub enum Event {
 pub struct Folder {
     pub name: String,
     pub path: String,
+}
+
+/// A trash entry back on the disk, with where to show it in the Finder.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct RestoredView {
+    #[serde(flatten)]
+    pub restored: Restored,
+    /// Its path on this Mac while the disk is mounted.
+    pub finder_path: Option<String>,
 }
 
 /// Why a command from the UI was refused or failed.
@@ -562,6 +571,51 @@ impl Core {
             None => self.mount_point().ok_or(CoreError::NotMounted)?,
         };
         list_folders(Path::new(&dir), LIST_TIMEOUT)
+    }
+
+    /// Refuses while a job installs, sets up, starts or stops the VM: the
+    /// trash is read and changed inside it.
+    fn vm_free(&self) -> Result<(), CoreError> {
+        let inner = self.lock();
+        match inner.job.as_ref().map(|j| j.info.kind) {
+            Some(
+                JobKind::Install
+                | JobKind::Setup
+                | JobKind::Start
+                | JobKind::Stop
+                | JobKind::Restart,
+            ) => Err(CoreError::Busy),
+            _ => Ok(()),
+        }
+    }
+
+    /// Every mounted disk's trash (DECISIONS #27).
+    pub fn trash(&self) -> Result<TrashReport, CoreError> {
+        self.vm_free()?;
+        Ok(engine::trash(&self.engine)?)
+    }
+
+    /// Puts a trash entry back where it was, under a free name.
+    pub fn restore(&self, disk: Option<&str>, id: &str) -> Result<RestoredView, CoreError> {
+        self.vm_free()?;
+        let restored = engine::restore(&self.engine, disk, id)?;
+        let inner = self.lock();
+        let report = inner.report.as_ref().and_then(|r| r.as_ref().ok());
+        let finder_path = report.and_then(|r| {
+            let mp = r.mount_point.as_deref()?;
+            let base = match restored.disk.as_deref() {
+                None => PathBuf::from(mp),
+                Some(id) => {
+                    let d = r.team_disks().iter().find(|d| d.id == id)?;
+                    Path::new(mp).join(&d.folder)
+                }
+            };
+            Some(base.join(&restored.path).display().to_string())
+        });
+        Ok(RestoredView {
+            restored,
+            finder_path,
+        })
     }
 
     /// Starts a job: the bundled install, `floppy start|stop|setup`, or
@@ -1050,6 +1104,55 @@ mod tests {
         core.refresh();
         assert_eq!(core.status().state, DiskState::NotInstalled);
         assert_eq!(core.status().engine_error, None);
+    }
+
+    #[test]
+    fn a_restore_says_where_it_is_in_the_finder() {
+        let dir = tempfile::tempdir().unwrap();
+        let disk = crate::engine::tests::DISK_A;
+        let status = crate::engine::tests::team_status(&[disk], "");
+        let bin = fake(
+            dir.path(),
+            &format!(
+                r#"case "$1 $2" in
+  "status --json") echo '{status}' ;;
+  "trash restore") echo "{{\"disk\": \"$3\", \"path\": \"Cantine/clip (ripristinato).mov\", \"name\": \"clip (ripristinato).mov\", \"renamed\": true, \"moved\": false}}" ;;
+  "trash ") sleep 0.3; echo '{{"disks": []}}' ;;
+  *) exit 2 ;;
+esac"#
+            ),
+        );
+        let (core, _) = core_with(bin);
+        core.refresh();
+        let r = core.restore(Some("0192-a"), "2026-10-19-07/1-2").unwrap();
+        assert!(r.restored.renamed);
+        assert_eq!(
+            r.finder_path.as_deref(),
+            Some("/Volumes/Floppy/Archivio 2025/Cantine/clip (ripristinato).mov")
+        );
+        // A disk the status does not list has no Finder path, not a wrong one.
+        assert_eq!(
+            core.restore(Some("other"), "h/1-2").unwrap().finder_path,
+            None
+        );
+        assert_eq!(core.trash().unwrap().disks, vec![]);
+    }
+
+    #[test]
+    fn the_trash_waits_for_a_stop() {
+        let dir = tempfile::tempdir().unwrap();
+        let bin = fake(
+            dir.path(),
+            &format!(
+                r#"case "$1" in status) echo '{CONNECTED}' ;; stop) sleep 0.5 ;; *) exit 2 ;; esac"#
+            ),
+        );
+        let (core, _) = core_with(bin);
+        core.refresh();
+        core.run_job(JobKind::Stop, None).unwrap();
+        assert_eq!(core.trash(), Err(CoreError::Busy));
+        assert_eq!(core.restore(None, "h/1-2").unwrap_err(), CoreError::Busy);
+        wait_idle(&core);
     }
 
     #[test]

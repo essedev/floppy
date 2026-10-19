@@ -773,6 +773,24 @@ cmd_activity() {
   in_vm sudo /usr/local/sbin/floppy-activity list "$@"
 }
 
+# Each mounted disk's trash, JSON out, and putting one entry back where it was
+# under a free name (DECISIONS #27). An entry is named by hour and inodes, never
+# by its file name: arguments reach the VM through a shell.
+cmd_trash() {
+  # In variables: bash 3.2 misreads a regex with "|" written inside [[ ]].
+  local disk_re='^(-|[a-z0-9][a-z0-9-]{0,62})$'
+  local entry_re='^[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{2}/[0-9]+-[0-9]+$'
+  case "${1:-}" in
+    '') in_vm sudo /usr/local/sbin/floppy-activity trash ;;
+    restore)
+      [ $# -eq 3 ] && [[ $2 =~ $disk_re ]] && [[ $3 =~ $entry_re ]] \
+        || die "usage: floppy trash restore <disk id or -> <entry id>"
+      in_vm sudo /usr/local/sbin/floppy-activity restore "$2" "$3"
+      ;;
+    *) die "usage: floppy trash [restore <disk id or -> <entry id>]" ;;
+  esac
+}
+
 cmd_uninstall() {
   if team; then
     log "This deletes the VM, the disks' cache and their replicas on this Mac."
@@ -802,8 +820,8 @@ cmd_uninstall() {
 }
 
 case "${1:-}" in
-  status|warmup|free|activity) cmd="$1"; shift; "cmd_$cmd" "$@" ;;
+  status|warmup|free|activity|trash) cmd="$1"; shift; "cmd_$cmd" "$@" ;;
   tick) shift; take_lock try || exit 0; cmd_tick "$@" ;;
   setup|start|stop|uninstall|disks) cmd="$1"; shift; take_lock wait; "cmd_$cmd" "$@" ;;
-  *) log "usage: floppy setup|start|stop|status [--json]|warmup <path>|free <path>|activity [--after ID]|disks apply|disks clear|uninstall"; exit 2 ;;
+  *) log "usage: floppy setup|start|stop|status [--json]|warmup <path>|free <path>|activity [--after ID]|trash [restore <disk> <id>]|disks apply|disks clear|uninstall"; exit 2 ;;
 esac

@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-Tests of macos/vm/guest/floppy-activity on a real audit log: fixtures/audit-samba-4.22.log
-is what Samba 4.22 wrote while a Mac made a folder, copied a clip with the Finder, saved a
+Tests of macos/vm/guest/floppy-activity: the activity on a real audit log, and the trash
+on a folder laid out like JuiceFS's. The audit log, fixtures/audit-samba-4.22.log, is
+what Samba 4.22 wrote while a Mac made a folder, copied a clip with the Finder, saved a
 file by rename and in place, replaced the clip from the Finder, renamed it, made and deleted
 a hidden file, renamed the folder and deleted a file and a folder (paths moved under
 /mnt/drive/Progetti).
@@ -16,6 +17,7 @@ import os
 import sys
 import tempfile
 import unittest
+from calendar import timegm
 from pathlib import Path
 
 # No bytecode next to the guest files: build-engine.sh copies that folder into the app.
@@ -169,7 +171,10 @@ class Store(unittest.TestCase):
             db = fa.connect()
             self.addCleanup(db.close)
             r = fa.to_rows(replay(FIXTURE), TEAM, lambda p: 3)
-            sql = "INSERT OR IGNORE INTO events (at, disk, op, kind, path, dest, size) VALUES (?, ?, ?, ?, ?, ?, ?)"
+            sql = (
+                "INSERT OR IGNORE INTO events (at, disk, op, kind, path, dest, size)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?)"
+            )
             with db:
                 db.executemany(sql, r)
                 db.executemany(sql, r)  # a replay of the same lines
@@ -219,6 +224,95 @@ class Follow(unittest.TestCase):
             g = fa.Follower(inode, 2)
             self.assertEqual(g.lines(), ["b\n", "c\n"])
             g.close()
+
+
+class Trash(unittest.TestCase):
+    """The trash on a plain folder laid out like JuiceFS's, inodes made up."""
+
+    def setUp(self):
+        d = tempfile.TemporaryDirectory()
+        self.addCleanup(d.cleanup)
+        self.disk = Path(d.name)
+        (self.disk / "Cantine").mkdir()
+        (self.disk / ".config").write_text(json.dumps({"Format": {"TrashDays": 7}}))
+        hour = self.disk / ".trash" / "2026-10-19-07"
+        hour.mkdir(parents=True)
+        # Cantine is inode 10. Girato (20) was deleted with a.mov and Raw (21) with b.mov.
+        for name, body in [
+            ("10-20-Girato", None),
+            ("20-30-a.mov", "aaaa"),
+            ("20-21-Raw", None),
+            ("21-31-b.mov", "bb"),
+            ("10-32-musica.xlsx", "v1"),
+            ("99-33-orphan.txt", "o"),
+        ]:
+            if body is None:
+                (hour / name).mkdir()
+            else:
+                (hour / name).write_text(body)
+        (self.disk / "Cantine" / "musica.xlsx").write_text("v2")
+        self.paths = {10: "Cantine"}
+        self.mount = fa.Mount("progetti", "Progetti", str(self.disk), True)
+
+    def where(self, _mount, ino):
+        return self.paths.get(ino)
+
+    @staticmethod
+    def move(src, dst):
+        if os.path.lexists(dst):
+            raise FileExistsError(dst)
+        os.rename(src, dst)
+
+    def listing(self):
+        entries = fa.scan_trash(str(self.disk))
+        return fa.list_trash(self.mount, entries, self.where, lambda *_: False)
+
+    def test_list_folds_a_deleted_folder(self):
+        got = {e["name"]: e for e in self.listing()["entries"]}
+        self.assertEqual(sorted(got), ["Girato", "musica.xlsx", "orphan.txt"])
+        self.assertEqual((got["Girato"]["files"], got["Girato"]["size"]), (2, 6))
+        self.assertEqual(got["Girato"]["from"], "Cantine")
+        self.assertTrue(got["musica.xlsx"]["replaced"])
+        self.assertFalse(got["Girato"]["replaced"])
+        self.assertIsNone(got["orphan.txt"]["from"])
+        self.assertEqual(got["Girato"]["expires_at"], timegm((2026, 10, 19, 7, 0, 0)) + 7 * 86400)
+
+    def test_restore_a_folder_with_its_files(self):
+        out = fa.restore(
+            self.mount, "2026-10-19-07/10-20", fa.scan_trash(str(self.disk)), self.where, self.move
+        )
+        self.assertEqual(out["path"], "Cantine/Girato")
+        self.assertEqual((self.disk / "Cantine/Girato/a.mov").read_text(), "aaaa")
+        self.assertEqual((self.disk / "Cantine/Girato/Raw/b.mov").read_text(), "bb")
+        self.assertEqual(
+            sorted(e["name"] for e in self.listing()["entries"]), ["musica.xlsx", "orphan.txt"]
+        )
+
+    def test_restore_never_writes_over_a_file(self):
+        entries = fa.scan_trash(str(self.disk))
+        out = fa.restore(self.mount, "2026-10-19-07/10-32", entries, self.where, self.move)
+        self.assertEqual((out["name"], out["renamed"]), ("musica (ripristinato).xlsx", True))
+        self.assertEqual((self.disk / "Cantine/musica.xlsx").read_text(), "v2")
+        self.assertEqual((self.disk / "Cantine/musica (ripristinato).xlsx").read_text(), "v1")
+
+    def test_restore_without_its_folder_goes_to_the_top(self):
+        out = fa.restore(
+            self.mount, "2026-10-19-07/99-33", fa.scan_trash(str(self.disk)), self.where, self.move
+        )
+        self.assertEqual((out["path"], out["moved"]), ("orphan.txt", True))
+
+    def test_read_only_and_unknown(self):
+        entries = fa.scan_trash(str(self.disk))
+        ro = fa.Mount("archivio", "Archivio", str(self.disk), False)
+        with self.assertRaises(PermissionError):
+            fa.restore(ro, "2026-10-19-07/10-32", entries, self.where, self.move)
+        with self.assertRaises(FileNotFoundError):
+            fa.restore(self.mount, "2026-10-19-07/10-99", entries, self.where, self.move)
+
+    def test_free_names(self):
+        self.assertEqual(fa.free_name("a.tar.gz", 2), "a.tar (ripristinato 2).gz")
+        self.assertEqual(fa.free_name("Girato", 1), "Girato (ripristinato)")
+        self.assertEqual(fa.free_name(".hidden", 1), ".hidden (ripristinato)")
 
 
 if __name__ == "__main__":

@@ -1,13 +1,17 @@
 #!/usr/bin/python3
 """
-What this Mac did on its disks, read from Samba's audit (DECISIONS #27): folders created,
-files added, written, replaced, renamed and deleted, kept 30 days in
-/var/lib/floppy/activity.db. The trash and the disk's activity in the app read it through
-`floppy activity`; reads are not recorded.
+What this Mac did on its disks, read from Samba's audit, and each disk's trash (DECISIONS
+#27). The activity: folders created, files added, written, replaced, renamed and deleted,
+kept 30 days in /var/lib/floppy/activity.db; reads are not recorded. The trash: what
+JuiceFS keeps after a delete or a replacement, listed and put back without ever writing
+over a file. The app reads both through `floppy activity` and `floppy trash`.
 
   floppy-activity run                             the service: follows the audit log
   floppy-activity list [--after ID] [--limit N]   JSON out: events newer than ID, and the
                                                   files this Mac holds open for writing
+  floppy-activity trash                           JSON out: every mounted disk's trash
+  floppy-activity restore DISK ID                 puts a trash entry back, JSON out; DISK
+                                                  is "-" for the single-user volume
 
 Samba logs one line per operation (smb.conf: full_audit, its own log file). A few things
 in those lines are not what they look like:
@@ -20,6 +24,8 @@ in those lines are not what they look like:
 
 from __future__ import annotations
 
+import ctypes
+import errno
 import json
 import os
 import re
@@ -27,6 +33,7 @@ import sqlite3
 import subprocess
 import sys
 import time
+from calendar import timegm
 from contextlib import closing
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -381,6 +388,267 @@ def list_open() -> list[dict]:
     return out
 
 
+# The trash. JuiceFS moves a deleted or replaced entry to <mount>/.trash/<hour>/, the hour
+# of the delete in UTC, named "<parent inode>-<inode>-<name>", and drops whole hours once
+# they are older than the volume's trash days. A folder deleted with its files is one entry
+# per file and folder, each under the inode of its own parent.
+TRASH_HOUR = re.compile(r"^(\d{4})-(\d\d)-(\d\d)-(\d\d)$")
+TRASH_NAME = re.compile(r"^(\d+)-(\d+)-(.+)$", re.S)
+TRASH_ID = re.compile(r"^(\d{4}-\d\d-\d\d-\d\d)/(\d+)-(\d+)$")
+RESTORED = "ripristinato"  # in the file's name, which the Italian Finder shows
+
+
+@dataclass
+class TrashEntry:
+    """One entry of a disk's trash."""
+
+    id: str  # "<hour>/<parent>-<inode>": no name, so it can travel on a command line
+    name: str
+    parent: int
+    ino: int
+    folder: bool
+    deleted_at: float
+    size: int
+    path: str  # in .trash
+
+
+@dataclass
+class Mount:
+    """A disk as this VM mounts it."""
+
+    disk: str | None  # None for the single-user volume
+    folder: str | None
+    path: str
+    writable: bool
+
+
+def mounts() -> list[Mount]:
+    """The mounted disks: the team's from the disks file, or the single-user volume."""
+    options = {}
+    with open("/proc/mounts") as f:
+        for line in f:
+            parts = line.split()
+            options[parts[1].replace("\\040", " ")] = parts[3].split(",")
+    by_folder = folders()
+    if by_folder is None:
+        found = [(None, None, ROOT)]
+    else:
+        found = [(disk, folder, f"{ROOT}/{folder}") for folder, disk in by_folder.items()]
+    return [
+        Mount(disk, folder, path, "ro" not in options[path])
+        for disk, folder, path in found
+        if path in options
+    ]
+
+
+def scan_trash(mount: str) -> list[TrashEntry]:
+    entries = []
+    trash = os.path.join(mount, ".trash")
+    for hour in sorted(os.listdir(trash)):
+        if not TRASH_HOUR.match(hour):
+            continue
+        for d in os.scandir(os.path.join(trash, hour)):
+            m = TRASH_NAME.match(d.name)
+            if not m:
+                continue
+            st = d.stat(follow_symlinks=False)
+            entries.append(
+                TrashEntry(
+                    id=f"{hour}/{m[1]}-{m[2]}",
+                    name=m[3],
+                    parent=int(m[1]),
+                    ino=int(m[2]),
+                    folder=d.is_dir(follow_symlinks=False),
+                    deleted_at=st.st_ctime,
+                    size=0 if d.is_dir(follow_symlinks=False) else st.st_size,
+                    path=d.path,
+                )
+            )
+    return entries
+
+
+def inode_path(mount: str, ino: int) -> str | None:
+    """
+    Where an inode is now, relative to the disk ("" for its top), through the mount's
+    `juicefs info`; None when it is gone or in the trash itself. One inode per call: an
+    unknown one ends the command.
+    """
+    if ino == 1:
+        return ""
+    out = subprocess.run(  # noqa: S603 (a fixed binary and an integer)
+        ["/usr/local/bin/juicefs", "info", "-i", str(ino)],
+        cwd=mount,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    for line in out.stdout.splitlines():
+        key, _, value = line.strip().partition(": ")
+        if key == "path" and value.startswith("/") and not value.startswith("/.trash/"):
+            return value[1:]
+    return None
+
+
+def trash_days(mount: str) -> int:
+    """The volume's trash days, from JuiceFS's virtual .config file."""
+    try:
+        conf = json.loads(Path(mount, ".config").read_text())
+    except (OSError, ValueError):
+        return 0
+    stack = [conf]
+    while stack:
+        node = stack.pop()
+        if isinstance(node, dict):
+            if isinstance(node.get("TrashDays"), int):
+                return node["TrashDays"]
+            stack.extend(node.values())
+    return 0
+
+
+def hour_start(entry_id: str) -> float:
+    y, mo, d, h = TRASH_HOUR.match(entry_id.partition("/")[0]).groups()
+    return float(timegm((int(y), int(mo), int(d), int(h), 0, 0)))
+
+
+def deleted_here(disk: str | None, path: str, at: float) -> bool:
+    """Whether this Mac's activity has the delete or replacement of `path` around `at`."""
+    try:
+        with closing(connect()) as db:
+            row = db.execute(
+                "SELECT 1 FROM events WHERE disk IS ? AND path = ?"
+                " AND op IN ('deleted', 'replaced') AND at BETWEEN ? AND ? LIMIT 1",
+                (disk, path, at - 120, at + 120),
+            ).fetchone()
+    except sqlite3.Error:
+        return False
+    return row is not None
+
+
+def list_trash(m: Mount, entries: list[TrashEntry], where=inode_path, here=deleted_here) -> dict:
+    """
+    One disk's trash as the app shows it: a deleted folder is one entry with its files
+    counted inside. An entry whose name is taken again where it was is a replaced version.
+    """
+    days = trash_days(m.path)
+    by_ino = {e.ino: e for e in entries}
+    kids: dict[int, list[TrashEntry]] = {}
+    for e in entries:
+        kids.setdefault(e.parent, []).append(e)
+
+    def tree(e: TrashEntry) -> tuple[int, int]:
+        files, size = 0, 0
+        for k in kids.get(e.ino, []):
+            if k.folder:
+                f, s = tree(k)
+                files, size = files + f, size + s
+            else:
+                files, size = files + 1, size + k.size
+        return files, size
+
+    parents: dict[int, str | None] = {}
+    out = []
+    for e in sorted(entries, key=lambda e: e.deleted_at, reverse=True):
+        if e.parent in by_ino:
+            continue  # inside a deleted folder
+        if e.parent not in parents:
+            parents[e.parent] = where(m.path, e.parent)
+        origin = parents[e.parent]
+        rel = None if origin is None else os.path.join(origin, e.name)
+        item = {
+            "id": e.id,
+            "name": e.name,
+            "kind": "folder" if e.folder else "file",
+            "from": origin,
+            "deleted_at": e.deleted_at,
+            "expires_at": hour_start(e.id) + days * 86400,
+            "size": e.size,
+            "replaced": not e.folder
+            and rel is not None
+            and os.path.lexists(os.path.join(m.path, rel)),
+            "by_this_mac": rel is not None and here(m.disk, rel, e.deleted_at),
+        }
+        if e.folder:
+            item["files"], item["size"] = tree(e)
+        out.append(item)
+    return {
+        "disk": m.disk,
+        "folder": m.folder,
+        "writable": m.writable,
+        "trash_days": days,
+        "entries": out,
+    }
+
+
+def rename_noreplace(src: str, dst: str) -> None:
+    """rename(2) that fails with FileExistsError instead of replacing `dst`."""
+    libc = ctypes.CDLL(None, use_errno=True)
+    at_fdcwd, rename_noreplace_flag = -100, 1
+    if libc.renameat2(
+        at_fdcwd, os.fsencode(src), at_fdcwd, os.fsencode(dst), rename_noreplace_flag
+    ):
+        e = ctypes.get_errno()
+        raise OSError(e, os.strerror(e), dst)
+
+
+def free_name(name: str, n: int) -> str:
+    """The n-th name to try: the name, then "name (ripristinato).ext", "... 2", ..."""
+    if n == 0:
+        return name
+    stem, dot, ext = name.rpartition(".")
+    if not stem:
+        stem, dot, ext = name, "", ""
+    tag = RESTORED if n == 1 else f"{RESTORED} {n}"
+    return f"{stem} ({tag}){dot}{ext}"
+
+
+def put_back(src: str, folder: str, name: str, move=rename_noreplace) -> str:
+    """Moves `src` into `folder` under the first free name; returns the name used."""
+    for n in range(100):
+        candidate = free_name(name, n)
+        try:
+            move(src, os.path.join(folder, candidate))
+            return candidate
+        except FileExistsError:
+            continue
+    raise FileExistsError(errno.EEXIST, "no free name", os.path.join(folder, name))
+
+
+def restore(
+    m: Mount, entry_id: str, entries: list[TrashEntry], where=inode_path, move=rename_noreplace
+) -> dict:
+    """
+    Puts one entry back where it was, or at the top of the disk when that folder is gone,
+    under a free name; a folder comes back with everything deleted inside it.
+    """
+    if not m.writable:
+        raise PermissionError(errno.EROFS, "the disk is read-only on this Mac", m.path)
+    entry = next((e for e in entries if e.id == entry_id), None)
+    if entry is None:
+        raise FileNotFoundError(errno.ENOENT, "not in the trash", entry_id)
+    origin = where(m.path, entry.parent)
+    folder = os.path.join(m.path, origin or "")
+    name = put_back(entry.path, folder, entry.name, move)
+    kids: dict[int, list[TrashEntry]] = {}
+    for e in entries:
+        kids.setdefault(e.parent, []).append(e)
+    # The folder keeps its inode out of the trash: its files follow it under their names.
+    stack = [(entry.ino, os.path.join(folder, name))]
+    while stack:
+        ino, into = stack.pop()
+        for k in kids.get(ino, []):
+            used = put_back(k.path, into, k.name, move)
+            if k.folder:
+                stack.append((k.ino, os.path.join(into, used)))
+    rel = os.path.join(origin or "", name)
+    return {
+        "disk": m.disk,
+        "path": rel,
+        "name": name,
+        "renamed": name != entry.name,
+        "moved": origin is None,
+    }
+
+
 def main(argv: list[str]) -> int:
     cmd, args = (argv[0] if argv else ""), argv[1:]
     if cmd == "run" and not args:
@@ -396,8 +664,24 @@ def main(argv: list[str]) -> int:
             return 2
         out = list_events(int(opts.get("--after", 0)), int(opts.get("--limit", 1000)))
         print(json.dumps({**out, "open": list_open()}))
+    elif cmd == "trash" and not args:
+        print(json.dumps({"disks": [list_trash(m, scan_trash(m.path)) for m in mounts()]}))
+    elif cmd == "restore" and len(args) == 2 and TRASH_ID.match(args[1]):
+        disk = None if args[0] == "-" else args[0]
+        m = next((m for m in mounts() if m.disk == disk), None)
+        if m is None:
+            print(f"floppy-activity: disk {args[0]} is not mounted", file=sys.stderr)
+            return 1
+        try:
+            print(json.dumps(restore(m, args[1], scan_trash(m.path))))
+        except OSError as e:
+            print(f"floppy-activity: {e.strerror}: {args[1]}", file=sys.stderr)
+            return 1
     else:
-        print("usage: floppy-activity run|list [--after ID] [--limit N]", file=sys.stderr)
+        print(
+            "usage: floppy-activity run|list [--after ID] [--limit N]|trash|restore DISK ID",
+            file=sys.stderr,
+        )
         return 2
     return 0
 
