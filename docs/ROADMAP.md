@@ -6,8 +6,9 @@ The principle is the one in [ARCHITECTURE.md](ARCHITECTURE.md#guiding-principle)
 
 The first instance runs on Dokploy (CYCLES 11): the control plane, the admin web and the meta service behind Dokploy's shared Traefik, one certificate per disk name, mail through SMTP, and the team's first disk in manual mode on OVH Milan with bucket versioning (old versions kept 7 days). Simone's Mac mounts it from the `v0.1.1` cask, the spike's measures ran on it (ROADMAP 2), and Dokploy backs up PostgreSQL and the metadata every night, with a restore tried (ARCHITECTURE, Backup and resilience). Left, in order:
 
-1. **The team on it**: invitations from the admin web with access to the disk; each person installs with `brew install --cask essedev/floppy/floppy`, sets the instance's address and signs in.
-2. **Small things seen on the way**: a change of access reaches the app at its next heartbeat, up to 60 s later; the Finder's sidebar may keep showing nothing after the share is remounted by name until the Finder is relaunched; a failed mount leaves a Finder dialog that blocks the engine until someone clicks OK; the SMB password between Mac and VM is in `osascript`'s arguments (to the Keychain).
+1. **The instance on `v0.2.0`**: deploy the control plane with migration 0005, which keeps the disks' activity the app now sends (CYCLES 12).
+2. **The team on it**: invitations from the admin web with access to the disk; each person installs with `brew install --cask essedev/floppy/floppy`, sets the instance's address and signs in.
+3. **Small things seen on the way**: a change of access reaches the app at its next heartbeat, up to 60 s later; the Finder's sidebar may keep showing nothing after the share is remounted by name until the Finder is relaunched; a failed mount leaves a Finder dialog that blocks the engine until someone clicks OK; the SMB password between Mac and VM is in `osascript`'s arguments (to the Keychain).
 
 ## 2. Data path on OVH
 

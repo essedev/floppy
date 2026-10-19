@@ -71,7 +71,7 @@ Nell'app il server è `http://127.0.0.1:4583`. I metadati dei dischi (`<label>.m
 
 ## Stato
 
-Agli inizi: un pacchetto di test per macOS, provato su OVH Object Storage a Milano, con i metadati in SQLite dentro ogni VM, quindi ogni Mac ha il suo disco. La versione per i team funziona dall'inizio alla fine su uno stack locale (`deploy/local/`, con il giro `e2e.py` su una VM vera): un admin invita dalla dashboard (`web/`), la persona accede dall'app nella barra dei menu (`app/`), e i dischi compaiono come cartelle di **Floppy** con l'accesso per disco, attraverso il control plane (`server/`), il servizio meta (`meta/`) dietro Traefik e il motore. L'app è su Homebrew (`v0.1.0`). Prossimo passo: la prima istanza self-hosted su Dokploy. Misure, decisioni e alternative sono in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), i piani in [docs/ROADMAP.md](docs/ROADMAP.md).
+Agli inizi: un pacchetto di test per macOS, provato su OVH Object Storage a Milano, con i metadati in SQLite dentro ogni VM, quindi ogni Mac ha il suo disco. La versione per i team funziona dall'inizio alla fine su uno stack locale (`deploy/local/`, con il giro `e2e.py` su una VM vera): un admin invita dalla dashboard (`web/`), la persona accede dall'app nella barra dei menu (`app/`), e i dischi compaiono come cartelle di **Floppy** con l'accesso per disco, attraverso il control plane (`server/`), il servizio meta (`meta/`) dietro Traefik e il motore. L'app è su Homebrew (`v0.2.0`) e la prima istanza self-hosted gira su Dokploy. Prossimo passo: il team sopra e il pilota. Misure, decisioni e alternative sono in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), i piani in [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Licenza
 

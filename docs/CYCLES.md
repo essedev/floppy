@@ -11,7 +11,8 @@ Log of the work done, most recent first. Plans are in [ROADMAP.md](ROADMAP.md), 
 - **The Finder at once** (DECISIONS #28): `floppy-notify` turns the replica's key events into Samba's own change notifications; a colleague's file appears in an open window in 0.6 s, against a control without it that stayed unchanged for 15 s.
 - **End to end with two devices**: `deploy/local/e2e.py` now has a colleague (the second device, mounted read-write) and the member's app with its activity; 20 steps pass. Found on the way: an undone rename left no event, a truncating open is recorded as written, the Finder's AppleScript reads the disk rather than the window, and the Mac keeps a folder for minutes after its window closed (178 s, then more than 300 s), which delays a lowered access as much.
 - **Updates under a mounted disk**: `floppy setup` restarted Samba every time, and a restarted Samba turns the Mac's open files into I/O errors; it now restarts only when its configuration or package changed, and the end to end run checks an update with a clip open and a Finder window open (the first update to this version still restarts it, for `kernel change notify`).
-- **Next**: deploy the control plane, release the app, CapCut in the pilot.
+- **`v0.2.0`**: the app with the trash, the activity and the Finder at once, released with its cask.
+- **Next**: deploy the control plane (migration 0005, the activity the app now sends), CapCut in the pilot.
 
 ## 11. Online (18/10/2026)
 
