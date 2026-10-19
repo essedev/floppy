@@ -1,10 +1,19 @@
 """`/device/*`: the app's endpoints, authenticated by `Authorization: Bearer <device token>`."""
 
 from typing import Annotated
+from uuid import UUID
 
-from fastapi import APIRouter, Depends, Response
+from fastapi import APIRouter, Depends, Query, Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
+from floppy_server.activity import service as activity_service
+from floppy_server.activity.service import (
+    ActivityAnswer,
+    ActivityPage,
+    ActivityReport,
+    DeletesAnswer,
+    DeletesRequest,
+)
 from floppy_server.api import CtxDep
 from floppy_server.device import service
 from floppy_server.device.service import (
@@ -55,3 +64,27 @@ async def sign_out(token: TokenDep, ctx: CtxDep) -> Response:
     """The device signs out: revoked by its owner, without opening a key window."""
     await service.sign_out(ctx, token)
     return Response(status_code=204)
+
+
+@router.post("/device/activity", response_model=ActivityAnswer)
+async def activity(body: ActivityReport, token: TokenDep, ctx: CtxDep) -> ActivityAnswer:
+    """The device's activity on its disks; the answer is what changed on them since `after`."""
+    return await activity_service.report(ctx, token, body)
+
+
+@router.get("/device/activity", response_model=ActivityPage)
+async def activity_history(
+    token: TokenDep,
+    ctx: CtxDep,
+    disk_id: Annotated[UUID, Query(alias="diskId")],
+    before: Annotated[str | None, Query(max_length=200)] = None,
+    limit: Annotated[int, Query(ge=1, le=200)] = 100,
+) -> ActivityPage:
+    """A page of one disk's history, newest first."""
+    return await activity_service.history(ctx, token, disk_id, before, limit)
+
+
+@router.post("/device/activity/deletes", response_model=DeletesAnswer)
+async def activity_deletes(body: DeletesRequest, token: TokenDep, ctx: CtxDep) -> DeletesAnswer:
+    """Who deleted or replaced each of a disk's trash entries."""
+    return await activity_service.deletes(ctx, token, body)

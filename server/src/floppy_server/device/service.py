@@ -186,6 +186,13 @@ async def device_by_token(db: AsyncSession, token: str, *, for_update: bool = Fa
     return device
 
 
+async def active_device(db: AsyncSession, token: str) -> Device:
+    """The active device a token belongs to, or 401 with the reason."""
+    device = await device_by_token(db, token)
+    _refused(device)
+    return device
+
+
 async def _owner(db: AsyncSession, device: Device) -> User | None:
     return await db.get(User, device.user_id)
 
@@ -317,8 +324,7 @@ async def _register(
 async def config(ctx: Context, token: str) -> DeviceConfig:
     """The disks an active device may see, with how to mount them."""
     async with ctx.sessions() as db:
-        device = await device_by_token(db, token)
-        _refused(device)
+        device = await active_device(db, token)
         org = await db.get(Organization, device.organization_id)
         if org is None:
             raise device_unauthorized("token_unknown", "Unknown device")

@@ -1,6 +1,6 @@
 # Database schema
 
-The control plane's data model, in PostgreSQL. **Status: built**: `server/`, models in `server/src/floppy_server/models.py`, migrations `0001_initial`, `0002` and `0003`. `0003` moved the control plane from one Valkey instance and one bucket per organization to one of each per disk, with access per person and per disk (DECISIONS #23, #24); what it changed is listed in [Migration 0003](#migration-0003).
+The control plane's data model, in PostgreSQL. **Status: built**: `server/`, models in `server/src/floppy_server/models.py`, migrations `0001_initial` to `0005`. `0003` moved the control plane from one Valkey instance and one bucket per organization to one of each per disk, with access per person and per disk (DECISIONS #23, #24); what it changed is listed in [Migration 0003](#migration-0003).
 
 The design started as the paper of the build roadmap (ROADMAP 3), written from the team architecture ([architecture.html](architecture.html), sections 06 to 11), the concepts ([concept-d-onboarding](concepts/concept-d-onboarding.html), [concept-e-admin](concepts/concept-e-admin.html)) and the admin web's API contract (`web/src/lib/api/types.ts`, `http.ts`, and the rules the fake in `web/src/lib/api/fake/` keeps). This file changes in the same commit as every migration.
 
@@ -40,14 +40,15 @@ The control plane is AGPL-3.0 (DECISIONS #3), FastAPI with SQLAlchemy 2.0 async 
 
 ### Soft delete
 
-**Nothing is ever deleted with `DELETE`.** The application's database role has no `DELETE` grant on any table (see [First migration](#first-migration)), so the rule holds even against a bug. The tables fall into four kinds:
+**Nothing is ever deleted with `DELETE`**, except the disks' activity after 30 days (`file_events`, below). The application's database role has no `DELETE` grant on any other table (see [First migration](#first-migration)), so the rule holds even against a bug. The tables fall into four kinds:
 
 | Kind | Tables | How a row ends |
 |---|---|---|
 | Entities: things people manage | `organizations`, `users`, `memberships`, `devices`, `volumes` | `deleted_at` (soft delete: the row disappears from every list and no longer counts for uniqueness). Their domain end states, a removed person or a revoked device, are separate columns (`removed_at`, `revoked_at`) because the admin web keeps showing them |
 | Records: facts with a lifecycle that ends in a terminal state | `invitations`, `sign_in_requests`, `web_sessions`, `meta_instances`, `s3_keys`, `key_rotations`, `key_exposures`, `audit_events` | A terminal state with its timestamp (expired, revoked, stopped, retired, closed). No `deleted_at`: "deleting" a fact would rewrite history, and none of them is ever hidden or restored |
 | Settings per pair: one row per pair, overwritten | `disk_access`, `meta_users`, `s3_key_grants` | Never end: `none` is a value, not a deletion. Who changed `disk_access` and when is in the audit log |
-| Observations: overwritten by the latest report | `organization_status`, `device_status`, `volume_status` | Follow their parent row; one row per parent, updated in place |
+| Observations: overwritten by the latest report | `organization_status`, `device_status`, `volume_status`, (0005) `device_activity` | Follow their parent row; one row per parent, updated in place |
+| (0005) The disks' activity: what people did on the files, kept 30 days | `file_events` | Deleted after 30 days by the control plane, the one `DELETE` the application role is granted (DECISIONS #16, #27): what each person did on each file is not kept longer than anyone needs it |
 
 **Uniqueness with soft-deleted rows** uses partial unique indexes: `... WHERE deleted_at IS NULL` (plus the domain condition where a removed or revoked row must not block a new one). Some values are unique **forever**, across deleted rows too, because what they name outlives the row: a disk's object prefix and its bucket still hold data after the disk is soft deleted, and reusing them would collide with old objects. Each table says which.
 
@@ -141,6 +142,9 @@ erDiagram
   key_rotations ||--o{ key_exposures : closes
   organizations ||--o{ audit_events : logs
   users ||--o{ audit_events : "acts in"
+  volumes ||--o{ file_events : "happened on"
+  devices ||--o{ file_events : "reported by"
+  devices ||--|| device_activity : "writing now"
 ```
 
 ## Tables
@@ -595,6 +599,45 @@ Indexes: `(organization_id, occurred_at DESC, id DESC)` for the list and its key
 
 Append only, twice: the application role has only `INSERT` and `SELECT` on this table, and a trigger rejects `UPDATE`, `DELETE` and `TRUNCATE` for every role but the owner.
 
+### file_events
+
+(0005) What a device's Mac did on a disk, from its VM's Samba audit (DECISIONS #27): the source of the app's Activity tab, of "who" in the trash and of the notices for a colleague's rename. Visible to everyone who sees the disk, read-only included.
+
+| Column | Type | Null | Default | Notes |
+|---|---|---|---|---|
+| `id` | `uuid` | | `uuidv7()` | Primary key; the cursors' tie-breaker |
+| `organization_id` | `uuid` | | | |
+| `volume_id` | `uuid` | | | Composite foreign key to `volumes`: an event on a disk the device's person does not see is dropped, not stored |
+| `device_id` | `uuid` | | | Composite foreign key to `devices` |
+| `user_id` | `uuid` | | | Foreign key to `users`: the device's person when it reported. The name shown is read at query time |
+| `local_id` | `bigint` | | | The VM's own id of the event, `> 0`. `UNIQUE (device_id, local_id)`: a report sent again after a lost answer stores nothing new |
+| `occurred_at` | `timestamptz` | | | When it happened, by the VM's clock |
+| `received_at` | `timestamptz` | | `now()` | When the control plane stored it: the order devices read new events in |
+| `op` | `text` | | | `CHECK IN ('created', 'added', 'written', 'replaced', 'renamed', 'deleted')` |
+| `kind` | `text` | | | `CHECK IN ('file', 'folder')` |
+| `path` | `text` | | | In the disk, 1 to 4096 characters; the API refuses absolute paths and `.`, `..` or empty parts |
+| `dest` | `text` | yes | | Where a rename or move took it; `CHECK ((op = 'renamed') = (dest IS NOT NULL))` |
+| `size` | `bigint` | yes | | Bytes, for files; a deleted file's comes from its trash entry |
+
+Indexes: `(organization_id, received_at, id)` for the devices' cursor; `(volume_id, occurred_at DESC, id DESC)` for a disk's history; `(volume_id, path, occurred_at)` to find who deleted a trash entry.
+
+**Cursors.** A device's report reads events by `(received_at, id)` after its cursor, so an event reported late by a Mac that was asleep still reaches everyone; it stops 5 s short of now, because `received_at` is the time its transaction began and one still open could commit behind a cursor already past it. A first report (no cursor) starts at now. A disk's history reads by `(occurred_at, id)`, newest first.
+
+**Retention**: 30 days, then deleted by the control plane every hour. The application role has `SELECT, INSERT, DELETE` on this table and nothing else deletable: there is no update, and the rows are observations nobody restores.
+
+### device_activity
+
+(0005) What each device is writing now, from its last activity report: the "arriving" and "in use" states of colleagues' files. One row per device, overwritten.
+
+| Column | Type | Null | Default | Notes |
+|---|---|---|---|---|
+| `device_id` | `uuid` | | | Primary key, composite foreign key to `devices` |
+| `organization_id` | `uuid` | | | |
+| `writing` | `jsonb` | | `'[]'` | `[{diskId, path, op, since, size}]`, `op` `added` for a new file arriving, `written` or `replaced` for one in use; only disks the device sees. `CHECK (jsonb_typeof(writing) = 'array')` |
+| `reported_at` | `timestamptz` | | | A report older than 30 s is stale: the Mac is asleep or gone, and its writes are not shown |
+
+Created with `fillfactor = 70`, like `device_status`: a report every few seconds rewrites it. Index: `(organization_id, reported_at)`.
+
 ## Secrets
 
 | Secret | Stored | How | Why this way |
@@ -759,6 +802,9 @@ The app's API, not in the admin web's contract:
 | `GET /device/config` | Nothing: `{valkeyUsername, storageMode, s3AccessKeyTail, metaCa, organization, user, disks}`, `metaCa` the PEM of the private CA the disks' metadata TLS uses (`FLOPPY_META_CA_PEM` or `FLOPPY_META_CA_FILE`, checked at startup), null when the certificate is public; each disk `{id, name, volumeName, access, metaUrl, region, cacheExpireDays, mountPath}`, `metaUrl` the disk's instance and database (`rediss://host:port/1`, no credentials: the app adds its user and password), `region` its bucket's S3 region, which the device's mount signs with (the format keeps only the endpoint) |
 | `POST /device/heartbeat` | `device_status`; answers `{state, disks: [{id, access}]}`: `revoked` makes the app stop every disk and clear cache and replicas; `disks` tells it to remount read-only a disk mounted read-write whose access became `read`, to unmount one no longer listed, to fetch the configuration for a new one |
 | `POST /device/sign-out` | `devices` `revoked` with `signed_out` |
+| (0005) `POST /device/activity` `{events, writing, after}` | `file_events` (events on disks the device sees, a repeated `localId` ignored), `device_activity`. Answers `{events, cursor, more, writing}`: what anyone did on the device's disks since `after` (none on a first report, which starts the cursor at now), each with `by {name, you}`, `thisDevice` and `localId`; `writing` is what the other active devices reported writing in the last 30 s |
+| (0005) `GET /device/activity?diskId=&before=&limit=` | Nothing: a page of one disk's events, newest first, with the `before` of the next page; `404` for a disk the device does not see |
+| (0005) `POST /device/activity/deletes` `{diskId, items: [{path, at}]}` | Nothing: for each trash entry, who deleted or replaced that path closest to its time within 2 minutes, or null |
 
 **A device token refused** answers `401 unauthorized` with `details.reason`, so the app can word it: `token_unknown` (no such token, or none sent), `device_revoked` (revoked by an admin, its owner from the web, a person's removal or the reconciler), `device_signed_out` ("Esci" in the app), `device_not_registered` (still `pending`). The heartbeat of a revoked or signed-out device answers `200 {state: "revoked"}` instead, the app's cue to stop every disk and clear its cache and replicas.
 
@@ -805,6 +851,10 @@ Built: `server/migrations/versions/0003_per_disk.py`, for one Valkey instance an
 ## Migration 0004
 
 Built: `server/migrations/versions/0004_disk_deleted.py`. `audit_events`: `disk_deleted` joins the actions. `downgrade()` refuses while such an event exists, since the audit log is never rewritten.
+
+## Migration 0005
+
+Built: `server/migrations/versions/0005_file_events.py`. New tables `file_events` and `device_activity` (DECISIONS #27), with `SELECT, INSERT, DELETE` on `file_events` and `SELECT, INSERT, UPDATE` on `device_activity` for the application role. `downgrade()` drops both: they are observations nothing else references.
 
 ## Decisions taken
 

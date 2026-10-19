@@ -26,14 +26,18 @@ async def test_every_table_is_migrated(owner_engine: AsyncEngine) -> None:
             ).scalars()
         )
     assert set(TABLES) <= present
-    assert len(TABLES) == 19
+    assert len(TABLES) == 21
 
 
 @pytest.mark.parametrize("table", TABLES)
 async def test_the_application_role_cannot_delete_or_truncate(
     table: str, ctx: Context, app_engine: AsyncEngine
 ) -> None:
-    for statement in (f"DELETE FROM {table}", f"TRUNCATE {table}"):
+    # The activity's 30 days are purged by the control plane itself (DECISIONS #16).
+    statements = [f"TRUNCATE {table}"]
+    if table != "file_events":
+        statements.append(f"DELETE FROM {table}")
+    for statement in statements:
         async with app_engine.connect() as conn:
             with pytest.raises(DBAPIError, match="permission denied"):
                 await conn.execute(text(statement))

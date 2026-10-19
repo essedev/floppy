@@ -94,6 +94,9 @@ INSTANCE_STATES = ("ready", "stopped")
 PROBE_STATES = ("ok", "failing", "unknown")
 KEY_ORIGINS = ("pasted", "provider")
 VERSIONING_STATES = ("enabled", "suspended", "off", "unknown")
+FILE_OPS = ("created", "added", "written", "replaced", "renamed", "deleted")
+WRITING_OPS = ("added", "written", "replaced")
+ENTRY_KINDS = ("file", "folder")
 AUDIT_ACTIONS = (
     "organization_created",
     "signed_in",
@@ -928,6 +931,79 @@ class AuditEvent(Base):
     target_id: Mapped[UUID] = mapped_column(PgUUID(as_uuid=True))
     target_label: Mapped[str] = mapped_column(Text)
     detail: Mapped[dict[str, object]] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
+
+
+class FileEvent(Base):
+    """
+    What a device did on a disk, from its VM's Samba audit (DECISIONS #27): kept 30 days, the
+    one table the application role may delete from. `local_id` is the VM's own id, so a
+    report sent twice is stored once.
+    """
+
+    __tablename__ = "file_events"
+    __table_args__ = (
+        _tenant_unique("file_events"),
+        _tenant_fk(["volume_id"], "volumes"),
+        _tenant_fk(["device_id"], "devices"),
+        CheckConstraint(_in("op", *FILE_OPS), name="op"),
+        CheckConstraint(_in("kind", *ENTRY_KINDS), name="kind"),
+        CheckConstraint("(op = 'renamed') = (dest IS NOT NULL)", name="dest"),
+        CheckConstraint("length(path) BETWEEN 1 AND 4096", name="path_length"),
+        CheckConstraint("dest IS NULL OR length(dest) BETWEEN 1 AND 4096", name="dest_length"),
+        CheckConstraint("size IS NULL OR size >= 0", name="size"),
+        CheckConstraint("local_id > 0", name="local_id"),
+        UniqueConstraint("device_id", "local_id", name="uq_file_events_device_id_local_id"),
+        Index(
+            "ix_file_events_organization_id_received_at_id",
+            "organization_id",
+            "received_at",
+            "id",
+        ),
+        Index(
+            "ix_file_events_volume_id_occurred_at_id",
+            "volume_id",
+            text("occurred_at DESC"),
+            text("id DESC"),
+        ),
+        Index("ix_file_events_volume_id_path_occurred_at", "volume_id", "path", "occurred_at"),
+    )
+
+    id: Mapped[UUID] = _id()
+    organization_id: Mapped[UUID] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("organizations.id")
+    )
+    volume_id: Mapped[UUID] = mapped_column(PgUUID(as_uuid=True))
+    device_id: Mapped[UUID] = mapped_column(PgUUID(as_uuid=True))
+    user_id: Mapped[UUID] = mapped_column(PgUUID(as_uuid=True), ForeignKey("users.id"))
+    local_id: Mapped[int] = mapped_column(BigInteger)
+    occurred_at: Mapped[datetime] = _ts()
+    received_at: Mapped[datetime] = _ts(default=True)
+    op: Mapped[str] = mapped_column(Text)
+    kind: Mapped[str] = mapped_column(Text)
+    path: Mapped[str] = mapped_column(Text)
+    dest: Mapped[str | None] = mapped_column(Text)
+    size: Mapped[int | None] = mapped_column(BigInteger)
+
+
+class DeviceActivity(Base):
+    """What a device is writing now, from its last activity report. One row per device."""
+
+    __tablename__ = "device_activity"
+    __table_args__ = (
+        _tenant_fk(["device_id"], "devices"),
+        CheckConstraint("jsonb_typeof(writing) = 'array'", name="writing_array"),
+        Index("ix_device_activity_organization_id_reported_at", "organization_id", "reported_at"),
+        {"postgresql_with": {"fillfactor": 70}},
+    )
+
+    device_id: Mapped[UUID] = mapped_column(PgUUID(as_uuid=True), primary_key=True)
+    organization_id: Mapped[UUID] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("organizations.id")
+    )
+    writing: Mapped[list[dict[str, object]]] = mapped_column(
+        JSONB, server_default=text("'[]'::jsonb")
+    )
+    reported_at: Mapped[datetime] = _ts()
 
 
 async def lock_organization(session: AsyncSession, organization_id: UUID) -> None:

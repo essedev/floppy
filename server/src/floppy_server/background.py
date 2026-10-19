@@ -1,7 +1,7 @@
 """
 Background work: the disk creation and rotation workers, the reconciler of the devices' users
-and grants, housekeeping of stuck rows, and the status pollers behind `GET /health` and the
-disks' counters.
+and grants, housekeeping of stuck rows, the status pollers behind `GET /health` and the
+disks' counters, and the purge of the disks' activity after 30 days.
 
 Each job is safe to run in several processes at once: the workers take rows with `SKIP
 LOCKED`, and the per-organization jobs take a transaction-level advisory lock, so a second
@@ -24,6 +24,7 @@ from uuid import UUID
 from sqlalchemy import select, update
 
 from floppy_server.access.service import apply_owed, sync
+from floppy_server.activity.service import purge
 from floppy_server.audit.service import AuditActor
 from floppy_server.context import Context, utcnow
 from floppy_server.devices.service import revoke_rows
@@ -44,6 +45,8 @@ from floppy_server.models import (
 log = logging.getLogger(__name__)
 
 PENDING_DEVICE_TTL = timedelta(hours=24)
+# Events past the 30 days go once an hour: nothing reads them by then.
+ACTIVITY_PURGE_SECONDS = 3600.0
 CREATING_VOLUME_TTL = timedelta(minutes=15)
 
 
@@ -322,4 +325,5 @@ def start(ctx: Context) -> list[asyncio.Task[None]]:
             _forever("reconcile", s.reconcile_interval_seconds, lambda: reconcile_all(ctx))
         ),
         asyncio.create_task(_forever("status", s.status_interval_seconds, lambda: poll_all(ctx))),
+        asyncio.create_task(_forever("activity", ACTIVITY_PURGE_SECONDS, lambda: purge(ctx))),
     ]

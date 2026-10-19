@@ -16,7 +16,7 @@ docker compose build server                         # before the JuiceFS tests: 
 ```
 
 - **The schema is docs/DATABASE_SCHEMA.md**: a migration and the schema doc change in the same commit.
-- **The application role has no DELETE**: soft delete or a terminal state, never a delete (DECISIONS #16).
+- **The application role has no DELETE**: soft delete or a terminal state, never a delete (DECISIONS #16). The one exception is `file_events`, the activity purged after 30 days.
 - **Debian already has a `floppy` group**: the container's user is `controlplane`.
 - **After `ACL DELUSER` redis-py does not reconnect by itself**: the Valkey adapter reconnects explicitly.
 - **The admin web against this server in dev** needs a `/api` proxy to `127.0.0.1:4507` in `web/vite.config.ts` and `VITE_API=http`.
