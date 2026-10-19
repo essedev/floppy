@@ -58,7 +58,7 @@ describe("trash", () => {
     expect(fromLine(entry({ kind: "folder", files: 120 }), "Progetti")).toBe("Cartella con 120 file · da Cantine/Girato");
     expect(fromLine(entry({ replaced: true }), "Progetti")).toBe("Versione precedente · era in Cantine/Girato");
     expect(restoreLabel(entry({ replaced: true }))).toBe("Ripristina come copia");
-    const back = { disk: null, path: "a", name: "a (ripristinato).mov", renamed: true, moved: false, finder_path: null };
+    const back = { id: "h/1-2", disk: null, path: "a", name: "a (ripristinato).mov", renamed: true, moved: false, finder_path: null };
     expect(restoredLine(back)).toBe("Ripristinato come «a (ripristinato).mov»");
     expect(restoredLine({ ...back, moved: true })).toBe("Ripristinato in cima al disco");
   });

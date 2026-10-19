@@ -7,11 +7,13 @@ JuiceFS keeps after a delete or a replacement, listed and put back without ever 
 over a file. The app reads both through `floppy activity` and `floppy trash`.
 
   floppy-activity run                             the service: follows the audit log
-  floppy-activity list [--after ID] [--limit N]   JSON out: events newer than ID, and the
-                                                  files this Mac holds open for writing
+  floppy-activity list [--after ID] [--limit N]   JSON out: events newer than ID, the files
+                                                  this Mac is writing and those it has open
   floppy-activity trash                           JSON out: every mounted disk's trash
-  floppy-activity restore DISK ID                 puts a trash entry back, JSON out; DISK
+  floppy-activity restore DISK ID...              puts trash entries back, JSON out; DISK
                                                   is "-" for the single-user volume
+  floppy-activity rename-back DISK                undoes a rename: {"path", "to"} of the
+                                                  event on stdin, JSON out
 
 Samba logs one line per operation (smb.conf: full_audit, its own log file). A few things
 in those lines are not what they look like:
@@ -219,7 +221,9 @@ def place(path: str, by_folder: dict[str, str] | None) -> tuple[str | None, str]
     return by_folder[folder], rest
 
 
-def to_rows(events: list[dict], by_folder: dict[str, str] | None, size) -> list[tuple]:
+def to_rows(
+    events: list[dict], by_folder: dict[str, str] | None, size, gone_size=lambda _p, _at: None
+) -> list[tuple]:
     rows = []
     for e in events:
         where = place(e["path"], by_folder)
@@ -237,7 +241,12 @@ def to_rows(events: list[dict], by_folder: dict[str, str] | None, size) -> list[
                 dest, path = to[1], e["to"]
         elif hidden(rel):
             continue
-        n = size(path) if e["kind"] == "file" and op != "deleted" else None
+        if e["kind"] != "file":
+            n = None
+        elif op == "deleted":
+            n = gone_size(path, e["at"])
+        else:
+            n = size(path)
         rows.append((e["at"], where[0], op, e["kind"], rel, dest, n))
     return rows
 
@@ -249,21 +258,84 @@ def stat_size(path: str) -> int | None:
         return None
 
 
-def open_for_writing() -> dict[str, float] | None:
-    """Absolute path to the time of its oldest open for writing; None if Samba does not answer."""
+class TrashSizes:
+    """
+    The size of a file just deleted, from the entry its delete made in the disk's trash:
+    the file is gone by the time its line is read. Each trash hour is listed once.
+    """
+
+    def __init__(self, by_folder: dict[str, str] | None) -> None:
+        self.by_folder = by_folder
+        self.hours: dict[str, dict[str, list[tuple[float, int]]]] = {}
+
+    def _hour(self, folder: str) -> dict[str, list[tuple[float, int]]]:
+        if folder not in self.hours:
+            found: dict[str, list[tuple[float, int]]] = {}
+            try:
+                for d in os.scandir(folder):
+                    m = TRASH_NAME.match(d.name)
+                    if m and d.is_file(follow_symlinks=False):
+                        st = d.stat(follow_symlinks=False)
+                        found.setdefault(m[3], []).append((st.st_ctime, st.st_size))
+            except OSError:
+                pass
+            self.hours[folder] = found
+        return self.hours[folder]
+
+    def __call__(self, path: str, at: float) -> int | None:
+        where = place(path, self.by_folder)
+        if where is None:
+            return None
+        mount = path[: len(path) - len(where[1]) - 1]
+        best = None
+        # The hour is the delete's, in UTC: either side of a change of hour.
+        for t in {int(at - 5) // 3600, int(at + 5) // 3600}:
+            hour = time.strftime("%Y-%m-%d-%H", time.gmtime(t * 3600))
+            for ctime, size in self._hour(os.path.join(mount, ".trash", hour)).get(
+                os.path.basename(path), []
+            ):
+                if abs(ctime - at) <= 30 and (best is None or abs(ctime - at) < best[0]):
+                    best = (abs(ctime - at), size)
+        return None if best is None else best[1]
+
+
+def open_files() -> dict[str, tuple[float, bool]] | None:
+    """
+    What Samba holds open: absolute path to the time of its oldest open and whether one is
+    for writing. None if Samba does not answer.
+    """
     out = subprocess.run(
         ["/usr/bin/smbstatus", "-L", "--json"], capture_output=True, text=True, check=False
     )
     if out.returncode != 0:
         return None
-    paths: dict[str, float] = {}
+    paths: dict[str, tuple[float, bool]] = {}
     for f in json.loads(out.stdout).get("open_files", {}).values():
         for o in f.get("opens", {}).values():
-            if int(o["access_mask"]["hex"], 16) & WRITE_ACCESS:
-                path = os.path.join(f["service_path"], f["filename"])
-                at = datetime.fromisoformat(o["opened_at"]).timestamp()
-                paths[path] = min(at, paths.get(path, at))
+            path = os.path.join(f["service_path"], f["filename"])
+            at = datetime.fromisoformat(o["opened_at"]).timestamp()
+            write = bool(int(o["access_mask"]["hex"], 16) & WRITE_ACCESS)
+            was_at, was_write = paths.get(path, (at, False))
+            paths[path] = (min(at, was_at), write or was_write)
     return paths
+
+
+def open_for_writing() -> dict[str, float] | None:
+    """Absolute path to the time of its oldest open, for the files open for writing."""
+    opens = open_files()
+    if opens is None:
+        return None
+    return {p: at for p, (at, write) in opens.items() if write}
+
+
+def writing_rows(pending: dict[str, Pending], by_folder: dict[str, str] | None) -> list[tuple]:
+    """The writes still open, as the `writing` table keeps them."""
+    rows = []
+    for path, p in sorted(pending.items()):
+        where = place(path, by_folder)
+        if where is not None and not hidden(where[1]):
+            rows.append((path, where[0], where[1], p.op, p.at))
+    return rows
 
 
 def connect() -> sqlite3.Connection:
@@ -276,6 +348,9 @@ def connect() -> sqlite3.Connection:
           kind TEXT NOT NULL, path TEXT NOT NULL, dest TEXT, size INTEGER,
           UNIQUE (at, op, path));
         CREATE TABLE IF NOT EXISTS position (log TEXT PRIMARY KEY, inode INTEGER, offset INTEGER);
+        CREATE TABLE IF NOT EXISTS writing (
+          abs TEXT PRIMARY KEY, disk TEXT, path TEXT NOT NULL, op TEXT NOT NULL,
+          since REAL NOT NULL);
         """
     )
     return db
@@ -335,7 +410,10 @@ def run() -> None:
     row = db.execute("SELECT inode, offset FROM position WHERE log = 'audit'").fetchone()
     follower = Follower(*(row or (None, 0)))
     tracker, last_at, last_trim = Tracker(), None, 0.0
-    saved = follower.position()
+    saved, saved_writing = follower.position(), []
+    # Writes open before a restart are not tracked: none is in progress as far as we know.
+    with db:
+        db.execute("DELETE FROM writing")
     while True:
         for line in follower.lines():
             last_at, op = parse(line, last_at)
@@ -345,22 +423,27 @@ def run() -> None:
         opens = open_for_writing() if tracker.pending else {}
         if opens is None:
             opens = tracker.pending  # Samba down: no write counts as done
-        rows = to_rows(tracker.tick(now, opens), folders(), stat_size)
+        by_folder = folders()
+        rows = to_rows(tracker.tick(now, opens), by_folder, stat_size, TrashSizes(by_folder))
+        writing = writing_rows(tracker.pending, by_folder)
         position, trim = follower.position(), now - last_trim > 3600
-        if rows or position != saved or trim:
+        if rows or position != saved or trim or writing != saved_writing:
             with db:
                 db.executemany(
                     "INSERT OR IGNORE INTO events (at, disk, op, kind, path, dest, size)"
                     " VALUES (?, ?, ?, ?, ?, ?, ?)",
                     rows,
                 )
+                if writing != saved_writing:
+                    db.execute("DELETE FROM writing")
+                    db.executemany("INSERT INTO writing VALUES (?, ?, ?, ?, ?)", writing)
                 # Lines behind writes still open or drafts still settling are lost if the
                 # service stops now: the cost of not replaying the log into duplicates.
                 db.execute("INSERT OR REPLACE INTO position VALUES ('audit', ?, ?)", position)
                 if trim:
                     db.execute("DELETE FROM events WHERE at < ?", (now - KEEP_DAYS * 86400,))
                     last_trim = now
-            saved = position
+            saved, saved_writing = position, writing
         time.sleep(1)
 
 
@@ -378,13 +461,26 @@ def list_events(after: int, limit: int) -> dict:
     return {"events": events, "last": rows[-1][0] if rows else after}
 
 
+def list_writing() -> list[dict]:
+    """The files this Mac is writing now, with their size so far."""
+    with closing(connect()) as db:
+        rows = db.execute("SELECT abs, disk, path, op, since FROM writing ORDER BY abs").fetchall()
+    return [
+        {"disk": disk, "path": path, "op": op, "since": since, "size": stat_size(a)}
+        for a, disk, path, op, since in rows
+    ]
+
+
 def list_open() -> list[dict]:
+    """
+    The files this Mac has open, read or written. Only the app sees them, to warn when one is
+    a colleague's file still arriving; they are never recorded (DECISIONS #27).
+    """
     by_folder, out = folders(), []
-    for path, since in sorted((open_for_writing() or {}).items()):
+    for path in sorted(open_files() or {}):
         where = place(path, by_folder)
-        if where is None or hidden(where[1]):
-            continue
-        out.append({"disk": where[0], "path": where[1], "size": stat_size(path), "since": since})
+        if where is not None and not hidden(where[1]):
+            out.append({"disk": where[0], "path": where[1]})
     return out
 
 
@@ -641,12 +737,62 @@ def restore(
                 stack.append((k.ino, os.path.join(into, used)))
     rel = os.path.join(origin or "", name)
     return {
+        "id": entry_id,
         "disk": m.disk,
         "path": rel,
         "name": name,
         "renamed": name != entry.name,
         "moved": origin is None,
     }
+
+
+def restore_many(
+    m: Mount, ids: list[str], entries: list[TrashEntry], where=inode_path, move=rename_noreplace
+) -> dict:
+    """Puts several entries back; one that fails does not stop the others."""
+    if not m.writable:
+        raise PermissionError(errno.EROFS, "the disk is read-only on this Mac", m.path)
+    restored, failed = [], []
+    for entry_id in ids:
+        try:
+            restored.append(restore(m, entry_id, entries, where, move))
+        except OSError as e:
+            failed.append({"id": entry_id, "error": e.strerror or str(e)})
+    return {"restored": restored, "failed": failed}
+
+
+def inside(rel: object) -> str | None:
+    """A path in a disk as an event names it, or None for one that leaves the disk."""
+    if not isinstance(rel, str) or not rel or rel.startswith("/") or "\0" in rel:
+        return None
+    parts = rel.split("/")
+    if any(p in ("", ".", "..") for p in parts):
+        return None
+    return rel
+
+
+def rename_back(m: Mount, path: str, to: str, move=rename_noreplace) -> dict:
+    """
+    Undoes the rename of `path` to `to`: `to` takes its name of before again, never over
+    what holds that name now. `reason` says why not: gone (nothing at `to`), taken (the old
+    name is in use) or no_folder (the folder it was in is gone).
+    """
+    if not m.writable:
+        raise PermissionError(errno.EROFS, "the disk is read-only on this Mac", m.path)
+    src, dst = os.path.join(m.path, to), os.path.join(m.path, path)
+    reason = None
+    if not os.path.lexists(src):
+        reason = "gone"
+    elif not os.path.isdir(os.path.dirname(dst)):
+        reason = "no_folder"
+    else:
+        try:
+            move(src, dst)
+        except FileExistsError:
+            reason = "taken"
+        except FileNotFoundError:
+            reason = "gone"
+    return {"disk": m.disk, "path": path, "to": to, "done": reason is None, "reason": reason}
 
 
 def main(argv: list[str]) -> int:
@@ -663,27 +809,53 @@ def main(argv: list[str]) -> int:
             print("usage: floppy-activity list [--after ID] [--limit N]", file=sys.stderr)
             return 2
         out = list_events(int(opts.get("--after", 0)), int(opts.get("--limit", 1000)))
-        print(json.dumps({**out, "open": list_open()}))
+        print(json.dumps({**out, "writing": list_writing(), "open": list_open()}))
     elif cmd == "trash" and not args:
         print(json.dumps({"disks": [list_trash(m, scan_trash(m.path)) for m in mounts()]}))
-    elif cmd == "restore" and len(args) == 2 and TRASH_ID.match(args[1]):
-        disk = None if args[0] == "-" else args[0]
-        m = next((m for m in mounts() if m.disk == disk), None)
+    elif cmd == "restore" and len(args) >= 2 and all(TRASH_ID.match(a) for a in args[1:]):
+        m = mounted(args[0])
         if m is None:
-            print(f"floppy-activity: disk {args[0]} is not mounted", file=sys.stderr)
             return 1
         try:
-            print(json.dumps(restore(m, args[1], scan_trash(m.path))))
+            print(json.dumps(restore_many(m, args[1:], scan_trash(m.path))))
         except OSError as e:
-            print(f"floppy-activity: {e.strerror}: {args[1]}", file=sys.stderr)
+            print(f"floppy-activity: {e.strerror}", file=sys.stderr)
+            return 1
+    elif cmd == "rename-back" and len(args) == 1:
+        try:
+            body = json.loads(sys.stdin.read(65536))
+        except ValueError:
+            body = None
+        path = inside(body.get("path")) if isinstance(body, dict) else None
+        to = inside(body.get("to")) if isinstance(body, dict) else None
+        if path is None or to is None or hidden(path) or hidden(to):
+            print('floppy-activity: rename-back wants {"path", "to"} in the disk', file=sys.stderr)
+            return 2
+        m = mounted(args[0])
+        if m is None:
+            return 1
+        try:
+            print(json.dumps(rename_back(m, path, to)))
+        except OSError as e:
+            print(f"floppy-activity: {e.strerror}", file=sys.stderr)
             return 1
     else:
         print(
-            "usage: floppy-activity run|list [--after ID] [--limit N]|trash|restore DISK ID",
+            "usage: floppy-activity run|list [--after ID] [--limit N]|trash"
+            "|restore DISK ID...|rename-back DISK",
             file=sys.stderr,
         )
         return 2
     return 0
+
+
+def mounted(disk_arg: str) -> Mount | None:
+    """The mount of a disk named on the command line, "-" for the single-user volume."""
+    disk = None if disk_arg == "-" else disk_arg
+    m = next((m for m in mounts() if m.disk == disk), None)
+    if m is None:
+        print(f"floppy-activity: disk {disk_arg} is not mounted", file=sys.stderr)
+    return m
 
 
 if __name__ == "__main__":

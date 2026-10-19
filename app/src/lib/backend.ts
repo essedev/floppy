@@ -10,7 +10,7 @@ import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import * as autostart from "@tauri-apps/plugin-autostart";
 import * as notification from "@tauri-apps/plugin-notification";
 import { mockBackend } from "@/lib/mock";
-import type { AppInfo, AuthView, DiskStatus, Folder, Notice, Restored, SetupProgress, TrashReport } from "@/lib/types";
+import type { AppInfo, AuthView, DiskStatus, Folder, Notice, RestoreResult, SetupProgress, TrashReport } from "@/lib/types";
 
 type Unlisten = () => void;
 
@@ -38,7 +38,7 @@ export interface Backend {
   /** Every mounted disk's trash (DECISIONS #27). */
   getTrash(): Promise<TrashReport>;
   /** Puts a trash entry back, never over a file; `disk` is null for the single-user volume. */
-  restoreTrash(disk: string | null, id: string): Promise<Restored>;
+  restoreTrash(disk: string | null, ids: string[]): Promise<RestoreResult>;
   /** Opens the trash window, on one disk when given. */
   openTrash(disk?: string | null): Promise<void>;
   /** The disk the trash window was asked to show. */
@@ -101,7 +101,7 @@ const tauriBackend: Backend = {
   openInFinder: (path) => invoke("open_in_finder", { path: path ?? null }),
   revealInFinder: (path) => invoke("reveal_in_finder", { path }),
   getTrash: () => invoke("get_trash"),
-  restoreTrash: (disk, id) => invoke("restore_trash", { disk, id }),
+  restoreTrash: (disk, ids) => invoke("restore_trash", { disk, ids }),
   openTrash: (disk) => invoke("open_trash", { disk: disk ?? null }),
   onTrashDisk: (cb) => subscribe("trash-disk", cb),
   getSetup: () => invoke("get_setup"),

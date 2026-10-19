@@ -206,7 +206,12 @@ interface RowProps {
 
 function Row({ entry, disk, done, onDone }: RowProps) {
   const restore = useMutation<Restored, CommandError>({
-    mutationFn: () => backend.restoreTrash(disk.disk, entry.id),
+    mutationFn: async () => {
+      const out = await backend.restoreTrash(disk.disk, [entry.id]);
+      const back = out.restored[0];
+      if (back) return back;
+      throw { code: "engine", message: out.failed[0]?.error ?? "" } satisfies CommandError;
+    },
     onSuccess: onDone,
   });
   const reveal = useMutation<void, CommandError, string>({ mutationFn: backend.revealInFinder });

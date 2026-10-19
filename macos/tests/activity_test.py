@@ -18,6 +18,7 @@ import sys
 import tempfile
 import unittest
 from calendar import timegm
+from contextlib import closing
 from pathlib import Path
 
 # No bytecode next to the guest files: build-engine.sh copies that folder into the app.
@@ -191,6 +192,74 @@ class Store(unittest.TestCase):
             json.dumps(first)
 
 
+class Writing(unittest.TestCase):
+    def test_open_writes_by_disk_without_hidden_files(self):
+        pending = {
+            "/mnt/drive/Progetti/Girato/a.mov": fa.Pending(10.0, "added"),
+            "/mnt/drive/Progetti/.a.mov.sb-12ab-x": fa.Pending(11.0, "written"),
+            "/mnt/drive/Altro/b.mov": fa.Pending(12.0, "added"),
+        }
+        self.assertEqual(
+            fa.writing_rows(pending, TEAM),
+            [("/mnt/drive/Progetti/Girato/a.mov", "progetti", "Girato/a.mov", "added", 10.0)],
+        )
+
+    def test_listed_with_their_size_so_far(self):
+        with tempfile.TemporaryDirectory() as d:
+            fa.DB = Path(d) / "activity.db"
+            clip = Path(d) / "a.mov"
+            clip.write_bytes(b"x" * 64)
+            with closing(fa.connect()) as db, db:
+                db.execute(
+                    "INSERT INTO writing VALUES (?, ?, ?, ?, ?)",
+                    (str(clip), "progetti", "Girato/a.mov", "added", 10.0),
+                )
+            self.assertEqual(
+                fa.list_writing(),
+                [
+                    {
+                        "disk": "progetti",
+                        "path": "Girato/a.mov",
+                        "op": "added",
+                        "since": 10.0,
+                        "size": 64,
+                    }
+                ],
+            )
+
+
+class TrashSizes(unittest.TestCase):
+    def test_a_deleted_file_takes_the_size_of_its_trash_entry(self):
+        at = float(timegm((2026, 10, 19, 7, 59, 58)))
+        sizes = fa.TrashSizes(TEAM)
+        trash = "/mnt/drive/Progetti/.trash"
+        # The delete at 07:59:58 may land in the next hour's folder: both are looked at.
+        sizes.hours = {
+            f"{trash}/2026-10-19-08": {"a.mov": [(at + 1, 4)]},
+            f"{trash}/2026-10-19-07": {"a.mov": [(at - 600, 2)], "b.mov": [(at, 1)]},
+        }
+        self.assertEqual(sizes("/mnt/drive/Progetti/Girato/a.mov", at), 4)
+        self.assertEqual(sizes("/mnt/drive/Progetti/b.mov", at), 1)
+        self.assertIsNone(sizes("/mnt/drive/Progetti/c.mov", at))
+        self.assertIsNone(sizes("/mnt/drive/Fuori/a.mov", at))
+
+    def test_reads_a_trash_hour_once(self):
+        with tempfile.TemporaryDirectory() as d:
+            Path(d, "10-20-a.mov").write_text("aaaa")
+            Path(d, "10-21-Girato").mkdir()
+            Path(d, "notes").write_text("x")
+            sizes = fa.TrashSizes(TEAM)
+            got = sizes._hour(d)
+            self.assertEqual([(n, [s for _, s in v]) for n, v in got.items()], [("a.mov", [4])])
+            self.assertIs(sizes._hour(d), got)
+            self.assertEqual(sizes._hour(d + "/missing"), {})
+
+    def test_rows_of_deletes_carry_it(self):
+        events = [{"at": 5.0, "op": "deleted", "kind": "file", "path": "/mnt/drive/Progetti/a"}]
+        got = fa.to_rows(events, TEAM, lambda p: 1, lambda p, at: 77)
+        self.assertEqual(got, [(5.0, "progetti", "deleted", "file", "a", None, 77)])
+
+
 class Follow(unittest.TestCase):
     def test_rotation_and_half_lines(self):
         with tempfile.TemporaryDirectory() as d:
@@ -309,10 +378,60 @@ class Trash(unittest.TestCase):
         with self.assertRaises(FileNotFoundError):
             fa.restore(self.mount, "2026-10-19-07/10-99", entries, self.where, self.move)
 
+    def test_restore_many_goes_on_after_a_failure(self):
+        out = fa.restore_many(
+            self.mount,
+            ["2026-10-19-07/10-99", "2026-10-19-07/10-32"],
+            fa.scan_trash(str(self.disk)),
+            self.where,
+            self.move,
+        )
+        self.assertEqual([r["id"] for r in out["restored"]], ["2026-10-19-07/10-32"])
+        self.assertEqual(
+            out["failed"], [{"id": "2026-10-19-07/10-99", "error": "not in the trash"}]
+        )
+        ro = fa.Mount("archivio", "Archivio", str(self.disk), False)
+        with self.assertRaises(PermissionError):
+            fa.restore_many(ro, ["2026-10-19-07/10-32"], [], self.where, self.move)
+
     def test_free_names(self):
         self.assertEqual(fa.free_name("a.tar.gz", 2), "a.tar (ripristinato 2).gz")
         self.assertEqual(fa.free_name("Girato", 1), "Girato (ripristinato)")
         self.assertEqual(fa.free_name(".hidden", 1), ".hidden (ripristinato)")
+
+
+class RenameBack(unittest.TestCase):
+    def setUp(self):
+        d = tempfile.TemporaryDirectory()
+        self.addCleanup(d.cleanup)
+        self.disk = Path(d.name)
+        (self.disk / "Backstage Tosca").mkdir()
+        (self.disk / "Backstage Tosca/a.mov").write_text("a")
+        self.mount = fa.Mount("progetti", "Progetti", str(self.disk), True)
+
+    def back(self, path, to):
+        return fa.rename_back(self.mount, path, to, Trash.move)
+
+    def test_the_folder_takes_its_name_back(self):
+        out = self.back("Backstage", "Backstage Tosca")
+        self.assertEqual((out["done"], out["reason"]), (True, None))
+        self.assertEqual((self.disk / "Backstage/a.mov").read_text(), "a")
+
+    def test_never_over_a_name_in_use(self):
+        (self.disk / "Backstage").mkdir()
+        self.assertEqual(self.back("Backstage", "Backstage Tosca")["reason"], "taken")
+        self.assertTrue((self.disk / "Backstage Tosca/a.mov").exists())
+
+    def test_gone_or_without_its_folder(self):
+        self.assertEqual(self.back("Backstage", "Altro")["reason"], "gone")
+        self.assertEqual(self.back("Clienti/Backstage", "Backstage Tosca")["reason"], "no_folder")
+        with self.assertRaises(PermissionError):
+            fa.rename_back(fa.Mount("a", "A", str(self.disk), False), "x", "Backstage Tosca")
+
+    def test_paths_stay_inside_the_disk(self):
+        for bad in ["", "/etc", "../x", "a/../../x", "a//b", "./a", None, 3]:
+            self.assertIsNone(fa.inside(bad), bad)
+        self.assertEqual(fa.inside("Clienti/Backstage Tosca"), "Clienti/Backstage Tosca")
 
 
 if __name__ == "__main__":

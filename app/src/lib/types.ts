@@ -238,6 +238,8 @@ export interface TrashReport {
 
 /** A trash entry back on the disk (core.rs, `RestoredView`). */
 export interface Restored {
+  /** The trash entry it was. */
+  id: string;
   disk: string | null;
   /** Relative to the disk. */
   path: string;
@@ -248,4 +250,11 @@ export interface Restored {
   moved: boolean;
   /** Its path on this Mac, while the disk is mounted. */
   finder_path: string | null;
+}
+
+/** What a restore put back and what it could not (core.rs, `RestoreView`). */
+export interface RestoreResult {
+  restored: Restored[];
+  /** `error` is the VM's reason, "not in the trash" for an entry already gone. */
+  failed: { id: string; error: string }[];
 }

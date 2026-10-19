@@ -2,7 +2,7 @@
 //! calls them through `src/lib/backend.ts`.
 
 use crate::account::{Account, AuthView, Refused};
-use crate::core::{Core, CoreError, DiskStatus, Folder, RestoredView, SetupProgress};
+use crate::core::{Core, CoreError, DiskStatus, Folder, RestoreView, SetupProgress};
 use crate::engine::JobKind;
 use crate::engine::TrashReport;
 use crate::prefs::PrefsStore;
@@ -137,15 +137,15 @@ pub async fn get_trash(core: CoreState<'_>) -> Result<TrashReport, CommandError>
         .map_err(CommandError::from)
 }
 
-/// Puts a trash entry back; `disk` is null for the single-user volume.
+/// Puts trash entries back; `disk` is null for the single-user volume.
 #[tauri::command]
 pub async fn restore_trash(
     core: CoreState<'_>,
     disk: Option<String>,
-    id: String,
-) -> Result<RestoredView, CommandError> {
+    ids: Vec<String>,
+) -> Result<RestoreView, CommandError> {
     let core = Arc::clone(&core);
-    tauri::async_runtime::spawn_blocking(move || core.restore(disk.as_deref(), &id))
+    tauri::async_runtime::spawn_blocking(move || core.restore(disk.as_deref(), &ids))
         .await
         .map_err(io_error)?
         .map_err(CommandError::from)

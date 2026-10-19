@@ -16,7 +16,7 @@ use crate::account::credentials::DiskCredentials;
 use crate::account::{MountReport, TeamDisks};
 use crate::engine::{
     self, Access, DiskState, EngineDisk, EngineError, EngineReport, JobKind, MetaMode, Mode,
-    Pending, Problem, Replica, Restored, RunState, Space, TrashReport,
+    Pending, Problem, Replica, RestoreFailure, Restored, RunState, Space, TrashReport,
 };
 use crate::installer::{InstallNeed, Installer};
 use crate::team::{self, DisksFile, Rejected};
@@ -182,6 +182,13 @@ pub struct RestoredView {
     pub restored: Restored,
     /// Its path on this Mac while the disk is mounted.
     pub finder_path: Option<String>,
+}
+
+/// What a restore put back and what it could not.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct RestoreView {
+    pub restored: Vec<RestoredView>,
+    pub failed: Vec<RestoreFailure>,
 }
 
 /// Why a command from the UI was refused or failed.
@@ -595,27 +602,37 @@ impl Core {
         Ok(engine::trash(&self.engine)?)
     }
 
-    /// Puts a trash entry back where it was, under a free name.
-    pub fn restore(&self, disk: Option<&str>, id: &str) -> Result<RestoredView, CoreError> {
+    /// Puts trash entries back where they were, under free names.
+    pub fn restore(&self, disk: Option<&str>, ids: &[String]) -> Result<RestoreView, CoreError> {
         self.vm_free()?;
-        let restored = engine::restore(&self.engine, disk, id)?;
-        let inner = self.lock();
-        let report = inner.report.as_ref().and_then(|r| r.as_ref().ok());
-        let finder_path = report.and_then(|r| {
-            let mp = r.mount_point.as_deref()?;
-            let base = match restored.disk.as_deref() {
-                None => PathBuf::from(mp),
-                Some(id) => {
-                    let d = r.team_disks().iter().find(|d| d.id == id)?;
-                    Path::new(mp).join(&d.folder)
-                }
-            };
-            Some(base.join(&restored.path).display().to_string())
-        });
-        Ok(RestoredView {
-            restored,
-            finder_path,
+        let ids: Vec<&str> = ids.iter().map(String::as_str).collect();
+        let report = engine::restore(&self.engine, disk, &ids)?;
+        Ok(RestoreView {
+            restored: report
+                .restored
+                .into_iter()
+                .map(|restored| RestoredView {
+                    finder_path: self.finder_path(restored.disk.as_deref(), &restored.path),
+                    restored,
+                })
+                .collect(),
+            failed: report.failed,
         })
+    }
+
+    /// Where a path of a disk is on this Mac, while the disk is mounted.
+    pub fn finder_path(&self, disk: Option<&str>, path: &str) -> Option<String> {
+        let inner = self.lock();
+        let r = inner.report.as_ref().and_then(|r| r.as_ref().ok())?;
+        let mp = r.mount_point.as_deref()?;
+        let base = match disk {
+            None => PathBuf::from(mp),
+            Some(id) => {
+                let d = r.team_disks().iter().find(|d| d.id == id)?;
+                Path::new(mp).join(&d.folder)
+            }
+        };
+        Some(base.join(path).display().to_string())
     }
 
     /// Starts a job: the bundled install, `floppy start|stop|setup`, or
@@ -1116,7 +1133,7 @@ mod tests {
             &format!(
                 r#"case "$1 $2" in
   "status --json") echo '{status}' ;;
-  "trash restore") echo "{{\"disk\": \"$3\", \"path\": \"Cantine/clip (ripristinato).mov\", \"name\": \"clip (ripristinato).mov\", \"renamed\": true, \"moved\": false}}" ;;
+  "trash restore") echo "{{\"restored\": [{{\"id\": \"$4\", \"disk\": \"$3\", \"path\": \"Cantine/clip (ripristinato).mov\", \"name\": \"clip (ripristinato).mov\", \"renamed\": true, \"moved\": false}}], \"failed\": []}}" ;;
   "trash ") sleep 0.3; echo '{{"disks": []}}' ;;
   *) exit 2 ;;
 esac"#
@@ -1124,15 +1141,20 @@ esac"#
         );
         let (core, _) = core_with(bin);
         core.refresh();
-        let r = core.restore(Some("0192-a"), "2026-10-19-07/1-2").unwrap();
-        assert!(r.restored.renamed);
+        let r = core
+            .restore(Some("0192-a"), &["2026-10-19-07/1-2".into()])
+            .unwrap();
+        assert!(r.restored[0].restored.renamed);
         assert_eq!(
-            r.finder_path.as_deref(),
+            r.restored[0].finder_path.as_deref(),
             Some("/Volumes/Floppy/Archivio 2025/Cantine/clip (ripristinato).mov")
         );
         // A disk the status does not list has no Finder path, not a wrong one.
         assert_eq!(
-            core.restore(Some("other"), "h/1-2").unwrap().finder_path,
+            core.restore(Some("other"), &["h/1-2".into()])
+                .unwrap()
+                .restored[0]
+                .finder_path,
             None
         );
         assert_eq!(core.trash().unwrap().disks, vec![]);
@@ -1151,7 +1173,10 @@ esac"#
         core.refresh();
         core.run_job(JobKind::Stop, None).unwrap();
         assert_eq!(core.trash(), Err(CoreError::Busy));
-        assert_eq!(core.restore(None, "h/1-2").unwrap_err(), CoreError::Busy);
+        assert_eq!(
+            core.restore(None, &["h/1-2".into()]).unwrap_err(),
+            CoreError::Busy
+        );
         wait_idle(&core);
     }
 

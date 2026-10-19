@@ -500,9 +500,11 @@ pub enum TrashKind {
     Folder,
 }
 
-/// What `floppy trash restore` prints: where the entry is now.
+/// An entry `floppy trash restore` put back: where it is now.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct Restored {
+    /// The trash entry it was.
+    pub id: String,
     pub disk: Option<String>,
     /// Relative to the disk.
     pub path: String,
@@ -511,6 +513,21 @@ pub struct Restored {
     pub renamed: bool,
     /// Its folder was gone: it came back at the top of the disk.
     pub moved: bool,
+}
+
+/// An entry `floppy trash restore` could not put back.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+pub struct RestoreFailure {
+    pub id: String,
+    /// The VM's reason, `not in the trash` for an entry already gone.
+    pub error: String,
+}
+
+/// What `floppy trash restore` prints: one failed entry does not stop the others.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+pub struct RestoreReport {
+    pub restored: Vec<Restored>,
+    pub failed: Vec<RestoreFailure>,
 }
 
 fn parse_json<T: serde::de::DeserializeOwned>(stdout: &str) -> Result<T, EngineError> {
@@ -526,14 +543,12 @@ pub fn trash(bin: &Path) -> Result<TrashReport, EngineError> {
     parse_json(&done.stdout)
 }
 
-/// Puts a trash entry back, never over a file: `floppy trash restore <disk> <id>`,
-/// with `-` for the single-user volume.
-pub fn restore(bin: &Path, disk: Option<&str>, id: &str) -> Result<Restored, EngineError> {
-    let done = run(
-        bin,
-        &["trash", "restore", disk.unwrap_or("-"), id],
-        RESTORE_TIMEOUT,
-    )?;
+/// Puts trash entries back, never over a file: `floppy trash restore <disk>
+/// <id>...`, with `-` for the single-user volume.
+pub fn restore(bin: &Path, disk: Option<&str>, ids: &[&str]) -> Result<RestoreReport, EngineError> {
+    let mut args = vec!["trash", "restore", disk.unwrap_or("-")];
+    args.extend_from_slice(ids);
+    let done = run(bin, &args, RESTORE_TIMEOUT)?;
     if !done.status.success() {
         return Err(failed(&done));
     }
@@ -1165,12 +1180,14 @@ echo '{"version":1,"configured":true,"installed":true,"stopped":true,"vm":"stopp
         let bin = fake(
             dir.path(),
             r#"[ "$1 $2" = "trash restore" ] || exit 2
-echo "{\"disk\": $([ "$3" = - ] && echo null || echo "\"$3\""), \"path\": \"Cantine/$4\", \"name\": \"x\", \"renamed\": true, \"moved\": false}""#,
+echo "{\"restored\": [{\"id\": \"$4\", \"disk\": $([ "$3" = - ] && echo null || echo "\"$3\""), \"path\": \"Cantine/$4\", \"name\": \"x\", \"renamed\": true, \"moved\": false}], \"failed\": [{\"id\": \"$5\", \"error\": \"not in the trash\"}]}""#,
         );
-        let r = restore(&bin, Some("progetti"), "2026-10-19-07/1-2").unwrap();
-        assert_eq!(r.disk.as_deref(), Some("progetti"));
-        assert_eq!(r.path, "Cantine/2026-10-19-07/1-2");
-        assert_eq!(restore(&bin, None, "h/1-2").unwrap().disk, None);
+        let r = restore(&bin, Some("progetti"), &["2026-10-19-07/1-2", "h/3-4"]).unwrap();
+        assert_eq!(r.restored[0].disk.as_deref(), Some("progetti"));
+        assert_eq!(r.restored[0].path, "Cantine/2026-10-19-07/1-2");
+        assert_eq!(r.failed[0].id, "h/3-4");
+        let single = restore(&bin, None, &["h/1-2"]).unwrap();
+        assert_eq!(single.restored[0].disk, None);
     }
 
     #[test]
@@ -1181,7 +1198,7 @@ echo "{\"disk\": $([ "$3" = - ] && echo null || echo "\"$3\""), \"path\": \"Cant
             "echo 'floppy-activity: the disk is read-only on this Mac: x' >&2; exit 1",
         );
         assert_eq!(
-            restore(&bin, Some("archivio"), "h/1-2").unwrap_err(),
+            restore(&bin, Some("archivio"), &["h/1-2"]).unwrap_err(),
             EngineError::Failed("floppy-activity: the disk is read-only on this Mac: x".into())
         );
     }

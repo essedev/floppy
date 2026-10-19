@@ -760,34 +760,45 @@ cmd_free() {
   in_vm sudo fstrim / >/dev/null
 }
 
-# What this Mac did on its disks and the files it holds open for writing, JSON
-# out, from the VM's floppy-activity (DECISIONS #27).
+# What this Mac did on its disks, the files it is writing and those it has
+# open, JSON out, from the VM's floppy-activity (DECISIONS #27); and undoing a
+# rename, with the event's {"path", "to"} on stdin: paths never travel as
+# arguments, which reach the VM through a shell.
 cmd_activity() {
-  local a
+  local a body disk_re='^(-|[a-z0-9][a-z0-9-]{0,62})$'
+  if [ "${1:-}" = rename-back ]; then
+    [ $# -eq 2 ] && [[ $2 =~ $disk_re ]] \
+      || die "usage: floppy activity rename-back <disk id or -> (the event on stdin)"
+    # Read before anything runs in the VM: limactl shell would eat stdin.
+    body=$(head -c 65536)
+    printf '%s' "$body" | in_vm sudo /usr/local/sbin/floppy-activity rename-back "$2"
+    return
+  fi
   for a in "$@"; do
     case "$a" in
       --after|--limit) ;;
-      ''|*[!0-9]*) die "usage: floppy activity [--after ID] [--limit N]" ;;
+      ''|*[!0-9]*) die "usage: floppy activity [--after ID] [--limit N] | rename-back <disk>" ;;
     esac
   done
   in_vm sudo /usr/local/sbin/floppy-activity list "$@"
 }
 
-# Each mounted disk's trash, JSON out, and putting one entry back where it was
+# Each mounted disk's trash, JSON out, and putting entries back where they were
 # under a free name (DECISIONS #27). An entry is named by hour and inodes, never
 # by its file name: arguments reach the VM through a shell.
 cmd_trash() {
   # In variables: bash 3.2 misreads a regex with "|" written inside [[ ]].
   local disk_re='^(-|[a-z0-9][a-z0-9-]{0,62})$'
   local entry_re='^[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{2}/[0-9]+-[0-9]+$'
+  local usage="usage: floppy trash [restore <disk id or -> <entry id>...]" id
   case "${1:-}" in
     '') in_vm sudo /usr/local/sbin/floppy-activity trash ;;
     restore)
-      [ $# -eq 3 ] && [[ $2 =~ $disk_re ]] && [[ $3 =~ $entry_re ]] \
-        || die "usage: floppy trash restore <disk id or -> <entry id>"
-      in_vm sudo /usr/local/sbin/floppy-activity restore "$2" "$3"
+      [ $# -ge 3 ] && [[ $2 =~ $disk_re ]] || die "$usage"
+      for id in "${@:3}"; do [[ $id =~ $entry_re ]] || die "$usage"; done
+      in_vm sudo /usr/local/sbin/floppy-activity restore "${@:2}"
       ;;
-    *) die "usage: floppy trash [restore <disk id or -> <entry id>]" ;;
+    *) die "$usage" ;;
   esac
 }
 

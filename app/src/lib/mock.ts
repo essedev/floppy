@@ -10,7 +10,7 @@
  */
 
 import type { Backend } from "@/lib/backend";
-import type { AuthView, DiskStatus, DiskView, Folder, Notice, Restored, SetupProgress, TeamView, TrashEntry, TrashReport } from "@/lib/types";
+import type { AuthView, DiskStatus, DiskView, Folder, Notice, RestoreResult, SetupProgress, TeamView, TrashEntry, TrashReport } from "@/lib/types";
 
 const params = new URLSearchParams(globalThis.location?.search ?? "");
 const scenario = params.get("scenario") ?? "connected";
@@ -355,15 +355,24 @@ export const mockBackend: Backend = {
     new Promise<TrashReport>((resolve, reject) =>
       later(400, () => (scenario === "trash_error" ? reject({ code: "engine", message: "the VM is not responding" }) : resolve(trashReport()))),
     ),
-  restoreTrash: (disk, id) =>
-    new Promise<Restored>((resolve, reject) =>
+  restoreTrash: (disk, ids) =>
+    new Promise<RestoreResult>((resolve, reject) =>
       later(600, () => {
         const d = TRASH.disks.find((x) => x.disk === disk);
-        const e = d?.entries.find((x) => x.id === id);
-        if (!d || !e) return reject({ code: "engine", message: "floppy-activity: not in the trash: " + id });
-        const name = e.replaced ? e.name.replace(/(\.[^.]+)?$/, " (ripristinato)$1") : e.name;
-        const dir = e.from ?? "";
-        resolve({ disk, path: dir ? `${dir}/${name}` : name, name, renamed: e.replaced, moved: e.from === null, finder_path: `/Volumes/Floppy/${d.folder}/${dir}` });
+        if (!d) return reject({ code: "engine", message: "floppy-activity: disk " + disk + " is not mounted" });
+        const out: RestoreResult = { restored: [], failed: [] };
+        for (const id of ids) {
+          const e = d.entries.find((x) => x.id === id);
+          if (!e) {
+            out.failed.push({ id, error: "not in the trash" });
+            continue;
+          }
+          const name = e.replaced ? e.name.replace(/(\.[^.]+)?$/, " (ripristinato)$1") : e.name;
+          const dir = e.from ?? "";
+          const path = dir ? `${dir}/${name}` : name;
+          out.restored.push({ id, disk, path, name, renamed: e.replaced, moved: e.from === null, finder_path: `/Volumes/Floppy/${d.folder}/${path}` });
+        }
+        resolve(out);
       }),
     ),
   openTrash: async () => {},
