@@ -28,9 +28,14 @@ VM, the disks in the Finder, the app's Core and Account, the admin web in Chrome
      whose undo gives the folder its name back and reaches the colleague as an event; the
      trash says who deleted a file and puts it back; a folder deleted from the Mac becomes a
      notice whose undo restores it; opening a file the colleague is still copying warns, and
-     its end too; a colleague's file appears at once in an open Finder window, which a control
-     without floppy-notify shows it does not do by itself;
+     its end too;
   6. the admin lowers A to read in the web: after the apply a write on A fails;
+  6b. after the access steps, since a Finder window holds its folder for minutes and a remount
+     waits for it: a colleague's file appears in an open Finder window, against a control
+     without floppy-notify; then an engine update under the mounted disk (`floppy setup`,
+     which restarts Samba in the VM) with a file open for reading and the window open: the
+     same mount point, the open file reads on, the listing is right, and the window still
+     shows a colleague's new file;
   7. the admin revokes the member's device in the web: the disks are cleared, nothing is left
      in the VM, the share is unmounted; any other install's share is still mounted.
 
@@ -486,7 +491,7 @@ def key_on_the_mac(store: dict[str, str], device: "Device") -> list[str]:
 
 
 def activity_steps(device: "Device", second: dict, disk_id: str, mac: str, mnt: str, tag: str,
-                   person: dict) -> None:
+                   person: dict) -> "Colleague":
     """Steps s09b to s09g: everything of DECISIONS #27 and #28 with two devices on disk A."""
     colleague = Colleague(second["token"], disk_id, mnt, tag)
     member = person["name"] or person["email"]
@@ -587,6 +592,14 @@ def activity_steps(device: "Device", second: dict, disk_id: str, mac: str, mnt: 
            arriving is not None and arrived is not None, time.monotonic() - t,
            f"{arriving} then {arrived}")
 
+    return colleague
+
+
+def finder_step(colleague: "Colleague", mac: str, mnt: str, tag: str) -> None:
+    """Step s13: a colleague's file in an open Finder window, with a control without floppy-notify.
+    After the access steps: the Mac holds a folder for minutes after its window closes (178 s and
+    more than 300 s measured), and a remount waits for it."""
+    live = f"Live {tag}"
     # A colleague's file in an open Finder window: with floppy-notify, and a control without it.
     t = time.monotonic()
     window = f"{mac}/{live}"
@@ -609,21 +622,70 @@ def activity_steps(device: "Device", second: dict, disk_id: str, mac: str, mnt: 
             time.sleep(0.5)
             if capture(win, "notify-after") != before:
                 shown = time.monotonic() - w
-        record("s09g a colleague's file appears in an open Finder window at once",
+        record("s13 a colleague's file appears in an open Finder window at once",
                shown is not None and not control, time.monotonic() - t,
                f"the window changed {shown:.1f} s after the colleague's file" if shown is not None else
                "the window never changed in 20 s", )
-        record("s09g' without floppy-notify the window stays as it was (the control)", not control, 0,
+        record("s13' without floppy-notify the window stays as it was (the control)", not control, 0,
                "it changed by itself: the Finder refreshed without a notification" if control else
                f"unchanged 15 s after the colleague's control file; images in {STATE}/e2e-finder-*.png")
     finally:
         close_finder_window(window)
-    # The Mac lets the folder go some time after the window closed; a remount waits for it.
+
+
+def update_step(colleague: "Colleague", mount: str, mac: str, mnt: str, tag: str) -> None:
+    """Step s14: `floppy setup` under the mounted disk, as an update of the app runs it; the files
+    come from the colleague, since A is read-only for the member by then."""
     t = time.monotonic()
-    folder_open = f"{os.path.basename(mac)}/{live}"
-    released = wait_quietly(lambda: folder_open not in in_vm("smbstatus -L 2>/dev/null; true"), 300, 5)
-    record("s09h the Mac lets the folder go after its Finder window closed", released, time.monotonic() - t,
-           f"after {time.monotonic() - t:.0f} s" if released else "still open after 300 s")
+    folder = f"{mac}/Aggiornamento {tag}"
+    out = colleague.sh(f"mkdir -p '{mnt}/Aggiornamento {tag}' && cd '{mnt}/Aggiornamento {tag}' && "
+                       "head -c 16777216 /dev/urandom > aperto.mov && for i in 0 1 2; do echo x > clip-$i.mov; done && "
+                       "sha256sum aperto.mov | cut -d' ' -f1")
+    digest = out.stdout.strip().splitlines()[-1] if out.returncode == 0 else ""
+    wait("the colleague's files on the Mac", lambda: os.path.exists(f"{folder}/clip-2.mov"), 30)
+    held = open(f"{folder}/aperto.mov", "rb")
+    first = held.read(4 * 1024 * 1024)
+    run("/usr/bin/open", folder)
+    notes, ok = [], True
+    try:
+        win = wait("the Finder window", lambda: finder_window(folder), 20)
+        time.sleep(3)
+        capture(win, "update-before")
+        out = run(ENGINE, "setup", env=engine_env(), check=False, timeout=900)
+        ok &= out.returncode == 0
+        notes.append(f"setup exit {out.returncode} in {time.monotonic() - t:.0f} s")
+        after = engine_status()
+        same = after.get("mount_point") == mount and mounted_at(mount)
+        ok &= same
+        notes.append(f"mount point {after.get('mount_point')}")
+        try:
+            rest = held.read()
+            reads = hashlib.sha256(first + rest).hexdigest() == digest
+        except OSError as e:
+            reads = False
+            notes.append(f"the open file: {errno.errorcode.get(e.errno, e.errno)}")
+        ok &= reads
+        notes.append("the open file reads on" if reads else "the open file broke")
+        listed = sorted(os.listdir(folder))
+        want = ["aperto.mov", "clip-0.mov", "clip-1.mov", "clip-2.mov"]
+        ok &= listed == want
+        notes.append(f"listing {listed}")
+        time.sleep(5)  # floppy-notify back up, reading the watched folders
+        before = capture(win, "update-after")
+        colleague.sh(f"echo dopo > '{mnt}/Aggiornamento {tag}/collega-dopo.txt'")
+        w, shown = time.monotonic(), None
+        while time.monotonic() - w < 20 and shown is None:
+            time.sleep(0.5)
+            if capture(win, "update-colleague") != before:
+                shown = time.monotonic() - w
+        ok &= shown is not None
+        notes.append(f"a colleague's file in the window after {shown:.1f} s" if shown is not None
+                     else "a colleague's file never reached the window")
+    finally:
+        held.close()
+        close_finder_window(folder)
+    record("s14 an engine update under the mounted disk: same mount, open file, listing, Finder window",
+           ok, time.monotonic() - t, "; ".join(notes) + f"; images in {STATE}/e2e-finder-update-*.png")
 
 
 def wait_quietly(predicate, limit: float, every: float) -> bool:
@@ -650,6 +712,7 @@ def main() -> int:
     member = f"membro-{tag.lower()}@floppy.test"
     device: Device | None = None
     second: dict | None = None
+    colleague: Colleague | None = None
     others = smb_shares()  # other installs' shares: they must outlive the run
     t0 = time.monotonic()
     with sync_playwright() as p:
@@ -821,7 +884,9 @@ def main() -> int:
 
             # 5b. The disk's activity, the colleague's changes, the notices and their undo.
             if seen == [digest]:
-                activity_steps(device, second, ids[disk_a], f"{mount}/{disk_a}", f"/mnt/{tag}", tag, person)
+                colleague = activity_steps(device, second, ids[disk_a], f"{mount}/{disk_a}", f"/mnt/{tag}", tag,
+                                           person)
+
 
             if store is not None:
                 # 5. Manual: the format on the bucket, the signature, where the key went.
@@ -882,6 +947,11 @@ def main() -> int:
             record("s11 A lowered to read in the web: after the apply a write on A fails",
                    err is not None and still, time.monotonic() - t,
                    f"remounted read-only after {remounted:.0f} s, errno {err or 'none'}, the file still reads")
+
+            # 6b. The Finder steps, now that no remount waits for the folders a window holds.
+            if colleague is not None:
+                finder_step(colleague, f"{mount}/{disk_a}", f"/mnt/{tag}", tag)
+                update_step(colleague, mount, f"{mount}/{disk_a}", f"/mnt/{tag}", tag)
 
             # 7. The member's device revoked, in the web.
             t = time.monotonic()
