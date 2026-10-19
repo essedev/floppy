@@ -181,6 +181,8 @@ class Store(unittest.TestCase):
                 db.executemany(sql, r)  # a replay of the same lines
             first = fa.list_events(0, 5)
             self.assertEqual(len(first["events"]), 5)
+            # Ids start at the creation time in milliseconds, never at 1.
+            self.assertGreater(first["events"][0]["id"], 1_700_000_000_000)
             rest = fa.list_events(first["last"], 1000)
             self.assertEqual(len(rest["events"]), len(r) - 5)
             self.assertEqual(

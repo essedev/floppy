@@ -344,7 +344,7 @@ def connect() -> sqlite3.Connection:
     db.executescript(
         """
         CREATE TABLE IF NOT EXISTS events (
-          id INTEGER PRIMARY KEY, at REAL NOT NULL, disk TEXT, op TEXT NOT NULL,
+          id INTEGER PRIMARY KEY AUTOINCREMENT, at REAL NOT NULL, disk TEXT, op TEXT NOT NULL,
           kind TEXT NOT NULL, path TEXT NOT NULL, dest TEXT, size INTEGER,
           UNIQUE (at, op, path));
         CREATE TABLE IF NOT EXISTS position (log TEXT PRIMARY KEY, inode INTEGER, offset INTEGER);
@@ -353,6 +353,14 @@ def connect() -> sqlite3.Connection:
           since REAL NOT NULL);
         """
     )
+    # Ids start at the time of creation in milliseconds and never go back: the app and
+    # the control plane know an event by its id, and a VM made again must not reuse one.
+    with db:
+        db.execute(
+            "INSERT INTO sqlite_sequence (name, seq) SELECT 'events', ?"
+            " WHERE NOT EXISTS (SELECT 1 FROM sqlite_sequence WHERE name = 'events')",
+            (int(time.time() * 1000),),
+        )
     return db
 
 
