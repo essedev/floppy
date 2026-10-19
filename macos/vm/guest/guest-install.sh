@@ -16,6 +16,10 @@ JUICEFS_VERSION=1.4.1
 PACKAGES=(samba samba-vfs-modules fuse3 valkey-server jq python3 python3-samba)
 
 export DEBIAN_FRONTEND=noninteractive
+# Restarting Samba breaks every file the Mac holds open (CapCut's clips read EIO): only when
+# its configuration or its package changed, or it is not running.
+samba_changed=false
+cmp -s smb.conf /etc/samba/smb.conf || samba_changed=true
 if ! command -v smbd >/dev/null || ! command -v fusermount3 >/dev/null \
     || ! command -v valkey-server >/dev/null || ! command -v jq >/dev/null \
     || ! command -v python3 >/dev/null || ! python3 -c 'import samba.messaging' 2>/dev/null; then
@@ -41,7 +45,14 @@ if ! command -v smbd >/dev/null || ! command -v fusermount3 >/dev/null \
     apt-get update -q
     apt-get install -y -q --no-install-recommends "${PACKAGES[@]}" ca-certificates
   fi
+  samba_changed=true
 fi
+# smbd itself, after the services that follow it are back.
+restart_samba() {
+  if [ "$samba_changed" = true ] || ! systemctl is-active --quiet smbd; then
+    systemctl restart smbd
+  fi
+}
 
 # The package ships the patched JuiceFS (spike/juicefs-replica, checked by
 # scripts/package.sh): there is no release of it to download, and the upstream
@@ -114,4 +125,5 @@ if [ "$(lsattr -d /mnt/drive | cut -c5)" != i ]; then
 fi
 systemctl daemon-reload
 systemctl enable smbd floppy-activity floppy-notify
-systemctl restart smbd floppy-activity floppy-notify
+restart_samba
+systemctl restart floppy-activity floppy-notify
