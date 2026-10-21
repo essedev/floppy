@@ -38,6 +38,7 @@ import {
   type KeyStatus,
   type KeyWindowReason,
   type MetadataHealth,
+  type MyDisk,
   type Person,
   type Rotation,
   type Session,
@@ -811,6 +812,15 @@ export const fakeApi: Api = {
       putAccess(disk, person, access, me)
       save()
       return { diskId, personId, access, applied: applied(accessRow(diskId, personId)) }
+    },
+    async mine() {
+      await latency()
+      const me = requireUser()
+      advance()
+      return db.disks.flatMap((d): MyDisk[] => {
+        const access = accessOf(d.id, me.id)
+        return d.state === 'ready' && access !== 'none' ? [{ id: d.id, name: d.name, access }] : []
+      })
     },
   },
 

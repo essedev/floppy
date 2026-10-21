@@ -9,6 +9,7 @@ export const queryKeys = {
   devices: ['devices'] as const,
   disks: ['disks'] as const,
   access: ['access'] as const,
+  myDisks: ['access', 'mine'] as const,
   key: ['key'] as const,
   rotation: (id: string) => ['key', 'rotation', id] as const,
   audit: (q: Omit<AuditQuery, 'cursor'>) => ['audit', q] as const,

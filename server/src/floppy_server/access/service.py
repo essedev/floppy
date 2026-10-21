@@ -70,6 +70,14 @@ class DiskEntry(CamelModel):
     access: AccessLevel
 
 
+class MyDiskOut(CamelModel):
+    """A disk the signed-in person sees, with their access: what their start page lists."""
+
+    id: UUID
+    name: str
+    access: Literal["read", "write"]
+
+
 class SetAccessRequest(CamelModel):
     """The new access."""
 
@@ -539,6 +547,30 @@ async def list_access(ctx: Context, organization_id: UUID) -> list[DiskAccessOut
         )
         for volume_id, membership_id, user_id, access in rows
     ]
+
+
+async def my_disks(ctx: Context, actor: Actor) -> list[MyDiskOut]:
+    """The ready disks the person may read or write, in creation order."""
+    async with ctx.sessions() as db:
+        rows = (
+            await db.execute(
+                select(Volume.id, Volume.name, DiskAccess.access)
+                .join(
+                    DiskAccess,
+                    (DiskAccess.volume_id == Volume.id)
+                    & (DiskAccess.organization_id == Volume.organization_id),
+                )
+                .where(
+                    Volume.organization_id == actor.organization_id,
+                    DiskAccess.membership_id == actor.membership_id,
+                    DiskAccess.access.in_(("read", "write")),
+                    Volume.state == "ready",
+                    Volume.deleted_at.is_(None),
+                )
+                .order_by(Volume.created_at)
+            )
+        ).all()
+    return [MyDiskOut(id=v, name=name, access=access) for v, name, access in rows]
 
 
 async def set_access(

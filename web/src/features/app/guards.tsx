@@ -1,6 +1,6 @@
 /*
   Route guards: signed-in pages need a session, admin pages an admin. A member who opens an
-  admin address lands on their own devices (DECISIONS #12).
+  admin address lands on their start page (DECISIONS #12).
 */
 
 import { Navigate, Outlet, useLocation } from 'react-router'
@@ -47,10 +47,10 @@ export function RequireSession() {
   return <Outlet />
 }
 
-/** Renders its routes for admins; members go to their devices. */
+/** Renders its routes for admins; members go to their start page. */
 export function RequireAdmin() {
   const session = useSession()
-  if (session.data?.role !== 'admin') return <Navigate to="/dispositivi" replace />
+  if (session.data?.role !== 'admin') return <Navigate to="/" replace />
   return <Outlet />
 }
 

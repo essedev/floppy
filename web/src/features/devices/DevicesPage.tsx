@@ -119,7 +119,16 @@ export function DevicesPage() {
               }
             />
           ) : (
-            <EmptyState art={<Faceplate state="off" />} title={t.devices.emptyMemberTitle} body={t.devices.emptyMemberBody} />
+            <EmptyState
+              art={<Faceplate state="off" />}
+              title={t.devices.emptyMemberTitle}
+              body={t.devices.emptyMemberBody}
+              action={
+                <Link to="/" className="inline-flex h-10 items-center rounded-[11px] bg-ink px-4 text-sm font-semibold text-surface no-underline hover:opacity-90">
+                  {t.devices.emptyMemberAction}
+                </Link>
+              }
+            />
           )
         }
       >

@@ -1,10 +1,11 @@
-/* The two small pages of the router: the home redirect and "not found". */
+/* The two small pages of the router: the home page by role and "not found". */
 
-import { Link, Navigate } from 'react-router'
+import { Link } from 'react-router'
 import { EmptyState } from '@/components/states'
 import { useI18n } from '@/i18n'
 import { useSession } from '@/features/auth/hooks'
 import { OverviewPage } from '@/features/overview/OverviewPage'
+import { StartPage } from '@/features/start/StartPage'
 
 /** An address that leads nowhere. */
 export function NotFound() {
@@ -22,8 +23,8 @@ export function NotFound() {
   )
 }
 
-/** The overview for admins; members have only their devices. */
+/** The overview for admins; for members the start page, with the install steps and their disks. */
 export function Home() {
   const session = useSession()
-  return session.data?.role === 'admin' ? <OverviewPage /> : <Navigate to="/dispositivi" replace />
+  return session.data?.role === 'admin' ? <OverviewPage /> : <StartPage />
 }

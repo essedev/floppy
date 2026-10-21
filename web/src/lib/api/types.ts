@@ -140,6 +140,13 @@ export interface DiskAccess {
   applied: boolean
 }
 
+/** GET /access/mine: a ready disk the signed-in person may read or write, for anyone. */
+export interface MyDisk {
+  id: string
+  name: string
+  access: Exclude<AccessLevel, 'none'>
+}
+
 /** PUT /disks/{diskId}/access/{personId}. Lowering to `none` in manual mode opens that disk's
  * key window when one of the person's devices could see it. */
 export interface SetAccessRequest {

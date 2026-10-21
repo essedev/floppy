@@ -1,10 +1,10 @@
 /*
   The signed-in layout (concept-e-admin, DECISIONS #12): a left sidebar with the wordmark, the
-  organization, the sections and the person; the page on the right. Members see only their
-  own devices. On a narrow screen the sidebar folds into a bar on top.
+  organization, the sections and the person; the page on the right. Members see their start
+  page and their own devices. On a narrow screen the sidebar folds into a bar on top.
 */
 
-import { FolderLock, HardDrive, KeyRound, LaptopMinimal, LayoutGrid, LogOut, Monitor, Moon, ScrollText, SlidersHorizontal, Sun, Users, type LucideIcon } from 'lucide-react'
+import { FolderLock, HardDrive, House, KeyRound, LaptopMinimal, LayoutGrid, LogOut, Monitor, Moon, ScrollText, SlidersHorizontal, Sun, Users, type LucideIcon } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router'
 import { IconButton } from '@/components/Button'
@@ -86,7 +86,10 @@ export function AppShell() {
                 <NavItem to="/impostazioni" icon={SlidersHorizontal} label={t.nav.settings} />
               </>
             ) : (
-              <NavItem to="/dispositivi" icon={LaptopMinimal} label={t.nav.myDevices} />
+              <>
+                <NavItem to="/" end icon={House} label={t.nav.start} />
+                <NavItem to="/dispositivi" icon={LaptopMinimal} label={t.nav.myDevices} />
+              </>
             )}
           </nav>
           <div className="mt-auto flex items-center gap-2.5 px-2.5 pt-3 max-md:hidden">

@@ -4,4 +4,6 @@
 export const brand = {
   name: 'Floppy',
   wordmark: 'floppy',
+  /** What `brew install --cask` takes, as on the site (site/src/brand.ts, DECISIONS #10). */
+  caskRef: 'essedev/floppy/floppy',
 }

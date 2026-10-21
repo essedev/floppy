@@ -1,6 +1,6 @@
 /*
   What an admin sees on opening the site (concept-e-admin, "Panoramica"): the key reminder,
-  the disks, the services as the control plane sees them, the devices connected now and the
+  the install steps while none of the admin's own Macs is connected, the disks, the services as the control plane sees them, the devices connected now and the
   latest activity. Each panel loads and fails on its own.
 */
 
@@ -20,6 +20,8 @@ import { DiskState } from '@/features/disks/DiskState'
 import { useDisks } from '@/features/disks/hooks'
 import { KeyNotice } from '@/features/key/KeyNotice'
 import { useDevices } from '@/features/devices/hooks'
+import { InstallSteps } from '@/features/start/InstallSteps'
+import { ownLive } from '@/features/start/hooks'
 import { useHealth } from '@/features/settings/hooks'
 
 const linkClass = 'inline-flex h-10 items-center gap-2 rounded-[11px] bg-ink px-4 text-sm font-semibold text-surface no-underline hover:opacity-90'
@@ -244,6 +246,19 @@ function OverviewStale() {
   return <StaleNotice updatedAt={Math.min(...failed.map((q) => q.dataUpdatedAt))} onRetry={() => failed.forEach((q) => void q.refetch())} />
 }
 
+/** The install steps, only while none of the admin's own Macs has access: then it is done. */
+function AdminInstall() {
+  const { t } = useI18n()
+  const session = useCurrentSession()
+  const devices = useDevices()
+  if (!devices.data || ownLive(devices.data, session.user.id).length > 0) return null
+  return (
+    <Well title={t.start.adminInstallTitle} className="mb-3.5">
+      <InstallSteps />
+    </Well>
+  )
+}
+
 /** The overview page. */
 export function OverviewPage() {
   const { t } = useI18n()
@@ -253,6 +268,7 @@ export function OverviewPage() {
       <PageHeader title={t.overview.title} lead={session.organization.name} />
       <OverviewStale />
       <KeyNotice />
+      <AdminInstall />
       <Disks />
       <Services />
       <div className="grid gap-3.5 lg:grid-cols-2">

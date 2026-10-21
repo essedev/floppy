@@ -11,6 +11,7 @@ import type {
   CreateDiskRequest,
   Disk,
   DiskAccess,
+  MyDisk,
   Health,
   InviteRequest,
   KeyStatus,
@@ -95,6 +96,8 @@ export interface Api {
     list(): Promise<DiskAccess[]>
     /** Sets a person's access to a disk, applied live to their devices. */
     set(diskId: string, personId: string, access: AccessLevel): Promise<DiskAccess>
+    /** The ready disks the caller may read or write, for members too. */
+    mine(): Promise<MyDisk[]>
   }
   key: {
     get(): Promise<KeyStatus>

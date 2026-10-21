@@ -55,7 +55,7 @@ A Valkey replica copies its whole instance, so every disk has its own Valkey ins
 
 ## 12. App and onboarding behavior
 
-**Active, 17/10/2026.** The panel puts the state first with one large action; "Turn off" instead of "Eject"; a full cache frees the least recently used blocks with a warning; automatic reconnection every 30 s; Settings in their own window. First run in a dedicated window; sign-in in the browser with a magic link and a 6-digit code as fallback. The admin web uses a left sidebar; removing a person leaves a persistent "change the key" reminder; members see only their own Macs. Concepts: [concept-d-onboarding](concepts/concept-d-onboarding.html), [concept-e-admin](concepts/concept-e-admin.html).
+**Active, 17/10/2026.** The panel puts the state first with one large action; "Turn off" instead of "Eject"; a full cache frees the least recently used blocks with a warning; automatic reconnection every 30 s; Settings in their own window. First run in a dedicated window; sign-in in the browser with a magic link and a 6-digit code as fallback. The admin web uses a left sidebar; removing a person leaves a persistent "change the key" reminder; members see only their own Macs, plus (since 21/10/2026) a start page with the install steps, this server's address to type in the app and the disks they see: the invitation mail leads there, since the released app does not know a self-hosted team's address. Concepts: [concept-d-onboarding](concepts/concept-d-onboarding.html), [concept-e-admin](concepts/concept-e-admin.html).
 **Ruled out:** the projects-first and Finder-like panels, Eject, blocking a project when the cache is full, sign-in inside the menu bar panel.
 
 ## 13. Website with Astro and Starlight

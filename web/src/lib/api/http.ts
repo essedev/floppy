@@ -88,6 +88,7 @@ export const httpApi: Api = {
   access: {
     list: () => request('GET', '/access'),
     set: (diskId, personId, access) => request('PUT', `/disks/${id(diskId)}/access/${id(personId)}`, { access }),
+    mine: () => request('GET', '/access/mine'),
   },
   key: {
     get: () => request('GET', '/key'),

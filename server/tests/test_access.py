@@ -295,3 +295,30 @@ async def test_admins_list_access_members_do_not(
         json={"access": "admin"},
     )
     assert bad.status_code == 422
+
+
+async def test_my_disks_lists_only_what_the_person_sees(
+    org: Org, ctx: Context, admin: httpx.AsyncClient, clients: ClientFactory
+) -> None:
+    member = clients()
+    marco = await invite_and_join(admin, member, ctx, "marco@studio-a.test")
+    progetti = await create_disk(admin, ctx, "Progetti")
+    archivio = await create_disk(admin, ctx, "Archivio")
+    await create_disk(admin, ctx, "Nascosto")
+    await set_access(admin, progetti["id"], marco["id"], "read")
+    await set_access(admin, archivio["id"], marco["id"], "write")
+    response = await member.get("/access/mine")
+    assert response.status_code == 200, response.text
+    assert response.json() == [
+        {"id": progetti["id"], "name": "Progetti", "access": "read"},
+        {"id": archivio["id"], "name": "Archivio", "access": "write"},
+    ]
+    # Lowered to none, the disk leaves the list; the admin sees the disks they created.
+    await set_access(admin, progetti["id"], marco["id"], "none")
+    assert [d["name"] for d in (await member.get("/access/mine")).json()] == ["Archivio"]
+    assert [d["name"] for d in (await admin.get("/access/mine")).json()] == [
+        "Progetti",
+        "Archivio",
+        "Nascosto",
+    ]
+    assert (await clients().get("/access/mine")).status_code == 401

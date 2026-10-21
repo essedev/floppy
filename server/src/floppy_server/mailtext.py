@@ -131,14 +131,16 @@ def invitation(
             "Hello,\n\n"
             f"{inviter} invited you to {organization} on Floppy, the team's shared disk.\n\n"
             "To join, open this link (valid for 7 days):\n\n"
-            f"{url}\n"
+            f"{url}\n\n"
+            "The page then shows how to install the Floppy app on your Mac.\n"
         )
         return Mail(to=to, subject=f"Floppy · {organization}: you are invited", text=text)
     text = (
         "Ciao,\n\n"
         f"{inviter} ti ha invitato in {organization} su Floppy, il disco condiviso del team.\n\n"
         "Per entrare apri questo link (vale 7 giorni):\n\n"
-        f"{url}\n"
+        f"{url}\n\n"
+        "Poi la pagina ti spiega come installare l'app Floppy sul Mac.\n"
     )
     return Mail(to=to, subject=f"Floppy · {organization}: sei stato invitato", text=text)
 
