@@ -1,10 +1,12 @@
 //! New releases of the app: once a day the app reads its latest release on
 //! GitHub, and the panel offers it. Installing goes through Homebrew, which
 //! tracks the cask (DECISIONS #10): a shell detached from the app runs
-//! `brew upgrade --cask`, which quits this app before replacing it (the cask's
-//! `uninstall quit`), then opens the new one. A failure leaves this app
-//! running, and the shell's log says why. The engine update the new app
-//! brings is offered by the panel as before, and waits for the person.
+//! `brew upgrade --cask`, then ends this app and opens the new one. Homebrew
+//! does not quit the app itself: it sees it runs inside it ("Skipping quitting
+//! application ... as `brew` is running inside it", measured with 0.2.4), and
+//! only replaces the bundle. A failure leaves this app running, and the
+//! shell's log says why. The engine update the new app brings is offered by
+//! the panel as before, and waits for the person.
 
 use serde::Serialize;
 use std::fs::File;
@@ -65,12 +67,18 @@ fn bundle_of(exe: &Path) -> Option<PathBuf> {
     (bundle.extension()? == "app").then(|| bundle.to_path_buf())
 }
 
-/// The shell that updates the app: the tap first, so the new cask is seen,
-/// then the upgrade, then the new app. `brew update` failing on another tap
-/// does not stop it; the upgrade failing leaves this app as it is.
+/// The shell that updates the app, with the brew, the cask, the bundle and
+/// this app's pid as arguments: the tap first, so the new cask is seen, then
+/// the upgrade; only once it succeeded, this app ends (up to 10 s) and the new
+/// bundle opens. `brew update` failing on another tap does not stop it; the
+/// upgrade failing leaves this app as it is.
 pub fn script() -> &'static str {
     r#""$1" update --quiet || true
-HOMEBREW_NO_AUTO_UPDATE=1 "$1" upgrade --cask "$2" && /usr/bin/open "$3""#
+HOMEBREW_NO_AUTO_UPDATE=1 "$1" upgrade --cask "$2" || exit $?
+kill -TERM "$4" 2>/dev/null
+i=0
+while kill -0 "$4" 2>/dev/null && [ "$i" -lt 50 ]; do sleep 0.2; i=$((i + 1)); done
+/usr/bin/open "$3""#
 }
 
 /// Checks for and installs new releases.
@@ -173,6 +181,7 @@ impl Updates {
         let mut child = Command::new("/bin/sh")
             .args(["-c", script(), "sh", brew, CASK])
             .arg(&bundle)
+            .arg(std::process::id().to_string())
             .env("PATH", "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin")
             .env("HOMEBREW_NO_ENV_HINTS", "1")
             .stdin(Stdio::null())
@@ -189,7 +198,7 @@ impl Updates {
         }));
         let me = Arc::clone(self);
         thread::spawn(move || {
-            // On success Homebrew quits this app before the shell ends: still
+            // On success the shell ends this app before it ends itself: still
             // being here when it ends means the app was not replaced.
             let ok = child.wait().is_ok_and(|s| s.success());
             let error = if ok {
@@ -294,9 +303,10 @@ mod tests {
         assert_eq!(u.get().unwrap().state, UpdateState::Installing);
     }
 
-    /// The shell with a fake brew: a failed upgrade does not open the app, a
-    /// failed `brew update` does not stop the upgrade, and the arguments
-    /// arrive whole (paths with spaces).
+    /// The shell with a fake brew: a successful upgrade ends the old app and
+    /// opens the new one, a failed one touches neither, a failed `brew update`
+    /// does not stop the upgrade, and the arguments arrive whole (paths with
+    /// spaces).
     #[test]
     fn the_script_runs_update_then_upgrade_then_open() {
         let dir = tempfile::tempdir().unwrap();
@@ -312,25 +322,42 @@ mod tests {
         )
         .unwrap();
         std::fs::set_permissions(&brew, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
-        // `open` of a path that does not exist fails: the exit status tells
-        // whether the shell got that far.
-        let run = || {
+        // A process standing in for the old app: the shell must end it. `open`
+        // of a path that does not exist fails: the exit status tells whether
+        // the shell got that far.
+        // Detached, as the real app is not the shell's child: a child of the
+        // test would linger unreaped and look alive.
+        let detached = || -> String {
+            let out = Command::new("/bin/sh")
+                .args(["-c", "/bin/sleep 30 >/dev/null 2>&1 & echo $!"])
+                .output()
+                .unwrap();
+            String::from_utf8(out.stdout).unwrap().trim().to_string()
+        };
+        let alive = |pid: &str| Command::new("/bin/kill").args(["-0", pid]).status().unwrap().success();
+        let run = |pid: &str| {
             Command::new("/bin/sh")
                 .args(["-c", script(), "sh"])
                 .arg(&brew)
                 .arg(CASK)
                 .arg(dir.path().join("No Such.app"))
+                .arg(pid)
                 .stderr(Stdio::null())
                 .status()
                 .unwrap()
                 .code()
         };
-        assert_eq!(run(), Some(1), "open ran and failed on the missing app");
+        let app = detached();
+        assert_eq!(run(&app), Some(1), "open ran and failed on the missing app");
+        assert!(!alive(&app), "the old app was ended");
         assert_eq!(
             std::fs::read_to_string(&calls).unwrap(),
             "update --quiet\nupgrade --cask essedev/floppy/floppy\n"
         );
         std::fs::write(dir.path().join("fail"), "").unwrap();
-        assert_eq!(run(), Some(3), "a failed upgrade stops before open");
+        let app = detached();
+        assert_eq!(run(&app), Some(3), "a failed upgrade stops before open");
+        assert!(alive(&app), "a failed upgrade leaves the app running");
+        Command::new("/bin/kill").arg(&app).status().unwrap();
     }
 }
