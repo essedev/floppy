@@ -41,7 +41,7 @@ case "$1" in
   start) log start; echo Running > "$FAKE/status" ;;
   stop) log stop; echo Stopped > "$FAKE/status" ;;
   shell) shift 4; log shell "$*"; [ -f "$FAKE/broken" ] && exit 1; exit 0 ;;
-  *) log "$1" ;;
+  *) log "$*" ;;
 esac
 EOF
 chmod +x "$FLOPPY_HOME/lima/bin/limactl"
