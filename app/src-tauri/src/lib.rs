@@ -139,6 +139,7 @@ pub fn run() {
             commands::dismiss_error,
             commands::list_folders,
             commands::set_disk_enabled,
+            commands::set_cache_size,
             commands::restart_disk,
             commands::open_in_finder,
             commands::reveal_in_finder,

@@ -16,7 +16,7 @@ import { diskLook, teamOf } from "@/features/disk/team";
 import { it } from "@/i18n/it";
 import { backend } from "@/lib/backend";
 import { fillOf, gb, gbUnit } from "@/lib/format";
-import type { AuthView, DiskStatus, DiskView, TeamView } from "@/lib/types";
+import type { AuthView, DiskStatus, DiskView, Space, TeamView } from "@/lib/types";
 
 export function SettingsWindow() {
   const info = useAppInfo();
@@ -61,12 +61,16 @@ export function SettingsWindow() {
       </Group>
 
       <Group title={it.settings.space}>
-        <Row column>
-          <div className="flex items-baseline justify-between gap-3">
-            <Label title={it.settings.maxSpace} line={it.settings.maxSpaceLine} />
-            <span className="font-ro text-[15px] text-ink">{limit != null ? gbUnit(limit) : it.settings.unknown}</span>
-          </div>
-        </Row>
+        {space?.chosen_mb != null ? (
+          <CopiesSetting space={space} />
+        ) : (
+          <Row column>
+            <div className="flex items-baseline justify-between gap-3">
+              <Label title={it.settings.copies} line={it.settings.copiesLine} />
+              <span className="font-ro text-[15px] text-ink">{limit != null ? gbUnit(limit) : it.settings.unknown}</span>
+            </div>
+          </Row>
+        )}
         <Row column>
           <div className="flex items-baseline justify-between gap-3">
             <Label title={it.settings.inUse} line={it.settings.inUseLine(gbUnit(space?.reserve_mb ?? 20480))} />
@@ -254,7 +258,7 @@ function DisksGroup({ status, team }: { status: DiskStatus; team: TeamView }) {
               />
             ) : (
               <Notice led="dl" title={it.team.restart.title}>
-                <span className="block">{it.team.restart.body}</span>
+                <span className="block">{team.restart_reason === "space" ? it.team.restart.bodySpace : it.team.restart.body}</span>
                 <Button
                   size="sm"
                   className="mt-2 bg-raised shadow-[0_0_0_0.5px_rgba(0,0,0,0.12)]"
@@ -269,6 +273,56 @@ function DisksGroup({ status, team }: { status: DiskStatus; team: TeamView }) {
         </div>
       )}
     </Group>
+  );
+}
+
+/** The space chosen for copies (team): steps of 5 GB, saved on demand, since
+ *  each save runs an apply. Lowering frees copies; raising waits for a restart. */
+const STEP_MB = 5120;
+
+function CopiesSetting({ space }: { space: Space }) {
+  const chosen = space.chosen_mb!;
+  const [draft, setDraft] = useState<number | null>(null);
+  const save = useDiskAction<number>((mb) => backend.setCacheSize(mb));
+  const value = draft ?? chosen;
+  // A choice made when the Mac had more room stays reachable downwards.
+  const max = Math.max(space.choice_max_mb ?? chosen, chosen);
+  const changed = draft != null && draft !== chosen;
+  const step = (d: number) => setDraft(Math.min(max, Math.max(STEP_MB, value + d * STEP_MB)));
+  const short = !space.waits_restart && space.target_mb != null && space.target_mb < chosen;
+  return (
+    <Row column>
+      <div className="flex items-start justify-between gap-3">
+        <Label title={it.settings.copies} line={it.settings.copiesLine} />
+        <span className="flex shrink-0 items-center gap-1.5">
+          <Button size="sm" aria-label={it.settings.copiesLess} disabled={value <= STEP_MB || save.isPending} onClick={() => step(-1)}>
+            −
+          </Button>
+          <span className="min-w-[58px] text-center font-ro text-[15px] text-ink">{gbUnit(value)}</span>
+          <Button size="sm" aria-label={it.settings.copiesMore} disabled={value >= max || save.isPending} onClick={() => step(1)}>
+            +
+          </Button>
+        </span>
+      </div>
+      {changed && (
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-[13px] text-ink-2">
+            {value < chosen ? it.settings.copiesLower : value >= max ? it.settings.copiesMax(gbUnit(max)) : it.settings.copiesWait}
+          </span>
+          <Button
+            size="sm"
+            variant="primary"
+            disabled={save.isPending}
+            onClick={() => save.mutate(value, { onSuccess: () => setDraft(null) })}
+          >
+            {it.settings.copiesSave}
+          </Button>
+        </div>
+      )}
+      {!changed && space.waits_restart && <span className="text-[13px] text-ink-2">{it.settings.copiesWait}</span>}
+      {!changed && short && <span className="text-[13px] text-ink-2">{it.settings.copiesShort(gbUnit(space.target_mb!))}</span>}
+      {save.error && <span className="text-[13px] text-ink">{it.errors[save.error.code] ?? save.error.message}</span>}
+    </Row>
   );
 }
 

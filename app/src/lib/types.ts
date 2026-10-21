@@ -67,8 +67,10 @@ export interface TeamView {
   /** `floppy disks apply` (or clear) is running. */
   applying: boolean;
   error: string | null;
-  /** The VM needs more memory for its disks: Floppy has to restart. */
+  /** Floppy has to restart: more memory for the disks, or the space chosen
+   *  for copies is bigger than what the disk runs with. */
   restart_needed: boolean;
+  restart_reason: "memory" | "space" | null;
   /** The account has disks but this Mac runs the single-user volume. */
   refused_single: boolean;
   /** Disks in use that have stayed failed for a while: the faceplate shows a problem. */
@@ -82,6 +84,13 @@ export interface Space {
   mac_free_mb: number | null;
   reserve_mb: number;
   low: boolean;
+  /** Team: the space for copies chosen (Floppy's pick until changed), the
+   *  most that may be chosen, and what the mounts get now. */
+  chosen_mb: number | null;
+  choice_max_mb: number | null;
+  target_mb: number | null;
+  /** The chosen space waits for a restart of Floppy. */
+  waits_restart: boolean;
 }
 
 /** The running job. */
@@ -194,6 +203,7 @@ export interface CommandError {
     | "no_bundle"
     | "not_team"
     | "no_such_disk"
+    | "cache_size"
     | "not_in_trash"
     | "no_such_notice"
     | "server"

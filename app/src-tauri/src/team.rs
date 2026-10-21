@@ -46,6 +46,11 @@ pub struct DisksFile {
     pub cache_max_mb: u64,
     #[serde(default = "default_reserve")]
     pub reserve_mb: u64,
+    /// The space for copies of files on this Mac, in MB: the person's choice
+    /// in Settings, or Floppy's own pick kept the first time the engine
+    /// reports it (`floppy` cache_target_mb).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_mb: Option<u64>,
     pub disks: Vec<FileDisk>,
 }
 
@@ -170,6 +175,7 @@ pub fn build(
         meta_ca: config.meta_ca.clone(),
         cache_max_mb: previous.map_or(DEFAULT_CACHE_MAX_MB, |p| p.cache_max_mb),
         reserve_mb: previous.map_or(DEFAULT_RESERVE_MB, |p| p.reserve_mb),
+        cache_mb: previous.and_then(|p| p.cache_mb),
         disks,
     };
     (file, rejected)

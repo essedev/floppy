@@ -28,7 +28,7 @@ const look = (over: Partial<DiskView>, applying = false) => diskLook({ ...mounte
 describe("diskLook", () => {
   test("a mounted disk is green, with its local copies", () => {
     expect(look({})).toMatchObject({ led: "ok", blink: false, readout: r.mounted, dim: false });
-    expect(look({}).line).toBe("0,8 GB su questo Mac");
+    expect(look({}).line).toBe("0,8 GB di copie su questo Mac");
     expect(look({ cache_used_mb: 0 }).line).toBe(it.disks.line.mounted);
   });
 
@@ -80,6 +80,7 @@ const team: TeamView = {
   applying: false,
   error: null,
   restart_needed: false,
+  restart_reason: null,
   refused_single: false,
   failing: 0,
 };

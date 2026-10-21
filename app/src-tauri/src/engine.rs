@@ -102,6 +102,22 @@ pub struct EngineReport {
     pub vm_memory_mib: Option<u64>,
     #[serde(default)]
     pub vm_memory_wanted_mib: Option<u64>,
+    /// Team: the space for copies the person chose (`cache_mb` in the disks
+    /// file), Floppy's own pick, the most that may be chosen, and what an
+    /// apply would give the mounts now (`cache_limit_mb` is what they run with).
+    #[serde(default)]
+    pub cache_chosen_mb: Option<u64>,
+    #[serde(default)]
+    pub cache_auto_mb: Option<u64>,
+    #[serde(default)]
+    pub cache_choice_max_mb: Option<u64>,
+    #[serde(default)]
+    pub cache_target_mb: Option<u64>,
+    /// Team: the VM's disk, and the size the chosen space needs.
+    #[serde(default)]
+    pub vm_disk_mb: Option<u64>,
+    #[serde(default)]
+    pub vm_disk_wanted_mb: Option<u64>,
     /// Team: one entry per disk of the disks file; null when the VM is not running.
     #[serde(default)]
     pub disks: Option<Vec<EngineDisk>>,
@@ -241,15 +257,38 @@ impl EngineReport {
         }
     }
 
-    /// The VM runs with less memory than its disks want: `floppy stop` and
-    /// `start` give it the new size (it never changes while running).
-    pub fn restart_needed(&self) -> bool {
-        self.mode == Mode::Team
-            && matches!(
-                (self.vm_memory_mib, self.vm_memory_wanted_mib),
-                (Some(have), Some(want)) if have < want
-            )
+    /// What needs `floppy stop` and `start` to take effect, which the app
+    /// never runs by itself: more memory for the disks (it never changes while
+    /// the VM runs), or more space for copies than the mounts run with or the
+    /// VM's disk holds (a bigger cache would cost a remount, a bigger disk a
+    /// stopped VM).
+    pub fn restart_reason(&self) -> Option<RestartReason> {
+        if self.mode != Mode::Team {
+            return None;
+        }
+        let short = |have: Option<u64>, want: Option<u64>| matches!((have, want), (Some(h), Some(w)) if h < w);
+        if short(self.vm_memory_mib, self.vm_memory_wanted_mib) {
+            Some(RestartReason::Memory)
+        } else if short(self.vm_disk_mb, self.vm_disk_wanted_mb)
+            || (self.cache_limit_mb.is_some_and(|l| l > 0) && short(self.cache_limit_mb, self.cache_target_mb))
+        {
+            Some(RestartReason::Space)
+        } else {
+            None
+        }
     }
+
+    pub fn restart_needed(&self) -> bool {
+        self.restart_reason().is_some()
+    }
+}
+
+/// Why Floppy has to restart; memory first when both apply.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RestartReason {
+    Memory,
+    Space,
 }
 
 /// The VM as Lima reports it, `broken` when it runs but does not answer.
@@ -862,6 +901,13 @@ pub struct Space {
     pub mac_free_mb: Option<u64>,
     pub reserve_mb: u64,
     pub low: bool,
+    /// Team: the space for copies chosen (Floppy's own pick until the person
+    /// changes it), the most that may be chosen, and what the mounts get now.
+    pub chosen_mb: Option<u64>,
+    pub choice_max_mb: Option<u64>,
+    pub target_mb: Option<u64>,
+    /// The chosen space waits for a restart.
+    pub waits_restart: bool,
 }
 
 /// The space figures of a report, with the command's default reserve.
@@ -873,6 +919,10 @@ pub fn space(report: &EngineReport) -> Space {
         mac_free_mb: report.mac_free_mb,
         reserve_mb,
         low: report.mac_free_mb.is_some_and(|f| f < reserve_mb),
+        chosen_mb: report.cache_chosen_mb.or(report.cache_auto_mb),
+        choice_max_mb: report.cache_choice_max_mb,
+        target_mb: report.cache_target_mb,
+        waits_restart: report.restart_reason() == Some(RestartReason::Space),
     }
 }
 
@@ -909,6 +959,12 @@ pub(crate) mod tests {
             mode: Mode::Single,
             vm_memory_mib: None,
             vm_memory_wanted_mib: None,
+            cache_chosen_mb: None,
+            cache_auto_mb: None,
+            cache_choice_max_mb: None,
+            cache_target_mb: None,
+            vm_disk_mb: None,
+            vm_disk_wanted_mb: None,
             disks: None,
         }
     }

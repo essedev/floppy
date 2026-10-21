@@ -16,7 +16,8 @@ use crate::account::credentials::DiskCredentials;
 use crate::account::{MountReport, TeamDisks};
 use crate::engine::{
     self, Access, DiskState, EngineDisk, EngineError, EngineReport, JobKind, MetaMode, Mode,
-    Pending, Problem, Replica, RestoreFailure, Restored, RunState, Space, TrashReport,
+    Pending, Problem, Replica, RestartReason, RestoreFailure, Restored, RunState, Space,
+    TrashReport,
 };
 use crate::installer::{InstallNeed, Installer};
 use crate::team::{self, DisksFile, Rejected};
@@ -35,6 +36,9 @@ pub const RETRY_INTERVAL: Duration = Duration::from_secs(30);
 /// Reading the disk's top folders gives up after this: a dead SMB mount can
 /// hang whoever lists it.
 pub const LIST_TIMEOUT: Duration = Duration::from_secs(3);
+/// The space for copies goes in steps of 5 GB, as the engine rounds it
+/// (`floppy` CACHE_STEP_MB).
+pub const CACHE_STEP_MB: u64 = 5120;
 /// How often `disks apply` runs again while a disk waits for a remount, and
 /// after a failed apply (docs/ARCHITECTURE.md, "Team disks": about a minute).
 pub const APPLY_RETRY: Duration = Duration::from_secs(60);
@@ -99,8 +103,10 @@ pub struct TeamView {
     pub applying: bool,
     /// Why the last apply or clear failed, until one succeeds.
     pub error: Option<String>,
-    /// The VM needs more memory for its disks: Floppy has to restart.
+    /// Floppy has to restart: the VM needs more memory for its disks, or the
+    /// space chosen for copies is bigger than what the disk runs with.
     pub restart_needed: bool,
+    pub restart_reason: Option<RestartReason>,
     /// The account has disks but this Mac runs the single-user volume, which
     /// the team engine refuses to share a VM with.
     pub refused_single: bool,
@@ -210,6 +216,8 @@ pub enum CoreError {
     NotTeam,
     #[error("no such disk on this Mac")]
     NoSuchDisk,
+    #[error("not a space this Mac can give: steps of 5 GB, up to what it can spare")]
+    CacheSize,
     #[error("not in the trash")]
     NotInTrash,
     #[error("no such notice")]
@@ -459,6 +467,7 @@ impl Core {
             applying: t.applying || t.clearing,
             error: t.error.clone(),
             restart_needed: report.is_some_and(EngineReport::restart_needed),
+            restart_reason: report.and_then(EngineReport::restart_reason),
             refused_single: mode == Some(Mode::Single) && t.plan.is_some(),
             failing: reported
                 .iter()
@@ -505,6 +514,7 @@ impl Core {
         inner.checked_ms = now_ms();
         if !inner.team.applying && !inner.team.clearing {
             inner.team.file = team::read(&self.home).ok().flatten();
+            self.keep_cache_pick(&mut inner);
         }
         // A failure lasts until the disk mounts: a unit retrying is reported
         // failed and starting by turns.
@@ -884,6 +894,53 @@ impl Core {
         drop(inner);
         self.wake();
         Ok(())
+    }
+
+    /// Sets the space for copies of files on this Mac (`cache_mb` in the
+    /// disks file), in steps of 5 GB. More than the Mac can spare is refused,
+    /// less is always taken. The next apply gives it to the mounts: a smaller
+    /// one remounts them once they are free, a bigger one waits for a restart.
+    pub fn set_cache_size(&self, mb: u64) -> Result<(), CoreError> {
+        let mut inner = self.lock();
+        if Self::mode(&inner) != Some(Mode::Team) {
+            return Err(CoreError::NotTeam);
+        }
+        let report = inner.report.as_ref().and_then(|r| r.as_ref().ok());
+        let current = report.and_then(|r| r.cache_chosen_mb.or(r.cache_auto_mb));
+        let max = report.and_then(|r| r.cache_choice_max_mb);
+        let fits = max.is_some_and(|m| mb <= m) || current.is_some_and(|c| mb <= c);
+        if mb < CACHE_STEP_MB || !mb.is_multiple_of(CACHE_STEP_MB) || !fits {
+            return Err(CoreError::CacheSize);
+        }
+        let mut file = team::read(&self.home)
+            .map_err(|e| CoreError::Engine(EngineError::Failed(e)))?
+            .ok_or(CoreError::NotTeam)?;
+        file.cache_mb = Some(mb);
+        team::write(&self.home, &file)
+            .map_err(|e| CoreError::Engine(EngineError::Failed(e.to_string())))?;
+        inner.team.file = Some(file);
+        inner.team.dirty = true;
+        inner.team.last_failed = false;
+        self.publish(&mut inner);
+        drop(inner);
+        self.wake();
+        Ok(())
+    }
+
+    /// Keeps Floppy's own pick as the choice the first time the engine
+    /// reports it, so the space shown does not move with the Mac's free space.
+    fn keep_cache_pick(&self, inner: &mut Inner) {
+        let Some(Ok(report)) = inner.report.as_ref() else { return };
+        let (None, Some(pick)) = (report.cache_chosen_mb, report.cache_auto_mb) else { return };
+        let Some(file) = inner.team.file.as_mut() else { return };
+        if file.cache_mb.is_some() || pick < CACHE_STEP_MB {
+            return;
+        }
+        file.cache_mb = Some(pick);
+        if let Err(e) = team::write(&self.home, file) {
+            file.cache_mb = None;
+            inner.team.error = Some(format!("could not write the disks file: {e}"));
+        }
     }
 
     /// Runs `disks apply` when one is due: after a change, and every minute
@@ -1854,6 +1911,65 @@ esac"#
                 .unwrap()
                 .starts_with("-----BEGIN")
         );
+    }
+
+    #[test]
+    fn the_space_for_copies_keeps_the_pick_then_takes_a_choice() {
+        let r = team_rig();
+        let (config, creds) = plan(&[("0192-a", "A", ApiAccess::Write)], false);
+        let space = r#","cache_chosen_mb":null,"cache_auto_mb":10240,"cache_choice_max_mb":25600,"cache_target_mb":10240,"vm_disk_mb":22528,"vm_disk_wanted_mb":22528"#;
+        r.status(&team_status(&[DISK_A], space));
+        r.core.refresh();
+        r.core.configure(&config, &creds);
+        r.sync_and_wait();
+        // Floppy's pick is kept as the choice, so it stops moving.
+        r.core.refresh();
+        assert_eq!(r.file()["cache_mb"], 10240);
+        assert_eq!(r.core.status().space.unwrap().chosen_mb, Some(10240));
+
+        // Not a step of 5 GB, or more than the Mac spares: refused.
+        assert_eq!(r.core.set_cache_size(12_000), Err(CoreError::CacheSize));
+        assert_eq!(r.core.set_cache_size(30_720), Err(CoreError::CacheSize));
+        assert_eq!(r.core.set_cache_size(0), Err(CoreError::CacheSize));
+        let before = r.applies().len();
+        assert_eq!(r.core.set_cache_size(20_480), Ok(()));
+        assert_eq!(r.file()["cache_mb"], 20480);
+        r.core.sync();
+        let start = Instant::now();
+        while r.core.lock().team.applying {
+            assert!(start.elapsed() < Duration::from_secs(10), "apply did not end");
+            thread::sleep(Duration::from_millis(20));
+        }
+        assert_eq!(r.applies().len(), before + 1);
+        // A new answer from the server keeps the choice.
+        r.core.configure(&config, &creds);
+        r.sync_and_wait();
+        assert_eq!(r.file()["cache_mb"], 20480);
+    }
+
+    #[test]
+    fn a_bigger_space_for_copies_waits_for_a_restart() {
+        let r = team_rig();
+        // The mounts run with 30 GB, the choice gives them 40.
+        r.status(&team_status(&[DISK_A], r#","cache_chosen_mb":40960,"cache_target_mb":40960,"vm_disk_mb":51200,"vm_disk_wanted_mb":51200"#));
+        r.core.refresh();
+        let s = r.core.status();
+        assert_eq!(s.team.as_ref().unwrap().restart_reason, Some(RestartReason::Space));
+        assert!(s.space.unwrap().waits_restart);
+        // A VM's disk too small for the choice also waits for one.
+        r.status(&team_status(&[DISK_A], r#","cache_chosen_mb":30720,"cache_target_mb":30720,"vm_disk_mb":22528,"vm_disk_wanted_mb":41984"#));
+        r.core.refresh();
+        assert_eq!(r.core.status().team.unwrap().restart_reason, Some(RestartReason::Space));
+        // Memory goes first.
+        r.status(&team_status(&[DISK_A], r#","cache_target_mb":40960"#).replace(r#""vm_memory_mib":1024"#, r#""vm_memory_mib":768"#));
+        r.core.refresh();
+        assert_eq!(r.core.status().team.unwrap().restart_reason, Some(RestartReason::Memory));
+        // A smaller choice remounts instead: no restart.
+        r.status(&team_status(&[DISK_A], r#","cache_chosen_mb":10240,"cache_target_mb":10240"#));
+        r.core.refresh();
+        let s = r.core.status();
+        assert!(!s.team.unwrap().restart_needed);
+        assert!(!s.space.unwrap().waits_restart);
     }
 
     #[test]

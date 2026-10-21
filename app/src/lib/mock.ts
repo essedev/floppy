@@ -48,6 +48,10 @@ const base: DiskStatus = {
     mac_free_mb: 214 * GB,
     reserve_mb: 20 * GB,
     low: false,
+    chosen_mb: null,
+    choice_max_mb: null,
+    target_mb: null,
+    waits_restart: false,
   },
   job: null,
   last_error: null,
@@ -103,10 +107,12 @@ const teamBase: TeamView = {
   applying: false,
   error: null,
   restart_needed: false,
+  restart_reason: null,
   refused_single: false,
   failing: 0,
 };
-const team = (over: Partial<TeamView> = {}): Partial<DiskStatus> => ({ mode: "team", team: { ...teamBase, ...over } });
+const teamSpace = { ...base.space!, cache_limit_mb: 45 * GB, chosen_mb: 45 * GB, choice_max_mb: 95 * GB, target_mb: 45 * GB };
+const team = (over: Partial<TeamView> = {}): Partial<DiskStatus> => ({ mode: "team", team: { ...teamBase, ...over }, space: teamSpace });
 
 const SCENARIOS: Record<string, Partial<DiskStatus>> = {
   connected: {},
@@ -157,10 +163,15 @@ const SCENARIOS: Record<string, Partial<DiskStatus>> = {
       disk("Pastificio Moretti - Spot Natale", { cache_used_mb: 31.6 * GB }),
     ],
   }),
-  team_starting: { state: "starting", ...unmounted, ...team({ applying: true, disks: teamBase.disks.map((d) => ({ ...d, path: null, state: null })) }) },
-  team_restart: team({ restart_needed: true }),
+  team_starting: { state: "starting", ...team({ applying: true, disks: teamBase.disks.map((d) => ({ ...d, path: null, state: null })) }), ...unmounted },
+  team_restart: team({ restart_needed: true, restart_reason: "memory" }),
+  team_space_restart: {
+    ...team({ restart_needed: true, restart_reason: "space" }),
+    space: { ...teamSpace, chosen_mb: 60 * GB, target_mb: 60 * GB, waits_restart: true },
+  },
+  team_space_short: { ...team(), space: { ...teamSpace, mac_free_mb: 31 * GB, chosen_mb: 45 * GB, choice_max_mb: 10 * GB, target_mb: 10 * GB } },
   team_error: team({ error: "the floppy command failed: the VM is not responding, run: floppy status" }),
-  team_no_disks: { state: "no_disks", ...unmounted, ...team({ disks: [] }) },
+  team_no_disks: { state: "no_disks", ...team({ disks: [] }), ...unmounted },
   team_all_off: {
     state: "no_disks",
     ...unmounted,
@@ -510,9 +521,25 @@ export const mockBackend: Backend = {
     const anyOn = disks.some((d) => d.enabled);
     publish({ team: { ...status.team, disks }, state: anyOn ? "connected" : "no_disks", mount_point: anyOn ? "/Volumes/Floppy" : null });
   },
+  setCacheSize: async (mb) => {
+    if (!status.space || !status.team) return;
+    const limit = status.space.cache_limit_mb ?? 0;
+    const bigger = mb > limit;
+    publish({
+      space: { ...status.space, chosen_mb: mb, target_mb: mb, cache_limit_mb: bigger ? limit : mb, waits_restart: bigger },
+      team: { ...status.team, restart_needed: bigger, restart_reason: bigger ? "space" : null },
+    });
+  },
   restart: async () => {
     publish({ state: "starting", job: { kind: "restart", path: null, name: null, started_ms: Date.now() } });
-    later(1500, () => publish({ state: "connected", job: null, team: status.team && { ...status.team, restart_needed: false } }));
+    later(1500, () =>
+      publish({
+        state: "connected",
+        job: null,
+        team: status.team && { ...status.team, restart_needed: false, restart_reason: null },
+        space: status.space && { ...status.space, cache_limit_mb: status.space.target_mb ?? status.space.cache_limit_mb, waits_restart: false },
+      }),
+    );
   },
   openInFinder: async () => {},
   revealInFinder: async () => {},

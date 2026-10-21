@@ -45,6 +45,8 @@ export interface Backend {
   listFolders(path?: string): Promise<Folder[]>;
   /** Turns a team disk on or off on this Mac. */
   setDiskEnabled(id: string, enabled: boolean): Promise<void>;
+  /** The space for copies of files on this Mac, in MB, in steps of 5 GB. */
+  setCacheSize(mb: number): Promise<void>;
   /** Stops and starts Floppy, for the memory its disks want. */
   restart(): Promise<void>;
   openInFinder(path?: string): Promise<void>;
@@ -124,6 +126,7 @@ const tauriBackend: Backend = {
   dismissError: () => invoke("dismiss_error"),
   listFolders: (path) => invoke("list_folders", { path: path ?? null }),
   setDiskEnabled: (id, enabled) => invoke("set_disk_enabled", { id, enabled }),
+  setCacheSize: (mb) => invoke("set_cache_size", { mb }),
   restart: () => invoke("restart_disk"),
   openInFinder: (path) => invoke("open_in_finder", { path: path ?? null }),
   revealInFinder: (path) => invoke("reveal_in_finder", { path }),

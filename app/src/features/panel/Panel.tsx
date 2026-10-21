@@ -295,7 +295,7 @@ function StatusSection({ status }: { status: DiskStatus }) {
         />
       ) : (
         <Notice key="restart" led="dl" title={it.team.restart.title}>
-          <span className="block">{it.team.restart.body}</span>
+          <span className="block">{team.restart_reason === "space" ? it.team.restart.bodySpace : it.team.restart.body}</span>
           <Button size="sm" className="mt-2 bg-raised shadow-[0_0_0_0.5px_rgba(0,0,0,0.12)]" onClick={() => setConfirmRestart(true)}>
             {it.team.restart.action}
           </Button>

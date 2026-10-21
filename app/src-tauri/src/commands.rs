@@ -32,6 +32,7 @@ impl From<CoreError> for CommandError {
             CoreError::NoBundle => "no_bundle",
             CoreError::NotTeam => "not_team",
             CoreError::NoSuchDisk => "no_such_disk",
+            CoreError::CacheSize => "cache_size",
             CoreError::NotInTrash => "not_in_trash",
             CoreError::NoSuchNotice => "no_such_notice",
             CoreError::Server(_) => "server",
@@ -117,6 +118,12 @@ pub fn restart_disk(core: CoreState) -> Result<(), CommandError> {
 #[tauri::command]
 pub fn set_disk_enabled(core: CoreState, id: String, enabled: bool) -> Result<(), CommandError> {
     Ok(core.set_disk_enabled(&id, enabled)?)
+}
+
+/// Sets the space for copies of files on this Mac, in MB.
+#[tauri::command]
+pub fn set_cache_size(core: CoreState, mb: u64) -> Result<(), CommandError> {
+    Ok(core.set_cache_size(mb)?)
 }
 
 /// The folders at the top of the disk, or of `path` on it.

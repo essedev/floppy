@@ -90,6 +90,7 @@ setting() {
   case "$1" in
     RESERVE_MB) disks_value reserve_mb ;;
     CACHE_SIZE_MB) disks_value cache_max_mb ;;
+    CACHE_MB) disks_value cache_mb ;;
   esac
 }
 # How many disks of the file are enabled.
@@ -190,17 +191,88 @@ mac_free_mb() { df -m "$HOME" | awk 'NR == 2 {print $4}'; }
 reserve_mb() { local r; r=$(setting RESERVE_MB); echo "${r:-20480}"; }
 cache_used_mb() { in_vm sudo du -sm /var/cache/floppy 2>/dev/null | cut -f1 || echo 0; }
 
-# The cache limit: half of what the Mac can spare above the reserve, capped by
-# CACHE_SIZE_MB. Space the cache already holds counts as spare. In the team
-# version it is split among the mounts, since JuiceFS enforces --cache-size
-# per mount.
-cache_limit_mb() {
-  local used="${1:-0}" max spare limit
-  max=$(setting CACHE_SIZE_MB); max="${max:-102400}"
-  spare=$(( $(mac_free_mb) + used - $(reserve_mb) ))
-  limit=$(( spare / 2 ))
+# The space for the copies of files on this Mac (the JuiceFS cache), in steps
+# of 5 GB: the figure the app shows stays round and does not move with every
+# file saved elsewhere on the Mac. What the Mac can spare is its free space
+# above the reserve, counting the space the cache already holds.
+CACHE_STEP_MB=5120
+step_down() { if [ "$1" -ge "$CACHE_STEP_MB" ]; then echo $(( $1 / CACHE_STEP_MB * CACHE_STEP_MB )); else echo "$1"; fi; }
+cache_spare_mb() { local s; s=$(( $(mac_free_mb) + ${1:-0} - $(reserve_mb) )); [ "$s" -gt 0 ] || s=0; echo "$s"; }
+cache_ceiling_mb() { local m; m=$(setting CACHE_SIZE_MB); echo "${m:-102400}"; }
+
+# Floppy's own pick: half of what the Mac can spare, capped by CACHE_SIZE_MB.
+# The app keeps it as the person's choice the first time it sees it, so it
+# is computed once.
+cache_auto_mb() {
+  local limit max
+  limit=$(( $(cache_spare_mb "${1:-0}") / 2 ))
+  max=$(cache_ceiling_mb)
+  [ "$limit" -gt "$max" ] && limit=$max
+  step_down "$limit"
+}
+
+# The most the person may choose in Settings: everything the Mac can spare.
+cache_choice_max_mb() {
+  local limit max
+  limit=$(step_down "$(cache_spare_mb "${1:-0}")")
+  max=$(cache_ceiling_mb)
   [ "$limit" -gt "$max" ] && limit=$max
   echo "$limit"
+}
+
+# The person's choice (team version, the disks file), or Floppy's own pick.
+cache_target_mb() {
+  local chosen=""
+  team && chosen=$(setting CACHE_MB)
+  case "$chosen" in ""|*[!0-9]*|0) cache_auto_mb "${1:-0}" ;; *) echo "$chosen" ;; esac
+}
+
+# The VM's disk, sized at creation for the cache plus Debian: the cache can
+# grow into it only up to its size less those 10 GB. A bigger choice grows the
+# disk while the VM is stopped (size_stopped_vm).
+VM_DISK_EXTRA_MB=10240
+vm_disk_mb() {
+  local b
+  b=$(lima list --format '{{.Disk}}' "$VM" 2>/dev/null || true)
+  case "$b" in ""|*[!0-9]*) echo "" ;; *) echo $(( b / 1048576 )) ;; esac
+}
+# Only the person's choice grows the disk, and nothing shrinks it: Floppy's
+# own pick fits the disk it was created with.
+vm_disk_wanted_mb() {
+  local chosen="" have want
+  have=$(vm_disk_mb)
+  team && chosen=$(setting CACHE_MB)
+  case "$chosen" in
+    ""|*[!0-9]*|0) echo "$have"; return 0 ;;
+  esac
+  want=$(( (chosen + VM_DISK_EXTRA_MB + 1023) / 1024 * 1024 ))
+  [ -n "$have" ] && [ "$have" -gt "$want" ] && want=$have
+  echo "$want"
+}
+
+# The cache limit now: the target, cut to what the Mac can spare and to what
+# the VM's disk holds. In the team version it is split among the mounts,
+# since JuiceFS enforces --cache-size per mount.
+cache_limit_mb() {
+  local used="${1:-0}" limit spare disk
+  limit=$(cache_target_mb "$used")
+  spare=$(step_down "$(cache_spare_mb "$used")")
+  [ "$limit" -gt "$spare" ] && limit=$spare
+  disk=$(vm_disk_mb)
+  if [ -n "$disk" ] && [ "$limit" -gt $(( disk - VM_DISK_EXTRA_MB )) ]; then
+    limit=$(( disk - VM_DISK_EXTRA_MB ))
+  fi
+  [ "$limit" -gt 0 ] || limit=0
+  echo "$limit"
+}
+
+# Each mount's share of the limit. Below 512 MB a disk would refetch every
+# clip; the Mac-side guard in tick still frees everything when the Mac runs low.
+cache_per_disk_mb() {
+  local n="$1" per="$2"
+  [ "$n" -gt 1 ] && per=$(( per / n ))
+  [ "$per" -ge 512 ] || per=512
+  echo "$per"
 }
 
 # The VM's memory in the team version: 1 GiB holds one disk (JuiceFS peaks
@@ -221,17 +293,27 @@ vm_memory_now() {
 }
 gib() { awk -v m="$1" 'BEGIN { printf "%g", m / 1024 }'; }
 
-# `memory` in lima.yaml applies only at creation: an existing VM changes it
-# here, and only while it is stopped, so a disk in use is never cut off for it.
+# `memory` and `disk` in lima.yaml apply only at creation: an existing VM
+# changes them here, and only while it is stopped, so a disk in use is never
+# cut off for it. The disk only grows (Lima cannot shrink it), and Debian
+# grows its filesystem into it at boot.
 size_stopped_vm() {
   team || return 0
   local want have
   want=$(vm_memory_mib "$(enabled_disks)")
   have=$(vm_memory_now)
-  [ -n "$have" ] && [ "$have" != "$want" ] || return 0
-  log "Giving the VM $(gib "$want") GiB of memory for $(enabled_disks) disks..."
-  lima edit --tty=false --memory="$(gib "$want")" "$VM" >>"$LIMA_LOG" 2>&1 \
-    || log "floppy: could not change the VM's memory, it keeps $(gib "$have") GiB"
+  if [ -n "$have" ] && [ "$have" != "$want" ]; then
+    log "Giving the VM $(gib "$want") GiB of memory for $(enabled_disks) disks..."
+    lima edit --tty=false --memory="$(gib "$want")" "$VM" >>"$LIMA_LOG" 2>&1 \
+      || log "floppy: could not change the VM's memory, it keeps $(gib "$have") GiB"
+  fi
+  want=$(vm_disk_wanted_mb)
+  have=$(vm_disk_mb)
+  if [ -n "$have" ] && [ "$have" -lt "$want" ]; then
+    log "Growing the VM's disk to $(gib "$want") GiB for the copies of files..."
+    lima edit --tty=false --disk="$(gib "$want")" "$VM" >>"$LIMA_LOG" 2>&1 \
+      || log "floppy: could not grow the VM's disk, it keeps $(gib "$have") GiB"
+  fi
 }
 
 # With "keep" the VM starts with the memory it has (a revoked device being
@@ -466,9 +548,9 @@ cmd_setup() {
     die "not enough free space on this Mac: $(( $(mac_free_mb) / 1024 )) GB free, at least $(( ($(reserve_mb) + 10240) / 1024 )) GB needed"
   fi
   if [ -z "$(vm_status)" ]; then
-    # The VM's disk only needs to hold the cache plus Debian. Its size is fixed
-    # here, at creation: later setups change the cache limit, not the disk.
-    disk_gib=$(( limit / 1024 + 10 ))
+    # The VM's disk only needs to hold the cache plus Debian; a bigger choice
+    # in Settings grows it later, while the VM is stopped.
+    disk_gib=$(( (limit + VM_DISK_EXTRA_MB + 1023) / 1024 ))
     create_vm "$disk_gib"
     start_vm
   fi
@@ -566,7 +648,7 @@ cmd_stop() {
 # or a file on the Mac; with nothing on stdin the VM keeps the last ones.
 # Prints one JSON object (docs/ARCHITECTURE.md, "Team disks").
 disks_apply() {
-  local secrets="${1:-}" n per used limit out want have
+  local secrets="${1:-}" n per used out want have disk disk_want
   [ -f "$DISKS_FILE" ] || die "missing $DISKS_FILE"
   /usr/bin/plutil -extract disks raw -o - "$DISKS_FILE" >/dev/null 2>&1 || die "$DISKS_FILE is not a disks file"
   if [ ! -f "$INSTALLED_MARK" ] || [ -z "$(vm_status)" ]; then cmd_setup_quiet; fi
@@ -578,20 +660,17 @@ disks_apply() {
   fi
   n=$(enabled_disks)
   used=$(cache_used_mb)
-  limit=$(cache_limit_mb "$used")
-  per=$limit
-  [ "$n" -gt 1 ] && per=$(( limit / n ))
-  # Below this a disk would refetch every clip; the Mac-side guard in tick
-  # still frees everything when the Mac runs low.
-  [ "$per" -ge 512 ] || per=512
+  per=$(cache_per_disk_mb "$n" "$(cache_limit_mb "$used")")
   out=$(in_vm sudo /usr/local/sbin/floppy-disks apply "$per" </dev/null)
   rm -f "$STOPPED_FLAG"
   want_share && mount_share keep
   want=$(vm_memory_mib "$n")
   have=$(vm_memory_now)
-  printf '{"version":1,"mount_point":%s,"cache_per_disk_mb":%s,"vm_memory_mib":%s,"vm_memory_wanted_mib":%s,"restart_needed":%s,"vm":%s}\n' \
-    "$(json_str "$(mount_point)")" "$per" "$(json_int "$have")" "$want" \
-    "$([ -n "$have" ] && [ "$have" -lt "$want" ] && echo true || echo false)" "$out"
+  disk=$(vm_disk_mb)
+  disk_want=$(vm_disk_wanted_mb)
+  printf '{"version":1,"mount_point":%s,"cache_per_disk_mb":%s,"vm_memory_mib":%s,"vm_memory_wanted_mib":%s,"vm_disk_mb":%s,"vm_disk_wanted_mb":%s,"restart_needed":%s,"vm":%s}\n' \
+    "$(json_str "$(mount_point)")" "$per" "$(json_int "$have")" "$want" "$(json_int "$disk")" "$(json_int "$disk_want")" \
+    "$( { [ -n "$have" ] && [ "$have" -lt "$want" ]; } || { [ -n "$disk" ] && [ "$disk" -lt "$disk_want" ]; } && echo true || echo false)" "$out"
 }
 
 # Setup inside `disks apply`, with its messages kept off the JSON on stdout.
@@ -657,6 +736,7 @@ json_int() {
 cmd_status_json() {
   local configured=false installed=false stopped=false st vm out="" mp mode=single
   local responding=null drive="" used="" limit="" reserve="" disks=null mem="" want=""
+  local disk="" disk_want="" chosen="" auto="" choice_max="" target="" n
   team && mode=team
   if team; then [ -f "$DISKS_FILE" ] && configured=true; else configured=true; fi
   [ -f "$INSTALLED_MARK" ] && installed=true
@@ -702,6 +782,17 @@ cmd_status_json() {
   if team && [ "$vm" != missing ]; then
     mem=$(vm_memory_now)
     want=$(vm_memory_mib "$(enabled_disks)")
+    disk=$(vm_disk_mb)
+    disk_want=$(vm_disk_wanted_mb)
+  fi
+  # The space for copies: the person's choice and its bounds (team), and what
+  # an apply would give the mounts now, to compare with what they run with.
+  if team && [ "$configured" = true ] && [ "$vm" != missing ]; then
+    chosen=$(setting CACHE_MB)
+    auto=$(cache_auto_mb "${used:-0}")
+    choice_max=$(cache_choice_max_mb "${used:-0}")
+    n=$(enabled_disks)
+    if [ "$n" -gt 0 ]; then target=$(( $(cache_per_disk_mb "$n" "$(cache_limit_mb "${used:-0}")") * n )); fi
   fi
   mp=$(mount_point)
   if [ -n "$mp" ]; then
@@ -714,8 +805,10 @@ cmd_status_json() {
     "$(json_str "$mp")" "$responding" "$(json_str "$drive")"
   printf '"cache_used_mb":%s,"cache_limit_mb":%s,"mac_free_mb":%s,"reserve_mb":%s,' \
     "$(json_int "$used")" "$(json_int "$limit")" "$(json_int "$(mac_free_mb)")" "$(json_int "$reserve")"
-  printf '"vm_memory_mib":%s,"vm_memory_wanted_mib":%s,"disks":%s}\n' \
-    "$(json_int "$mem")" "$(json_int "$want")" "$disks"
+  printf '"cache_chosen_mb":%s,"cache_auto_mb":%s,"cache_choice_max_mb":%s,"cache_target_mb":%s,' \
+    "$(json_int "$chosen")" "$(json_int "$auto")" "$(json_int "$choice_max")" "$(json_int "$target")"
+  printf '"vm_memory_mib":%s,"vm_memory_wanted_mib":%s,"vm_disk_mb":%s,"vm_disk_wanted_mb":%s,"disks":%s}\n' \
+    "$(json_int "$mem")" "$(json_int "$want")" "$(json_int "$disk")" "$(json_int "$disk_want")" "$disks"
 }
 
 cmd_status() {
@@ -736,6 +829,7 @@ cmd_status() {
   [ "$st" = Running ] || return 0
   if team; then
     printf 'Memory:  %s MB (%s MB for %s disks)\n' "$(vm_memory_now)" "$(vm_memory_mib "$(enabled_disks)")" "$(enabled_disks)"
+    printf 'VM disk: %s MB (%s MB for the copies chosen)\n' "$(vm_disk_mb)" "$(vm_disk_wanted_mb)"
     # shellcheck disable=SC2016 # jq's own syntax
     in_vm sudo sh -c '[ -x /usr/local/sbin/floppy-disks ] && /usr/local/sbin/floppy-disks status | jq -r "
       \"Samba:   \(.smbd)\", \"Cache:   \(.cache_used_mb // 0) MB of \(.cache_limit_mb // 0) MB\",
