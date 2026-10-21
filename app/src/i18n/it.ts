@@ -232,6 +232,19 @@ export const it = {
     free: "Ancora libero",
     macFree: "Liberi sul Mac",
     unknown: "Lo spazio si legge quando il disco è acceso.",
+    info: {
+      label: "Cosa sono questi GB",
+      title: "Le copie dei file su questo Mac",
+      cloud: "I file di Floppy stanno nel cloud del team: lì non c'è questo limite, e i colleghi li vedono tutti.",
+      copies:
+        "Quando apri un file, Floppy ne tiene una copia su questo Mac: così riparte subito, senza riscaricarlo, e un progetto si monta senza attese.",
+      limit: (gb: string) =>
+        `Le copie possono occupare fino a ${gb}. Quando lo spazio finisce, quelle usate meno di recente si cancellano da sole: i file restano su Floppy e si riscaricano quando li riapri.`,
+      limitAuto:
+        "Quando lo spazio per le copie finisce, quelle usate meno di recente si cancellano da sole: i file restano su Floppy e si riscaricano quando li riapri.",
+      reserve: (gb: string) => `Floppy lascia sempre almeno ${gb} liberi sul Mac.`,
+      change: "Cambia lo spazio in Impostazioni",
+    },
   },
 
   folders: {

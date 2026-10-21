@@ -8,7 +8,7 @@
 
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { ChevronRight, Download, Ellipsis, Eraser, ExternalLink, Folder as FolderIcon, Globe, History, Power, RefreshCw, Settings, Trash2 } from "lucide-react";
+import { ChevronRight, Download, Ellipsis, Eraser, ExternalLink, Folder as FolderIcon, Globe, History, Info, Power, RefreshCw, Settings, Trash2 } from "lucide-react";
 import { Faceplate } from "@/components/Faceplate";
 import { Button, Confirm, Led, Notice, Readout, SlotMark } from "@/components/ui";
 import { useAuth } from "@/features/account/hooks";
@@ -409,10 +409,49 @@ function SpaceSection({ status }: { status: DiskStatus }) {
   const s = status.space!;
   const used = s.cache_used_mb;
   const limit = s.cache_limit_mb;
+  const info = useMenu("space-info");
+  const t = it.space.info;
   return (
     <section className="px-5 pb-[18px]">
-      <div className="mb-3 flex items-baseline justify-between gap-2 text-[11px] font-semibold tracking-[0.1em] text-ink-3 uppercase">
-        <span>{it.space.heading}</span>
+      <div className="relative mb-3 flex items-center justify-between gap-2 text-[11px] font-semibold tracking-[0.1em] text-ink-3 uppercase">
+        <span className="flex items-center gap-1">
+          {it.space.heading}
+          <button
+            type="button"
+            data-menu-trigger
+            className={`grid size-[22px] place-items-center rounded-md border-0 normal-case hover:bg-sunken hover:text-ink ${info.open ? "bg-sunken text-ink" : "bg-transparent text-ink-3"}`}
+            aria-label={t.label}
+            title={t.label}
+            aria-haspopup="dialog"
+            aria-expanded={info.open}
+            onClick={info.toggle}
+          >
+            <Info size={14} strokeWidth={1.8} aria-hidden="true" />
+          </button>
+        </span>
+        {info.open && (
+          <RowMenu label={t.label} role="dialog" onClose={info.close}>
+            <div className="flex flex-col gap-2 text-[12.5px] leading-[1.45] font-normal tracking-normal text-ink normal-case">
+              <b className="text-[13px] font-semibold">{t.title}</b>
+              <p className="m-0">{t.cloud}</p>
+              <p className="m-0">{t.copies}</p>
+              <p className="m-0">{s.chosen_mb != null ? t.limit(gbUnit(s.chosen_mb)) : t.limitAuto}</p>
+              <p className="m-0 text-ink-2">{t.reserve(gbUnit(s.reserve_mb))}</p>
+              {s.chosen_mb != null && (
+                <button
+                  type="button"
+                  className="mt-0.5 self-start border-0 bg-transparent p-0 text-[12.5px] font-semibold text-ink underline underline-offset-2"
+                  onClick={() => {
+                    info.close();
+                    void backend.openSettings();
+                  }}
+                >
+                  {t.change}
+                </button>
+              )}
+            </div>
+          </RowMenu>
+        )}
         {used != null && limit != null && (
           <b className="font-ro text-[12px] font-normal tracking-[0.02em] text-ink normal-case">{it.space.of(gb(used), gb(limit))}</b>
         )}

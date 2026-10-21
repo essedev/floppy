@@ -46,8 +46,21 @@ export function useMenu(key: string) {
 
 const GAP = 4;
 
-/** The floating menu; its parent must be `relative` and hold the trigger. */
-export function RowMenu({ label, onClose, children }: { label: string; onClose: () => void; children: ReactNode }) {
+/**
+ * The floating menu; its parent must be `relative` and hold the trigger. As a
+ * `dialog` it carries text instead of items and spans its parent's width.
+ */
+export function RowMenu({
+  label,
+  onClose,
+  role = "menu",
+  children,
+}: {
+  label: string;
+  onClose: () => void;
+  role?: "menu" | "dialog";
+  children: ReactNode;
+}) {
   const ctx = useContext(MenuContext);
   const ref = useRef<HTMLDivElement>(null);
   const [up, setUp] = useState(false);
@@ -100,10 +113,10 @@ export function RowMenu({ label, onClose, children }: { label: string; onClose: 
   return (
     <div
       ref={ref}
-      role="menu"
+      role={role}
       aria-label={label}
       style={up ? { bottom: `calc(100% + ${GAP}px)` } : { top: `calc(100% + ${GAP}px)` }}
-      className="menu absolute right-1 z-20 flex w-[256px] flex-col rounded-xl p-[5px]"
+      className={`menu absolute z-20 flex flex-col rounded-xl ${role === "dialog" ? "inset-x-0 px-4 py-3.5" : "right-1 w-[256px] p-[5px]"}`}
     >
       {children}
     </div>
