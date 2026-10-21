@@ -496,6 +496,16 @@ impl Account {
         }
     }
 
+    /// The team's web (people, disks, devices), at the address of the server
+    /// this Mac is signed in to; none while signed out.
+    pub fn dashboard(&self) -> Option<String> {
+        let inner = self.lock();
+        match (&inner.phase, &inner.record) {
+            (Phase::SignedIn { .. }, Some(r)) => Some(r.server.clone()),
+            _ => None,
+        }
+    }
+
     /// What the windows show now.
     pub fn view(&self) -> AuthView {
         Self::compose(&self.lock())

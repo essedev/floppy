@@ -310,6 +310,24 @@ pub async fn app_info(app: AppHandle, core: CoreState<'_>) -> Result<AppInfo, Co
     })
 }
 
+/// Opens the team's web in the browser: only the address of the server this
+/// Mac is signed in to, never one the page passes.
+#[tauri::command]
+pub fn open_dashboard(account: AccountState<'_>) -> Result<(), CommandError> {
+    let url = account
+        .dashboard()
+        .filter(|u| u.starts_with("https://") || u.starts_with("http://"))
+        .ok_or_else(|| CommandError {
+            code: "auth_state",
+            message: "not signed in to a team".into(),
+        })?;
+    Command::new("/usr/bin/open")
+        .arg(&url)
+        .spawn()
+        .map(|_| ())
+        .map_err(io_error)
+}
+
 /// A newer release of the app, if the daily check found one.
 #[tauri::command]
 pub fn get_app_update(updates: State<'_, Arc<Updates>>) -> Option<AppUpdate> {

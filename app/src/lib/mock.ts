@@ -653,6 +653,7 @@ export const mockBackend: Backend = {
   },
   onAppUpdate: (cb) => listen(updateListeners, cb),
   openSettings: async () => {},
+  openDashboard: async () => {},
   openWelcome: async () => {},
   finishWelcome: async () => {},
   loginEnabled: async () => login,

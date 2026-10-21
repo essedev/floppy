@@ -140,6 +140,7 @@ export function SettingsWindow() {
 /** Who is signed in, with sign-out; the sign-in flow otherwise. */
 function AccountRows({ view, computerName }: { view: AuthView; computerName: string | null }) {
   const signOut = useAuthStep<boolean>(backend.authSignOut);
+  const dashboard = useDiskAction(backend.openDashboard);
   const [confirming, setConfirming] = useState(false);
   const t = it.account;
 
@@ -164,6 +165,15 @@ function AccountRows({ view, computerName }: { view: AuthView; computerName: str
           {busy ? t.signOut.signingOut : t.signOut.action}
         </Button>
       </Row>
+      <Row>
+        <Label title={it.settings.dashboard} line={it.settings.dashboardLine} />
+        <Button onClick={() => dashboard.mutate()}>{it.settings.dashboardOpen}</Button>
+      </Row>
+      {dashboard.error && (
+        <Row>
+          <span className="text-[13px] text-ink">{it.errors[dashboard.error.code] ?? dashboard.error.message}</span>
+        </Row>
+      )}
       {notes && (
         <div className="flex flex-col gap-2.5 px-3 py-3">
           {!view.reachable && <Notice led="dl">{t.offline}</Notice>}

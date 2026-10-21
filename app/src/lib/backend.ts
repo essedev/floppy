@@ -84,6 +84,8 @@ export interface Backend {
   installAppUpdate(): Promise<void>;
   onAppUpdate(cb: (u: AppUpdate | null) => void): Unlisten;
   openSettings(): Promise<void>;
+  /** The team's web, at the server this Mac is signed in to, in the browser. */
+  openDashboard(): Promise<void>;
   openWelcome(): Promise<void>;
   finishWelcome(): Promise<void>;
   loginEnabled(): Promise<boolean>;
@@ -156,6 +158,7 @@ const tauriBackend: Backend = {
   installAppUpdate: () => invoke("install_app_update"),
   onAppUpdate: (cb) => subscribe("app-update", cb),
   openSettings: () => invoke("open_settings"),
+  openDashboard: () => invoke("open_dashboard"),
   openWelcome: () => invoke("open_welcome"),
   finishWelcome: () => invoke("finish_welcome"),
   loginEnabled: () => autostart.isEnabled(),

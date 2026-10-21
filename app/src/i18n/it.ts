@@ -92,6 +92,7 @@ export const it = {
     stop: "Interrompi",
     openSetup: "Apri la preparazione",
     settings: "Impostazioni",
+    dashboard: (host: string) => `Apri il pannello del team (${host})`,
     turnOff: "Spegni",
     stopConfirm: {
       title: "Spegnere Floppy?",
@@ -374,6 +375,9 @@ export const it = {
     title: "Impostazioni",
     account: "Account",
     accountLine: (org: string | null, email: string) => (org ? `${org} · ${email}` : email),
+    dashboard: "Pannello del team",
+    dashboardLine: "Persone, dischi e dispositivi del team, nel browser.",
+    dashboardOpen: "Apri",
     disks: "Dischi",
     disksLine: "Spegni un disco che non ti serve: sparisce dal Finder e libera spazio su questo Mac.",
     disksNone: "Nessun disco del team su questo Mac.",

@@ -161,6 +161,7 @@ pub fn run() {
             commands::run_setup,
             commands::install_engine,
             commands::app_info,
+            commands::open_dashboard,
             commands::get_app_update,
             commands::install_app_update,
             commands::open_settings,

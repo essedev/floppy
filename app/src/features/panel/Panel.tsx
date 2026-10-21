@@ -8,7 +8,7 @@
 
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { ChevronRight, Download, Ellipsis, Eraser, ExternalLink, Folder as FolderIcon, History, Power, RefreshCw, Settings, Trash2 } from "lucide-react";
+import { ChevronRight, Download, Ellipsis, Eraser, ExternalLink, Folder as FolderIcon, Globe, History, Power, RefreshCw, Settings, Trash2 } from "lucide-react";
 import { Faceplate } from "@/components/Faceplate";
 import { Button, Confirm, Led, Notice, Readout, SlotMark } from "@/components/ui";
 import { useAuth } from "@/features/account/hooks";
@@ -804,6 +804,8 @@ function FolderRow(p: FolderRowProps) {
 
 function Footer({ status, version }: { status: DiskStatus; version: string | undefined }) {
   const [confirm, setConfirm] = useState(false);
+  const { data: auth } = useAuth();
+  const dashboard = useDiskAction(backend.openDashboard);
   const stop = useDiskAction(backend.stop);
   const canStop = status.state === "connected" || status.state === "unreachable" || status.state === "no_disks";
   return (
@@ -822,9 +824,9 @@ function Footer({ status, version }: { status: DiskStatus; version: string | und
           onCancel={() => setConfirm(false)}
         />
       )}
-      {stop.error && (
+      {(stop.error ?? dashboard.error) && (
         <div className="mx-2 mt-2">
-          <ActionError error={stop.error} />
+          <ActionError error={stop.error ?? dashboard.error} />
         </div>
       )}
       <footer className="flex items-center gap-1.5 py-2.5 pr-2.5 pl-5 text-[12px] text-ink-3">
@@ -851,6 +853,17 @@ function Footer({ status, version }: { status: DiskStatus; version: string | und
               <Trash2 size={16} strokeWidth={1.7} aria-hidden="true" />
             </button>
           </>
+        )}
+        {auth?.phase === "signed_in" && (
+          <button
+            type="button"
+            className="grid size-[30px] place-items-center rounded-lg border-0 bg-transparent text-ink-2 hover:bg-sunken hover:text-ink"
+            aria-label={it.panel.dashboard(auth.server_display)}
+            title={it.panel.dashboard(auth.server_display)}
+            onClick={() => dashboard.mutate()}
+          >
+            <Globe size={16} strokeWidth={1.7} aria-hidden="true" />
+          </button>
         )}
         <button
           type="button"

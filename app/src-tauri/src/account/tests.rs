@@ -894,3 +894,12 @@ fn sign_out_clears_the_disks_too_even_locally() {
     r.account.sign_out(true).unwrap();
     assert_eq!(r.team.clears.lock().unwrap().len(), 1);
 }
+
+#[test]
+fn the_team_web_is_the_signed_in_server_only() {
+    assert_eq!(rig().account.dashboard(), None);
+    assert_eq!(
+        signed_in_rig().account.dashboard().as_deref(),
+        Some("https://floppy.studio.test")
+    );
+}
