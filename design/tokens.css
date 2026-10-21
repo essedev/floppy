@@ -33,6 +33,10 @@
 
   --pop-shadow: 0 0 0 0.5px rgba(40, 30, 20, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.7), 0 34px 70px -24px rgba(50, 35, 20, 0.5);
   --win-shadow: 0 0 0 0.5px rgba(40, 30, 20, 0.22), 0 30px 70px -20px rgba(50, 35, 20, 0.45);
+
+  /* Floating menus: a step above raised, so they stand off a raised row in the dark */
+  --menu: #fbfaf7; --menu-hover: #ebe8e1; --menu-line: #e2ded6;
+  --menu-shadow: 0 0 0 0.5px rgba(40, 30, 20, 0.22), 0 18px 40px -12px rgba(50, 35, 20, 0.45);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -47,6 +51,8 @@
     --bezel: #0f0f0e; --bezel-lift: rgba(255, 255, 255, .06);
     --pop-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.8), inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 34px 70px -24px rgba(0, 0, 0, 0.8);
     --win-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.9), 0 30px 70px -20px rgba(0, 0, 0, 0.8);
+    --menu: #302e2b; --menu-hover: #3b3935; --menu-line: rgba(255, 255, 255, 0.09);
+    --menu-shadow: 0 0 0 0.5px rgba(255, 255, 255, 0.08), 0 0 0 1px rgba(0, 0, 0, 0.6), 0 18px 40px -10px rgba(0, 0, 0, 0.85);
   }
 }
 :root[data-theme="dark"] {
@@ -60,6 +66,8 @@
   --bezel: #0f0f0e; --bezel-lift: rgba(255, 255, 255, .06);
   --pop-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.8), inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 34px 70px -24px rgba(0, 0, 0, 0.8);
   --win-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.9), 0 30px 70px -20px rgba(0, 0, 0, 0.8);
+  --menu: #302e2b; --menu-hover: #3b3935; --menu-line: rgba(255, 255, 255, 0.09);
+  --menu-shadow: 0 0 0 0.5px rgba(255, 255, 255, 0.08), 0 0 0 1px rgba(0, 0, 0, 0.6), 0 18px 40px -10px rgba(0, 0, 0, 0.85);
 }
 
 /* Detail set A. These replace generic UI-kit details: no pills or badges for state,

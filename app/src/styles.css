@@ -83,6 +83,19 @@
     box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.18);
   }
 
+  /* The panel's row menus (concept-g-menus A). */
+  .menu {
+    background: var(--menu);
+    box-shadow: var(--menu-shadow);
+  }
+  .menu-item {
+    background: transparent;
+  }
+  .menu-item:not(:disabled):hover,
+  .menu-item:focus-visible {
+    background: var(--menu-hover);
+  }
+
   /* Settings groups: a raised well with a hairline. */
   .well {
     box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.1);

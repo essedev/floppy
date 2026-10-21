@@ -230,7 +230,9 @@ export const it = {
     actions: (name: string) => `Azioni per ${name}`,
     working: "IN CORSO",
     makeAvailable: "Rendi disponibile",
+    makeAvailableNote: "Scarica tutto il progetto su questo Mac, per montare senza attese.",
     freeSpace: "Libera spazio",
+    freeSpaceNote: "Cancella le copie su questo Mac. I file restano su Floppy.",
     showInFinder: "Mostra nel Finder",
     fullCache:
       "Per fare posto Floppy libererà i file aperti meno di recente su questo Mac. Restano su Floppy e si riscaricano quando li apri.",
