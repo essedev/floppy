@@ -13,7 +13,7 @@ from pydantic import ValidationError
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncEngine
 
-from floppy_server.background import expire_stale_rows, reconcile_instances
+from floppy_server.background import expire_stale_rows, reconcile_instances, refresh_app_version
 from floppy_server.context import Context, utcnow
 from floppy_server.crypto import token_hash
 from floppy_server.models import AuditEvent, Device, KeyExposure, MetaUser, SignInRequest
@@ -332,6 +332,37 @@ async def test_heartbeat_reports_status_and_logs_an_outdated_app_once(
             .all()
         )
     assert outdated == [{"appVersion": "0.3.9"}]
+
+
+async def test_a_newer_release_on_github_flags_a_device_outdated(
+    org: Org,
+    ctx: Context,
+    admin: httpx.AsyncClient,
+    clients: ClientFactory,
+    owner_engine: AsyncEngine,
+) -> None:
+    app = clients()
+    device = await enrol_device(app, admin, ctx, org.admin_email)
+    beat = {**BEAT, "appVersion": "0.4.1"}  # above the tests' floor, 0.4.0
+    await app.post("/device/heartbeat", json=beat, headers=device.auth)
+    assert (await admin.get("/devices")).json()[0]["appOutdated"] is False
+
+    ctx.settings.app_releases_url = "https://api.github.test/repos/essedev/floppy/releases/latest"
+    release = httpx.MockTransport(lambda _: httpx.Response(200, json={"tag_name": "v0.5.0"}))
+    await refresh_app_version(ctx, transport=release)
+    assert (await admin.get("/devices")).json()[0]["appOutdated"] is True
+    await app.post("/device/heartbeat", json=beat, headers=device.auth)
+    async with owner_engine.connect() as conn:
+        outdated = (
+            (
+                await conn.execute(
+                    select(AuditEvent.detail).where(AuditEvent.action == "device_seen_outdated")
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert outdated == [{"appVersion": "0.4.1"}]
 
 
 async def test_admin_revokes_a_device_and_the_window_of_each_disk_it_saw_opens(

@@ -371,7 +371,7 @@ async def heartbeat(ctx: Context, token: str, body: HeartbeatRequest) -> Heartbe
             s3_access_key_tail=body.s3_access_key_tail,
             mounted_volume_ids=body.mounted_disk_ids,
         )
-        latest = ctx.settings.latest_app_version
+        latest = ctx.latest_app_version
         if is_outdated(body.app_version, latest):
             status = await db.get(DeviceStatus, device.id, with_for_update=True)
             if status is not None and status.outdated_logged_version != body.app_version:

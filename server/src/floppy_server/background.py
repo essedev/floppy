@@ -1,7 +1,8 @@
 """
 Background work: the disk creation and rotation workers, the reconciler of the devices' users
 and grants, housekeeping of stuck rows, the status pollers behind `GET /health` and the
-disks' counters, and the purge of the disks' activity after 30 days.
+disks' counters, the purge of the disks' activity after 30 days, and the lookup of the app's
+latest release (infra/releases.py).
 
 Each job is safe to run in several processes at once: the workers take rows with `SKIP
 LOCKED`, and the per-organization jobs take a transaction-level advisory lock, so a second
@@ -21,6 +22,7 @@ from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta
 from uuid import UUID
 
+import httpx
 from sqlalchemy import select, update
 
 from floppy_server.access.service import apply_owed, sync
@@ -30,6 +32,7 @@ from floppy_server.context import Context, utcnow
 from floppy_server.devices.service import revoke_rows
 from floppy_server.disks.service import run_disk_formats
 from floppy_server.infra.metadata import MetadataUnavailableError
+from floppy_server.infra.releases import ReleaseLookupError, fetch_latest_app_version
 from floppy_server.keys.managed import delete_owed_keys
 from floppy_server.keys.service import run_rotations
 from floppy_server.models import (
@@ -48,6 +51,8 @@ PENDING_DEVICE_TTL = timedelta(hours=24)
 # Events past the 30 days go once an hour: nothing reads them by then.
 ACTIVITY_PURGE_SECONDS = 3600.0
 CREATING_VOLUME_TTL = timedelta(minutes=15)
+# A release is a few a month: four lookups a day stay far below GitHub's anonymous limit.
+APP_RELEASE_SECONDS = 6 * 3600.0
 
 
 async def _organizations(ctx: Context) -> list[UUID]:
@@ -283,6 +288,26 @@ async def poll_all(ctx: Context) -> None:
         await poll_status(ctx, organization_id)
 
 
+async def refresh_app_version(
+    ctx: Context, transport: httpx.AsyncBaseTransport | None = None
+) -> None:
+    """
+    Reads the app's latest release into the context. A failure keeps the last known value
+    with one warning line: the lookup is a convenience, never a reason to stop the loop.
+    """
+    url = ctx.settings.app_releases_url
+    if not url:
+        return
+    try:
+        ctx.fetched_app_version = await fetch_latest_app_version(url, transport=transport)
+    except ReleaseLookupError as error:
+        log.warning(
+            "app release lookup failed (%s); keeping %s as the latest",
+            error,
+            ctx.latest_app_version,
+        )
+
+
 async def _forever(
     name: str,
     interval: float,
@@ -307,7 +332,7 @@ async def _forever(
 def start(ctx: Context) -> list[asyncio.Task[None]]:
     """Starts the background loops; the caller cancels them at shutdown."""
     s = ctx.settings
-    return [
+    tasks = [
         asyncio.create_task(
             _forever(
                 "rotations",
@@ -327,3 +352,11 @@ def start(ctx: Context) -> list[asyncio.Task[None]]:
         asyncio.create_task(_forever("status", s.status_interval_seconds, lambda: poll_all(ctx))),
         asyncio.create_task(_forever("activity", ACTIVITY_PURGE_SECONDS, lambda: purge(ctx))),
     ]
+    if s.app_releases_url:
+        # The first lookup runs at start, like every loop's first pass.
+        tasks.append(
+            asyncio.create_task(
+                _forever("releases", APP_RELEASE_SECONDS, lambda: refresh_app_version(ctx))
+            )
+        )
+    return tasks

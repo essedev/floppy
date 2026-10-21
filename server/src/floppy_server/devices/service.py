@@ -23,6 +23,7 @@ from floppy_server.api import Actor, CamelModel
 from floppy_server.audit.service import AuditActor, DetailValue, Target, record
 from floppy_server.context import Context, utcnow
 from floppy_server.errors import invalid_state, not_found
+from floppy_server.infra.releases import version_tuple
 from floppy_server.keys.managed import delete_owed_keys, retire_device_keys
 from floppy_server.models import Device, DeviceStatus, Organization, User
 
@@ -61,17 +62,6 @@ class DeviceOut(CamelModel):
     replica: Replica | None
     revoked_at: datetime | None
     revoked_by: str | None
-
-
-def version_tuple(version: str) -> tuple[int, ...]:
-    """A dotted version as numbers, ignoring anything after the first non-numeric part."""
-    parts: list[int] = []
-    for piece in version.strip().lstrip("v").split("."):
-        digits = "".join(c for c in piece if c.isdigit())
-        if not digits:
-            break
-        parts.append(int(digits))
-    return tuple(parts)
 
 
 def is_outdated(app_version: str | None, latest: str) -> bool:
@@ -130,7 +120,7 @@ async def list_devices(ctx: Context, actor: Actor) -> list[DeviceOut]:
         query = query.where(Device.user_id == actor.user_id)
     async with ctx.sessions() as db:
         rows = (await db.execute(query)).all()
-    devices = [device_view(d, o, s, r, ctx.settings.latest_app_version) for d, o, s, r in rows]
+    devices = [device_view(d, o, s, r, ctx.latest_app_version) for d, o, s, r in rows]
     order = {"active": 0, "pending": 1, "revoked": 2}
     return sorted(devices, key=lambda d: (order[d.state], not d.connected, d.name.lower()))
 
@@ -155,7 +145,7 @@ async def get_device(ctx: Context, organization_id: UUID, device_id: UUID) -> De
     if row is None:
         raise not_found("No such device")
     device, owner_row, status, revoker_row = row
-    return device_view(device, owner_row, status, revoker_row, ctx.settings.latest_app_version)
+    return device_view(device, owner_row, status, revoker_row, ctx.latest_app_version)
 
 
 def revoke_rows(

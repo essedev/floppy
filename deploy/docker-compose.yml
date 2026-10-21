@@ -100,6 +100,9 @@ services:
       FLOPPY_BOOTSTRAP_STORAGE_MODE: ${FLOPPY_BOOTSTRAP_STORAGE_MODE:-manual}
       FLOPPY_BOOTSTRAP_STORAGE_PROVIDER: ${FLOPPY_BOOTSTRAP_STORAGE_PROVIDER:-}
       FLOPPY_BOOTSTRAP_STORAGE_ADMIN_CREDENTIALS: ${FLOPPY_BOOTSTRAP_STORAGE_ADMIN_CREDENTIALS:-}
+      # `-`, not `:-`: set empty, it turns the release lookup off.
+      FLOPPY_APP_RELEASES_URL: ${FLOPPY_APP_RELEASES_URL-https://api.github.com/repos/essedev/floppy/releases/latest}
+      FLOPPY_LATEST_APP_VERSION: ${FLOPPY_LATEST_APP_VERSION:-0.1.0}
     networks: [internal, proxy]
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/healthz', timeout=2)"]

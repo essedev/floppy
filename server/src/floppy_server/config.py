@@ -146,8 +146,11 @@ class Settings(BaseSettings):
     # Self-hosted: one organization, refused after the first.
     single_organization: bool = True
 
-    # The app release devices are compared against for `appOutdated`.
+    # The app release devices are compared against for `appOutdated`: the latest of the app's
+    # public releases (`app_releases_url`, a GitHub `releases/latest` endpoint, read every 6
+    # hours; empty turns the lookup off), never lower than `latest_app_version`, the floor.
     latest_app_version: str = "0.1.0"
+    app_releases_url: str = "https://api.github.com/repos/essedev/floppy/releases/latest"
 
     # Background loops: rotation worker, ACL reconciler, status pollers.
     background_tasks: bool = True
@@ -203,6 +206,8 @@ class Settings(BaseSettings):
             raise ValueError("the meta service needs FLOPPY_META_URL and FLOPPY_META_TOKEN")
         if not self.public_url.startswith(("http://", "https://")):
             raise ValueError("FLOPPY_PUBLIC_URL must be an http(s) address")
+        if self.app_releases_url and not self.app_releases_url.startswith(("http://", "https://")):
+            raise ValueError("FLOPPY_APP_RELEASES_URL must be an http(s) address, or empty")
         return self
 
     @cached_property

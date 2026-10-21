@@ -352,7 +352,7 @@ What each device last reported in its heartbeat. One row per device, overwritten
 | `device_id` | `uuid` | | | Primary key, composite foreign key to `devices` |
 | `organization_id` | `uuid` | | | |
 | `last_seen_at` | `timestamptz` | | | `connected` is a heartbeat in the last 2 minutes, computed |
-| `app_version`, `macos_version` | `text` | | | `appOutdated` is computed against the latest release the instance knows, not stored |
+| `app_version`, `macos_version` | `text` | | | `appOutdated` is computed against the latest release the instance knows (read every 6 hours from the app's GitHub releases, `FLOPPY_APP_RELEASES_URL`, never below `FLOPPY_LATEST_APP_VERSION`), not stored |
 | `replica_mode` | `text` | yes | | `CHECK IN ('replica', 'master', 'offline')`, from the mounts' `.stats` |
 | `replica_lag_ms` | `integer` | yes | | |
 | `s3_access_key_tail` | `text` | yes | | Managed: the tail of the key its mounts use, to see that a reissued key arrived. Manual: the tail read from a disk's format on its replica, which counts the devices that picked up a rotation |

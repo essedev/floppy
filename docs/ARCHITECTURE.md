@@ -246,6 +246,7 @@ What self-hosting needs, besides the Compose file ([Deploy](#deploy)):
 - **`FLOPPY_SECRET_KEY`**: 32 random bytes that encrypt the disks' S3 secrets, the instances' admin passwords, the storage adapter's credentials and the SMTP password at rest (DECISIONS #17). Losing it loses no files: a manual disk's key is still in its format and an admin rotates it; in managed mode the adapter's credentials are typed again and it creates a new key for the control plane; the SMTP password is typed again.
 - **The storage mode**, chosen at first start: manual with a bucket and a key pasted per disk and any S3, or managed with a provider adapter and its admin credentials (DECISIONS #24). It is fixed once a disk exists.
 - **The meta service** (`meta/`, [Deploy](#deploy)), its two tokens and the domain its instances live under; the number of disks is what its port range (1,000 by default) and the host's memory allow.
+- **Internet, optionally**: the control plane reads the app's latest release from its GitHub releases every 6 hours, to flag devices on an older app; without internet `FLOPPY_APP_RELEASES_URL` is set empty and `FLOPPY_LATEST_APP_VERSION`, otherwise the floor, is the only source.
 
 ## Deploy
 

@@ -21,6 +21,7 @@ from floppy_server.infra.mail import Mailer, SmtpConfig
 from floppy_server.infra.meta import MetaService
 from floppy_server.infra.metadata import MetadataAdmin, ValkeyTarget
 from floppy_server.infra.providers import GarageAdapter, ProviderError, StorageAdapter
+from floppy_server.infra.releases import effective_app_version
 from floppy_server.infra.storage import StorageProber
 from floppy_server.models import MetaInstance, Organization, S3Key, Volume
 from floppy_server.ratelimit import RateLimiter
@@ -49,6 +50,14 @@ class Context:
     rate_limiter: RateLimiter = field(default_factory=RateLimiter)
     # Tests put a fake here; otherwise each managed organization gets its provider's.
     adapter_override: StorageAdapter | None = None
+    # The latest app release read by the background loop (infra/releases.py); in memory only,
+    # so a restart starts from the floor until the first lookup.
+    fetched_app_version: str | None = None
+
+    @property
+    def latest_app_version(self) -> str:
+        """The app release devices are compared against: the fetched one, or the floor."""
+        return effective_app_version(self.settings.latest_app_version, self.fetched_app_version)
 
     def instance_target(self, instance: MetaInstance) -> ValkeyTarget:
         """A disk's instance as the control plane reaches it, with its admin credentials."""
