@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Concept G - menu del pannello</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<!--
+  Concept G: i menu dei dischi e dei progetti nel pannello della barra dei menu.
+
+  Il problema, visto il 21/10/2026 sul pannello di un tester (0.2.0, tema scuro):
+  - Il menu si apre dentro la lista e spinge giù il resto: sembra un'altra fila di righe, non un menu.
+    In tema scuro il suo fondo (raised) si distingue appena dalla sezione (sunken).
+  - Due menu restano aperti insieme (il disco e un suo progetto): ognuno ha il suo stato.
+  - Le icone ci sono su alcune voci e non su altre, a destra; nessun gruppo, nessun separatore: andare
+    nel Finder, aprire il cestino, liberare spazio e spegnere il disco hanno lo stesso peso.
+  - "Rendi disponibile" e "Libera spazio" non dicono cosa fanno; il progetto sotto il disco non sembra
+    dentro il disco (stessa rientranza, segno grigio che sembra un disco spento).
+
+  Varianti (la scommessa, non l'aspetto):
+    A Menu sospeso: il menu galleggia sopra il pannello, ancorato ai tre puntini, si chiude cliccando
+      fuori o con Esc, uno solo alla volta. Icone a sinistra su ogni voce, gruppi con separatori, una
+      riga di spiegazione sotto le azioni sullo spazio, Spegni in fondo da solo. CONSIGLIATA.
+    B Menu di macOS: il menu vero del sistema (NSMenu, da Tauri), uguale a quello del Finder. Familiare
+      e senza codice di menu nostro, ma niente spiegazioni sotto le voci, l'aspetto non è quello di
+      Floppy e nel browser di sviluppo non si vede.
+    C Azioni in vista: sulla riga del disco tre pulsanti a icona (Finder, Attività, Cestino) al passaggio
+      del mouse; i tre puntini tengono solo spazio e Spegni. Più veloce per chi lo usa spesso, ma tante
+      icone in 360 px e il loro significato si legge solo nel suggerimento.
+  In tutte: i progetti rientrano sotto il loro disco con una linea guida, e il segno davanti al progetto
+  è una cartella, non il segno dello slot.
+
+  Tasti: t cambia tema.
+-->
+<style>
+:root {
+  color-scheme: light;
+  --f-ui: "Schibsted Grotesk", -apple-system, sans-serif;
+  --f-ro: ui-monospace, Menlo, monospace;
+  --page: #e6e3dc; --surface: #f4f2ed; --raised: #fbfaf7; --sunken: #ebe8e1; --line: #dcd8cf;
+  --ink: #1d1c1a; --ink-2: #625f58; --ink-3: #706c64;
+  --bezel: #dcd8ce; --bezel-lift: rgba(255,255,255,.55); --led-ok: #2fbf57;
+  --menu: #fbfaf7; --menu-hover: #ebe8e1;
+  --pop-shadow: 0 0 0 0.5px rgba(40,30,20,.18), inset 0 1px 0 rgba(255,255,255,.7), 0 34px 70px -24px rgba(50,35,20,.5);
+  --menu-shadow: 0 0 0 0.5px rgba(40,30,20,.22), 0 18px 40px -12px rgba(50,35,20,.45);
+  --ns-bg: rgba(246,245,242,.86); --ns-ink: #1d1c1a; --ns-dim: #8a867e; --ns-sel: #2f6fe4; --ns-line: rgba(0,0,0,.1);
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #121211; --surface: #1d1c1a; --raised: #262522; --sunken: #161514; --line: #2f2d29;
+  --ink: #efece5; --ink-2: #a29e95; --ink-3: #8f8b83;
+  --bezel: #0f0f0e; --bezel-lift: rgba(255,255,255,.06); --led-ok: #3fdc6c;
+  --menu: #302e2b; --menu-hover: #3b3935;
+  --pop-shadow: 0 0 0 0.5px rgba(0,0,0,.8), inset 0 1px 0 rgba(255,255,255,.06), 0 34px 70px -24px rgba(0,0,0,.8);
+  --menu-shadow: 0 0 0 0.5px rgba(255,255,255,.08), 0 0 0 1px rgba(0,0,0,.6), 0 18px 40px -10px rgba(0,0,0,.85);
+  --ns-bg: rgba(44,43,40,.88); --ns-ink: #efece5; --ns-dim: #8f8b83; --ns-sel: #2f6fe4; --ns-line: rgba(255,255,255,.1);
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--page); color: var(--ink); font: 14px/1.45 var(--f-ui); padding: 28px 16px 60px; }
+header { max-width: 1480px; margin: 0 auto 22px; }
+h1 { margin: 0 0 6px; font-size: 24px; letter-spacing: -.02em; }
+header p { margin: 0; max-width: 78ch; color: var(--ink-2); }
+.grid { max-width: 1480px; margin: 0 auto; display: grid; gap: 22px; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); align-items: start; }
+.col h2 { margin: 0 0 4px; font-size: 16px; }
+.col h2 small { font-weight: 500; color: var(--ink-2); }
+.col p.why { margin: 0 0 12px; font-size: 13px; color: var(--ink-2); min-height: 76px; }
+.panel { position: relative; width: 340px; max-width: 100%; background: var(--surface); border-radius: 16px; box-shadow: var(--pop-shadow); padding: 10px 0 12px; }
+.section { margin: 0 8px; background: var(--sunken); border-radius: 14px; padding: 14px 4px 6px; }
+.section-h { display: flex; justify-content: space-between; padding: 0 12px; margin-bottom: 4px; font-size: 11px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-2); }
+.row { position: relative; display: flex; align-items: center; min-height: 48px; padding: 0 4px 0 12px; border-radius: 10px; }
+.row.on { background: var(--raised); }
+.row .name { font-size: 13px; font-weight: 500; display: flex; align-items: center; gap: 4px; }
+.row .line { font-size: 12px; color: var(--ink-2); }
+.row .body { flex: 1; min-width: 0; padding: 6px 0; }
+.ro { font: 11px var(--f-ro); text-transform: uppercase; letter-spacing: .04em; color: var(--ink-2); margin-left: auto; }
+.dots { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 8px; color: var(--ink-2); }
+.dots.on { background: var(--sunken); color: var(--ink); }
+.led { display: inline-grid; place-items: center; width: 14px; height: 14px; border-radius: 50%; background: var(--bezel); box-shadow: inset 0 1px 1.5px rgba(0,0,0,.35), 0 1px 0 var(--bezel-lift); margin-right: 9px; flex: none; }
+.led::after { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--led-ok); }
+.slot { width: 12px; height: 4px; border-radius: 2px; background: var(--ink-3); margin-right: 10px; flex: none; }
+svg.i { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+/* Folder rows */
+.folder { min-height: 36px; }
+.folder .name { font-weight: 400; }
+.tree { margin-left: 18px; padding-left: 8px; border-left: 1px solid var(--line); }
+.tree .folder { padding-left: 6px; }
+.ficon { color: var(--ink-3); margin-right: 8px; }
+/* X: today */
+.inline-menu { margin: 4px 4px 8px; background: var(--raised); border-radius: 12px; padding: 6px; display: flex; flex-direction: column; box-shadow: 0 0 0 .5px rgba(0,0,0,.12); }
+.inline-menu .mi { height: 36px; display: flex; align-items: center; justify-content: space-between; padding: 0 10px; font-size: 13px; font-weight: 500; border-radius: 8px; color: var(--ink); }
+.inline-menu .mi svg { color: var(--ink-2); }
+/* A: floating */
+.pop { position: absolute; right: 6px; z-index: 5; width: 250px; background: var(--menu); border-radius: 12px; padding: 5px; box-shadow: var(--menu-shadow); }
+.pop .mi { display: grid; grid-template-columns: 18px 1fr; column-gap: 10px; align-items: center; padding: 6px 9px; border-radius: 8px; font-size: 13px; color: var(--ink); }
+.pop .mi svg { color: var(--ink-2); }
+.pop .mi.hover { background: var(--menu-hover); }
+.pop .mi small { grid-column: 2; font-size: 11.5px; color: var(--ink-2); line-height: 1.35; }
+.pop .sep { height: 1px; background: var(--line); margin: 4px 8px; }
+.pop .head { padding: 6px 9px 4px; font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); }
+/* B: macOS menu */
+.ns { position: absolute; right: 10px; z-index: 5; width: 232px; background: var(--ns-bg); backdrop-filter: blur(20px) saturate(1.6); -webkit-backdrop-filter: blur(20px) saturate(1.6); border-radius: 9px; padding: 5px; box-shadow: 0 0 0 .5px rgba(0,0,0,.25), 0 10px 30px rgba(0,0,0,.28); font: 13px -apple-system, "SF Pro Text", sans-serif; color: var(--ns-ink); }
+.ns .mi { display: flex; align-items: center; gap: 8px; height: 22px; padding: 0 9px; border-radius: 5px; }
+.ns .mi svg { width: 14px; height: 14px; }
+.ns .mi.sel { background: var(--ns-sel); color: #fff; }
+.ns .sep { height: 1px; background: var(--ns-line); margin: 5px 9px; }
+/* C: actions in view */
+.acts { display: flex; gap: 2px; margin-left: 6px; }
+.act { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 8px; color: var(--ink-2); }
+.act.hover { background: var(--sunken); color: var(--ink); }
+.tip { position: absolute; z-index: 6; top: -26px; right: 64px; background: var(--ink); color: var(--surface); font-size: 11.5px; padding: 3px 7px; border-radius: 6px; white-space: nowrap; }
+.spacer { height: 190px; }
+.reco { display: inline-block; margin-left: 6px; font: 11px var(--f-ro); text-transform: uppercase; letter-spacing: .04em; color: var(--ink-2); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Concept G · menu del pannello</h1>
+  <p>I menu del disco e dei progetti, oggi e in tre varianti, sullo stesso pannello: il disco Progetti con il menu aperto e un suo progetto. Premi <b>t</b> per il tema scuro, dove il problema si vede di più.</p>
+</header>
+<div class="grid" id="grid"></div>
+<script>
+const I = {
+  folder: '<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>',
+  history: '<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/>',
+  trash: '<path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><path d="M10 11v6"/><path d="M14 11v6"/>',
+  download: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/>',
+  eraser: '<path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21"/><path d="M22 21H7"/><path d="m5 11 9 9"/>',
+  power: '<path d="M12 2v10"/><path d="M18.4 6.6a9 9 0 1 1-12.77.04"/>',
+  dots: '<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',
+  chev: '<path d="m6 9 6 6 6-6"/>',
+};
+const svg = (n) => `<svg class="i" viewBox="0 0 24 24">${I[n]}</svg>`;
+const disk = (on, extra = '') => `
+  <div class="row ${on ? 'on' : ''}">
+    <span class="led"></span>
+    <div class="body"><div class="name">Progetti ${svg('chev')}<span class="ro">Collegato</span></div><div class="line">0 GB di copie su questo Mac</div></div>
+    ${extra}<span class="dots ${on ? 'on' : ''}">${svg('dots')}</span>
+  </div>`;
+const head = `<div class="section-h"><span>Dischi del team</span><span>1</span></div>`;
+
+const X = `<div class="panel"><div class="section">${head}${disk(true)}
+  <div class="inline-menu">
+    <div class="mi">Mostra nel Finder ${svg('folder')}</div><div class="mi">Attività ${svg('history')}</div>
+    <div class="mi">Cestino ${svg('trash')}</div><div class="mi">Libera spazio</div><div class="mi">Spegni su questo Mac</div>
+  </div>
+  <div class="row folder on" style="margin:0 4px"><span class="slot"></span><div class="body"><div class="name">Marketing : growth</div></div><span class="dots on">${svg('dots')}</span></div>
+  <div class="inline-menu"><div class="mi">Rendi disponibile</div><div class="mi">Libera spazio</div><div class="mi">Mostra nel Finder ${svg('folder')}</div></div>
+</div></div>`;
+
+const tree = (on = false, extra = '') => `<div class="tree">
+  <div class="row folder ${on ? 'on' : ''}">${svg('folder').replace('class="i"', 'class="i ficon"')}<div class="body"><div class="name">Marketing : growth</div></div>${extra}<span class="dots">${svg('dots')}</span></div>
+  <div class="row folder">${svg('folder').replace('class="i"', 'class="i ficon"')}<div class="body"><div class="name">Spot Natale</div></div><span class="dots">${svg('dots')}</span></div>
+</div>`;
+
+const A = `<div class="panel"><div class="section">${head}${disk(true)}${tree()}<div class="spacer"></div>
+  <div class="pop" style="top:84px">
+    <div class="mi hover">${svg('folder')}<span>Mostra nel Finder</span></div>
+    <div class="sep"></div>
+    <div class="mi">${svg('history')}<span>Attività</span></div>
+    <div class="mi">${svg('trash')}<span>Cestino</span></div>
+    <div class="sep"></div>
+    <div class="mi">${svg('eraser')}<span>Libera spazio</span><small>Cancella le copie su questo Mac. I file restano su Floppy.</small></div>
+    <div class="sep"></div>
+    <div class="mi">${svg('power')}<span>Spegni su questo Mac</span></div>
+  </div>
+</div></div>`;
+
+const A2 = `<div class="panel"><div class="section">${head}${disk(false)}${tree(true)}<div class="spacer" style="height:196px"></div>
+  <div class="pop" style="top:136px">
+    <div class="head">Marketing : growth</div>
+    <div class="mi hover">${svg('download')}<span>Rendi disponibile</span><small>Scarica tutto il progetto su questo Mac, per montare senza attese.</small></div>
+    <div class="mi">${svg('eraser')}<span>Libera spazio</span><small>Cancella le copie su questo Mac. I file restano su Floppy.</small></div>
+    <div class="sep"></div>
+    <div class="mi">${svg('folder')}<span>Mostra nel Finder</span></div>
+  </div>
+</div></div>`;
+
+const B = `<div class="panel"><div class="section">${head}${disk(true)}${tree()}<div class="spacer" style="height:96px"></div>
+  <div class="ns" style="top:84px">
+    <div class="mi sel">${svg('folder')}Mostra nel Finder</div>
+    <div class="sep"></div>
+    <div class="mi">${svg('history')}Attività</div>
+    <div class="mi">${svg('trash')}Cestino</div>
+    <div class="sep"></div>
+    <div class="mi">${svg('eraser')}Libera spazio…</div>
+    <div class="sep"></div>
+    <div class="mi">${svg('power')}Spegni su questo Mac…</div>
+  </div>
+</div></div>`;
+
+const acts = `<span class="acts"><span class="act hover">${svg('folder')}</span><span class="act">${svg('history')}</span><span class="act">${svg('trash')}</span></span>`;
+const C = `<div class="panel"><div class="section">${head}
+  <div style="position:relative">${disk(true, acts)}<span class="tip" style="top:-22px;right:92px">Mostra nel Finder</span></div>
+  ${tree(false, `<span class="acts"><span class="act">${svg('download')}</span><span class="act">${svg('eraser')}</span></span>`)}
+  <div class="spacer" style="height:80px"></div>
+  <div class="pop" style="top:84px">
+    <div class="mi">${svg('eraser')}<span>Libera spazio</span><small>Cancella le copie su questo Mac. I file restano su Floppy.</small></div>
+    <div class="sep"></div>
+    <div class="mi">${svg('power')}<span>Spegni su questo Mac</span></div>
+  </div>
+</div></div>`;
+
+const cols = [
+  ['X', 'Oggi', 'Il menu si apre dentro la lista e spinge giù il resto; due menu aperti insieme; icone solo su alcune voci; nessun gruppo.', X],
+  ['A', 'Menu sospeso', 'Galleggia sopra il pannello, uno alla volta, si chiude fuori o con Esc. Icone a sinistra, gruppi, una riga che spiega le azioni sullo spazio, Spegni da solo in fondo. Sotto, lo stesso menu su un progetto.', A + '<div style="height:14px"></div>' + A2, true],
+  ['B', 'Menu di macOS', 'Il menu del sistema, uguale al Finder: si riconosce subito. Ma niente spiegazioni sotto le voci (le dice la conferma), e l\'aspetto non è quello di Floppy.', B],
+  ['C', 'Azioni in vista', 'Finder, Attività e Cestino come icone sulla riga; i tre puntini tengono solo spazio e Spegni. Veloce, ma le icone si capiscono solo col suggerimento.', C],
+];
+document.getElementById('grid').innerHTML = cols.map(([k, t, why, html, reco]) =>
+  `<div class="col"><h2>${k} <small>${t}</small>${reco ? '<span class="reco">consigliata</span>' : ''}</h2><p class="why">${why}</p>${html}</div>`).join('');
+addEventListener('keydown', (e) => {
+  if (e.key === 't') {
+    const r = document.documentElement;
+    r.dataset.theme = r.dataset.theme === 'dark' ? 'light' : 'dark';
+  }
+});
+if (matchMedia('(prefers-color-scheme: dark)').matches) document.documentElement.dataset.theme = 'dark';
+</script>
+</body>
+</html>
