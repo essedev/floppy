@@ -116,7 +116,10 @@ impl TrayState {
 
     fn set(&self, png: &'static [u8]) {
         if let Ok(img) = Image::from_bytes(png) {
-            let _ = self.icon.set_icon(Some(img));
+            // On macOS a plain set_icon drops the template flag set at build
+            // time: the icon then stays black instead of following the menu
+            // bar (white on a dark or tinted one). Both at once, no flicker.
+            let _ = self.icon.set_icon_with_as_template(Some(img), true);
         }
     }
 }
