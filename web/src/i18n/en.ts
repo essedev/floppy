@@ -85,7 +85,7 @@ export const en: Dict = {
   },
   shell: {
     signOut: 'Sign out',
-    theme: { system: 'Automatic theme', light: 'Light theme', dark: 'Dark theme', next: 'Change theme' },
+    theme: { light: 'Light theme', dark: 'Dark theme', switchTo: { light: 'Switch to the light theme', dark: 'Switch to the dark theme' } },
   },
   fake: {
     label: 'Fake data',

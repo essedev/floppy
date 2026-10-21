@@ -1,44 +1,58 @@
 /*
-  Light, dark or the system's choice. design/tokens.css follows prefers-color-scheme and is
-  forced by data-theme on <html>; this hook sets or clears that attribute and remembers it.
+  Light or dark. Until the person chooses, the page is in the system's scheme and follows it
+  live: design/tokens.css reads prefers-color-scheme while <html> has no data-theme. Choosing
+  stores the theme and sets data-theme, and from then on the system no longer drives it.
+  public/theme.js applies the stored choice before the first paint, under the same key.
 */
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 
-/** The theme the person chose. */
-export type ThemeMode = 'system' | 'light' | 'dark'
+/** The theme on screen. */
+export type Theme = 'light' | 'dark'
 
 const KEY = 'floppy.theme'
+const darkQuery = window.matchMedia('(prefers-color-scheme: dark)')
 
-function saved(): ThemeMode {
+/** The choice made in this visit, kept when storage refuses it (private mode). */
+let chosen: Theme | null = null
+
+/** The choice the person made, or null while the system decides. */
+function storedTheme(): Theme | null {
+  if (chosen) return chosen
   try {
     const value = localStorage.getItem(KEY)
     if (value === 'light' || value === 'dark') return value
   } catch {
-    // No storage: follow the system.
+    // No storage: the system decides.
   }
-  return 'system'
+  return null
 }
 
-/** Applies the remembered theme before the first render, so the page does not flash. */
-export function applySavedTheme(): void {
-  const mode = saved()
-  if (mode !== 'system') document.documentElement.dataset.theme = mode
-}
+const systemTheme = (): Theme => (darkQuery.matches ? 'dark' : 'light')
 
-/** The chosen theme and a setter that applies and remembers it. */
-export function useTheme(): [ThemeMode, (mode: ThemeMode) => void] {
-  const [mode, setMode] = useState<ThemeMode>(saved)
+/** The theme on screen and a setter that applies and remembers the person's choice. */
+export function useTheme(): [Theme, (theme: Theme) => void] {
+  const [theme, setTheme] = useState<Theme>(() => storedTheme() ?? systemTheme())
+
+  // Until the person chooses, follow the system as it changes (the tokens already do).
   useEffect(() => {
-    const root = document.documentElement
-    if (mode === 'system') delete root.dataset.theme
-    else root.dataset.theme = mode
+    const follow = () => {
+      if (!storedTheme()) setTheme(systemTheme())
+    }
+    darkQuery.addEventListener('change', follow)
+    return () => darkQuery.removeEventListener('change', follow)
+  }, [])
+
+  const choose = useCallback((next: Theme) => {
+    chosen = next
+    document.documentElement.dataset.theme = next
     try {
-      if (mode === 'system') localStorage.removeItem(KEY)
-      else localStorage.setItem(KEY, mode)
+      localStorage.setItem(KEY, next)
     } catch {
       // Applied for this visit only.
     }
-  }, [mode])
-  return [mode, setMode]
+    setTheme(next)
+  }, [])
+
+  return [theme, choose]
 }

@@ -10,10 +10,7 @@ import { RouterProvider } from 'react-router/dom'
 import { I18nProvider } from '@/i18n/I18nProvider'
 import { isApiError } from '@/lib/api'
 import { queryKeys } from '@/lib/api/keys'
-import { applySavedTheme } from '@/lib/theme'
 import { router } from '@/features/app/router'
-
-applySavedTheme()
 
 // A 401 anywhere means the session is gone: forget it, and the guard sends to sign-in.
 const onError = (error: unknown) => {

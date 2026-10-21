@@ -4,20 +4,20 @@
   page and their own devices. On a narrow screen the sidebar folds into a bar on top.
 */
 
-import { FolderLock, HardDrive, House, KeyRound, LaptopMinimal, LayoutGrid, LogOut, Monitor, Moon, ScrollText, SlidersHorizontal, Sun, Users, type LucideIcon } from 'lucide-react'
+import { FolderLock, HardDrive, House, KeyRound, LaptopMinimal, LayoutGrid, LogOut, Moon, ScrollText, SlidersHorizontal, Sun, Users, type LucideIcon } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router'
 import { IconButton } from '@/components/Button'
 import { Avatar, Led } from '@/components/detail'
 import { Wordmark } from '@/components/marks'
 import { useI18n, plural } from '@/i18n'
-import { useTheme, type ThemeMode } from '@/lib/theme'
+import { useTheme, type Theme } from '@/lib/theme'
 import { useCurrentSession, useSignOut } from '@/features/auth/hooks'
 import { openWindows, useKeyStatus } from '@/features/key/hooks'
 import { FakeBanner } from './FakeBanner'
 
-const NEXT_THEME: Record<ThemeMode, ThemeMode> = { system: 'light', light: 'dark', dark: 'system' }
-const THEME_ICON: Record<ThemeMode, LucideIcon> = { system: Monitor, light: Sun, dark: Moon }
+const OTHER_THEME: Record<Theme, Theme> = { light: 'dark', dark: 'light' }
+const THEME_ICON: Record<Theme, LucideIcon> = { light: Sun, dark: Moon }
 
 function NavItem({ to, icon: Icon, label, extra, end }: { to: string; icon: LucideIcon; label: string; extra?: ReactNode; end?: boolean }) {
   return (
@@ -52,6 +52,7 @@ export function AppShell() {
   const org = session.organization
   const count = (n: number) => <span className="num text-xs text-ink-3">{n}</span>
   const ThemeIcon = THEME_ICON[theme]
+  const themeLabel = `${t.shell.theme[theme]}. ${t.shell.theme.switchTo[OTHER_THEME[theme]]}`
 
   return (
     <div className="flex min-h-dvh flex-col">
@@ -100,7 +101,7 @@ export function AppShell() {
             </div>
           </div>
           <div className="flex items-center gap-0.5 px-1.5 pt-2 max-md:absolute max-md:top-3 max-md:right-3 max-md:hidden">
-            <IconButton label={`${t.shell.theme[theme]}. ${t.shell.theme.next}`} onClick={() => setTheme(NEXT_THEME[theme])}>
+            <IconButton label={themeLabel} onClick={() => setTheme(OTHER_THEME[theme])}>
               <ThemeIcon size={17} strokeWidth={1.8} aria-hidden />
             </IconButton>
             <button
@@ -126,7 +127,7 @@ export function AppShell() {
         <main id="main" className="min-w-0 px-[34px] pt-7 pb-10 max-md:px-4 max-md:pt-5">
           <Outlet />
           <div className="mt-10 flex items-center gap-1 border-t border-line pt-3 md:hidden">
-            <IconButton label={`${t.shell.theme[theme]}. ${t.shell.theme.next}`} onClick={() => setTheme(NEXT_THEME[theme])}>
+            <IconButton label={themeLabel} onClick={() => setTheme(OTHER_THEME[theme])}>
               <ThemeIcon size={17} strokeWidth={1.8} aria-hidden />
             </IconButton>
             <button type="button" aria-label={t.lang.switchLabel} onClick={() => setLang(lang === 'it' ? 'en' : 'it')} className="readout h-[34px] rounded-[9px] border-0 bg-transparent px-2 hover:bg-sunken">

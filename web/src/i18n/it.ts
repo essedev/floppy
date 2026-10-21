@@ -92,7 +92,7 @@ export const it = {
   },
   shell: {
     signOut: 'Esci',
-    theme: { system: 'Tema automatico', light: 'Tema chiaro', dark: 'Tema scuro', next: 'Cambia tema' },
+    theme: { light: 'Tema chiaro', dark: 'Tema scuro', switchTo: { light: 'Passa al tema chiaro', dark: 'Passa al tema scuro' } },
   },
   fake: {
     label: 'Dati finti',
