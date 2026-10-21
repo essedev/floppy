@@ -5,7 +5,7 @@ members = ["src-tauri"]
 # The app's version. The bundle version is tracked in src-tauri/tauri.conf.json
 # and package.json: bump the three together.
 [workspace.package]
-version = "0.2.4"
+version = "0.2.5"
 edition = "2024"
 authors = ["Simone Salerno"]
 license = "MIT"
