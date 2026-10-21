@@ -11,6 +11,7 @@ import * as autostart from "@tauri-apps/plugin-autostart";
 import * as notification from "@tauri-apps/plugin-notification";
 import { mockBackend } from "@/lib/mock";
 import type {
+  AppUpdate,
   ActivitySnapshot,
   Alert,
   AppInfo,
@@ -77,6 +78,11 @@ export interface Backend {
   /** Installs or updates the engine from the app, then sets it up. */
   installEngine(): Promise<void>;
   appInfo(): Promise<AppInfo>;
+  /** A newer release of the app, if the daily check found one. */
+  getAppUpdate(): Promise<AppUpdate | null>;
+  /** Upgrades through Homebrew: the app quits and the new one opens. */
+  installAppUpdate(): Promise<void>;
+  onAppUpdate(cb: (u: AppUpdate | null) => void): Unlisten;
   openSettings(): Promise<void>;
   openWelcome(): Promise<void>;
   finishWelcome(): Promise<void>;
@@ -146,6 +152,9 @@ const tauriBackend: Backend = {
   runSetup: () => invoke("run_setup"),
   installEngine: () => invoke("install_engine"),
   appInfo: () => invoke("app_info"),
+  getAppUpdate: () => invoke("get_app_update"),
+  installAppUpdate: () => invoke("install_app_update"),
+  onAppUpdate: (cb) => subscribe("app-update", cb),
   openSettings: () => invoke("open_settings"),
   openWelcome: () => invoke("open_welcome"),
   finishWelcome: () => invoke("finish_welcome"),

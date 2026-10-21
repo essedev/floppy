@@ -219,7 +219,7 @@ The problems each feature answers, to verify in the pilot:
 
 Only the macOS module is built; Windows is added as a module, not a rewrite, when needed.
 
-**Distribution with Homebrew** (DECISIONS #10), like Portsage: a cask in its own tap, without an Apple Developer ID, clearing the quarantine in `postflight_steps`. Homebrew needs administrator rights once to install itself; the app and the disk never do. Limits: updates need `brew upgrade`, and the trick for unsigned apps depends on Homebrew's rules, which are getting stricter. A DMG in `~/Applications` stays the fallback.
+**Distribution with Homebrew** (DECISIONS #10), like Portsage: a cask in its own tap, without an Apple Developer ID, clearing the quarantine in `postflight_steps`. Homebrew needs administrator rights once to install itself; the app and the disk never do. Updates still go through `brew upgrade`, but the app runs it (`app/src-tauri/src/updates.rs`): once a day it reads `releases/latest` of the GitHub repo, the panel offers a newer version, and a click starts `brew update` and `brew upgrade --cask essedev/floppy/floppy` in a shell in its own process group, since the cask's `uninstall quit` closes the app halfway; the shell then opens the new bundle, and a failure leaves the old app running with Homebrew's last line and the command to run by hand (log in `~/Library/Logs/dev.esse.floppy.menubar/update.log`). Limit: the trick for unsigned apps depends on Homebrew's rules, which are getting stricter. A DMG in `~/Applications` stays the fallback.
 
 ## Access and security
 

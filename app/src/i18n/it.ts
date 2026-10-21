@@ -149,6 +149,18 @@ export const it = {
     engineDetail: "Dettaglio del comando",
   },
 
+  appUpdate: {
+    title: (v: string) => `È disponibile Floppy ${v}`,
+    body: "Aggiorna quando non stai lavorando: Floppy si chiude e si riapre da solo in un paio di minuti. I dischi restano nel Finder.",
+    action: "Aggiorna",
+    installingTitle: "Aggiorno Floppy…",
+    installingBody: "Si chiude e si riapre da solo. Non serve fare niente.",
+    failedTitle: "Non sono riuscito ad aggiornare Floppy",
+    failedBody: "Aggiornalo dal Terminale con questo comando:",
+    command: "brew upgrade --cask essedev/floppy/floppy",
+    retry: "Riprova",
+  },
+
   team: {
     restart: {
       title: "Floppy va riavviato",
@@ -698,6 +710,7 @@ export const it = {
     not_team: "Questo Mac non usa ancora i dischi del team.",
     no_such_disk: "Questo disco non c'è più su questo Mac.",
     cache_size: "Questo spazio non c'è sul Mac: scegline uno più piccolo.",
+    update: "Non riesco ad aggiornare Floppy da qui.",
     not_in_trash: "Non è più nel cestino: forse l'ha già ripristinato qualcun altro, o è scaduto.",
     no_such_notice: "Questo avviso non c'è più.",
     server: "Il server del team non ha risposto.",

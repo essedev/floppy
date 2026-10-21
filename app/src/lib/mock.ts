@@ -14,6 +14,7 @@
 
 import type { Backend } from "@/lib/backend";
 import type {
+  AppUpdate,
   ActivityNotice,
   ActivitySnapshot,
   AuthView,
@@ -34,6 +35,17 @@ import type {
 
 const params = new URLSearchParams(globalThis.location?.search ?? "");
 const view = params.get("view") ?? "panel";
+// ?update=available|failed: a newer release of the app, as the daily check finds it.
+const updateParam = params.get("update");
+let appUpdate: AppUpdate | null =
+  updateParam === "available" || updateParam === "failed"
+    ? { version: "0.2.2", state: updateParam, error: updateParam === "failed" ? "Error: Cask 'floppy' is not installed." : null }
+    : null;
+const updateListeners = new Set<(u: AppUpdate | null) => void>();
+function publishUpdate(u: AppUpdate | null) {
+  appUpdate = u;
+  updateListeners.forEach((cb) => cb(u));
+}
 const scenario = params.get("scenario") ?? (view === "disk" ? "disk_team" : "connected");
 
 const GB = 1024;
@@ -631,6 +643,15 @@ export const mockBackend: Backend = {
     engine_path: base.engine_path,
     computer_name: MAC,
   }),
+  getAppUpdate: async () => appUpdate,
+  installAppUpdate: async () => {
+    if (!appUpdate) return;
+    publishUpdate({ ...appUpdate, state: "installing", error: null });
+    later(2500, () =>
+      publishUpdate({ ...appUpdate!, state: "failed", error: "Error: Cask 'floppy' is not installed." }),
+    );
+  },
+  onAppUpdate: (cb) => listen(updateListeners, cb),
   openSettings: async () => {},
   openWelcome: async () => {},
   finishWelcome: async () => {},

@@ -8,6 +8,7 @@ use crate::engine::JobKind;
 use crate::engine::RenameBackRefusal;
 use crate::engine::TrashReport;
 use crate::prefs::PrefsStore;
+use crate::updates::{AppUpdate, Updates};
 use crate::windows;
 use serde::Serialize;
 use std::process::Command;
@@ -306,6 +307,21 @@ pub async fn app_info(app: AppHandle, core: CoreState<'_>) -> Result<AppInfo, Co
         version: app.package_info().version.to_string(),
         engine_path: core.engine().display().to_string(),
         computer_name,
+    })
+}
+
+/// A newer release of the app, if the daily check found one.
+#[tauri::command]
+pub fn get_app_update(updates: State<'_, Arc<Updates>>) -> Option<AppUpdate> {
+    updates.get()
+}
+
+/// Upgrades the app through Homebrew; the app quits and the new one opens.
+#[tauri::command]
+pub fn install_app_update(updates: State<'_, Arc<Updates>>) -> Result<(), CommandError> {
+    updates.install().map_err(|message| CommandError {
+        code: "update",
+        message,
     })
 }
 

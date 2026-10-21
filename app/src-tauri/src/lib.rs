@@ -14,6 +14,7 @@ mod prefs;
 mod team;
 mod text;
 mod tray;
+mod updates;
 mod windows;
 
 use crate::account::{Account, AccountEvent, Timing, api, secrets};
@@ -54,6 +55,10 @@ fn on_activity(app: &tauri::AppHandle, event: ActivityEvent) {
             let _ = app.emit_to(windows::PANEL, "alert", &alert);
         }
     }
+}
+
+fn on_update(app: &tauri::AppHandle, update: Option<updates::AppUpdate>) {
+    let _ = app.emit("app-update", &update);
 }
 
 impl activity::Session for Account {
@@ -156,6 +161,8 @@ pub fn run() {
             commands::run_setup,
             commands::install_engine,
             commands::app_info,
+            commands::get_app_update,
+            commands::install_app_update,
             commands::open_settings,
             commands::open_welcome,
             commands::finish_welcome,
@@ -217,7 +224,16 @@ pub fn run() {
             let version = app.package_info().version.to_string();
             let macos = macos_version();
             let account_handle = app.handle().clone();
-            let http = Arc::new(api::Http::new(&format!("Floppy/{version} (macOS {macos})")));
+            let user_agent = format!("Floppy/{version} (macOS {macos})");
+            let http = Arc::new(api::Http::new(&user_agent));
+            let update_handle = app.handle().clone();
+            let updates = updates::Updates::new(
+                version.clone(),
+                app.path().app_log_dir()?.join("update.log"),
+                move |u| on_update(&update_handle, u),
+            );
+            updates.start(user_agent);
+            app.manage(updates);
             let account = Account::new(
                 Arc::clone(&http) as Arc<dyn api::ControlPlane>,
                 Arc::new(secrets::Keychain),

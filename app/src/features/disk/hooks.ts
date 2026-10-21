@@ -15,6 +15,7 @@ export const keys = {
   info: ["app-info"] as const,
   folders: ["folders"] as const,
   login: ["login"] as const,
+  update: ["app-update"] as const,
 };
 
 /** The disk's status, kept current by the "status" event. */
@@ -29,6 +30,13 @@ export function useSetup() {
   const qc = useQueryClient();
   useEffect(() => backend.onSetup((s) => qc.setQueryData(keys.setup, s)), [qc]);
   return useQuery<SetupProgress>({ queryKey: keys.setup, queryFn: backend.getSetup, staleTime: Infinity });
+}
+
+/** A newer release of the app, kept current by the "app-update" event. */
+export function useAppUpdate() {
+  const qc = useQueryClient();
+  useEffect(() => backend.onAppUpdate((u) => qc.setQueryData(keys.update, u)), [qc]);
+  return useQuery({ queryKey: keys.update, queryFn: backend.getAppUpdate, staleTime: Infinity });
 }
 
 export function useAppInfo() {

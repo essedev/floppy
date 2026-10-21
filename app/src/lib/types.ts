@@ -204,6 +204,7 @@ export interface CommandError {
     | "not_team"
     | "no_such_disk"
     | "cache_size"
+    | "update"
     | "not_in_trash"
     | "no_such_notice"
     | "server"
@@ -366,4 +367,12 @@ export interface RestoreResult {
   restored: Restored[];
   /** `error` is the VM's reason, "not in the trash" for an entry already gone. */
   failed: { id: string; error: string }[];
+}
+
+/** A newer release of the app, found by the daily check, and its installation. */
+export interface AppUpdate {
+  version: string;
+  state: "available" | "installing" | "failed";
+  /** The last line Homebrew printed when it failed. */
+  error: string | null;
 }

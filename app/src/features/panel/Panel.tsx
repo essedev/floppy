@@ -17,7 +17,7 @@ import { useActivitySnapshot } from "@/features/activity/hooks";
 import { ActivityNotices, alertText } from "@/features/activity/notices";
 import { lostAccess } from "@/features/account/view";
 import { faceFor, isBusy } from "@/features/disk/face";
-import { keys, useAppInfo, useCountdown, useDiskAction, useFolders, useStatus } from "@/features/disk/hooks";
+import { keys, useAppInfo, useAppUpdate, useCountdown, useDiskAction, useFolders, useStatus } from "@/features/disk/hooks";
 import { diskLook, noDisksCase, teamOf } from "@/features/disk/team";
 import { it } from "@/i18n/it";
 import { backend } from "@/lib/backend";
@@ -80,6 +80,7 @@ export function Panel() {
               <Faceplate {...faceFor(status)} />
             </div>
             <StatusSection status={status} />
+            <AppUpdateNotice />
             <ActivityNotices />
             <RevokedSection />
             {WITH_SPACE.has(status.state) && status.space?.cache_used_mb != null && <SpaceSection status={status} />}
@@ -104,6 +105,45 @@ export function Panel() {
 }
 
 /** An admin took this Mac off the team: say so here too, with the way back. */
+/** A newer release of the app: the person picks the moment, since the app quits to update. */
+function AppUpdateNotice() {
+  const update = useAppUpdate().data;
+  const install = useDiskAction(backend.installAppUpdate);
+  if (!update) return null;
+  const t = it.appUpdate;
+  const failed = update.state === "failed" || install.isError;
+  const installing = update.state === "installing" && !install.isError;
+  return (
+    <div className="px-4 pb-3">
+      <Notice led={failed ? "err" : "dl"} title={failed ? t.failedTitle : installing ? t.installingTitle : t.title(update.version)}>
+        {failed ? (
+          <>
+            <span className="block">{t.failedBody}</span>
+            <span className="mt-1 block font-ro text-[11.5px] break-all text-ink select-text">{t.command}</span>
+            {(update.error || install.error) && (
+              <span className="mt-1 block font-ro text-[11.5px] text-ink-2">
+                {update.error ?? it.errors[install.error!.code] ?? install.error!.message}
+              </span>
+            )}
+          </>
+        ) : (
+          <span className="block">{installing ? t.installingBody : t.body}</span>
+        )}
+        {!installing && (
+          <Button
+            size="sm"
+            className="mt-2 bg-raised shadow-[0_0_0_0.5px_rgba(0,0,0,0.12)]"
+            disabled={install.isPending}
+            onClick={() => install.mutate()}
+          >
+            {failed ? t.retry : t.action}
+          </Button>
+        )}
+      </Notice>
+    </div>
+  );
+}
+
 function RevokedSection() {
   const { data: auth } = useAuth();
   const lost = auth?.phase === "signed_out" ? lostAccess(auth.notice) : null;
