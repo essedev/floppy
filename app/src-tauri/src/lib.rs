@@ -237,7 +237,7 @@ pub fn run() {
             app.manage(updates);
             let account = Account::new(
                 Arc::clone(&http) as Arc<dyn api::ControlPlane>,
-                Arc::new(secrets::Keychain),
+                Arc::new(secrets::Keychain::new()),
                 Arc::clone(&core) as Arc<dyn account::TeamDisks>,
                 prefs.clone(),
                 api::Versions {
