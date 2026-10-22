@@ -50,7 +50,7 @@ STACK=manual deploy/local/stack.sh up   # a second instance, manual storage on a
 # Control plane: server/ (commands in .claude/rules/server.md); admin web, dev on the fake API
 cd web && pnpm dev             # http://localhost:4508; pnpm typecheck, lint, build
 make meta-check                # the meta service (meta/): one Valkey per disk
-FLOPPY_JUICEFS_DIST=spike/juicefs-replica/dist deploy/check/check.py   # the Dokploy compose behind Traefik on 443, 23 checks
+FLOPPY_JUICEFS_DIST=spike/juicefs-replica/dist deploy/check/check.py   # the Dokploy compose behind Traefik on 443, 25 checks
 
 # Claude through MCP (DECISIONS #29): the team's server at /mcp/ (server/, oauth/ and mcp/), this Mac's on stdio
 printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | app/target/debug/floppy-app mcp

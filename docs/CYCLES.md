@@ -2,6 +2,15 @@
 
 Log of the work done, most recent first. Plans are in [ROADMAP.md](ROADMAP.md), the reasons behind the choices in [ARCHITECTURE.md](ARCHITECTURE.md).
 
+## 14. Claude on Floppy (22/10/2026)
+
+- **Two servers and one skill** (DECISIONS #29): the team's state is on the control plane and a Mac's copies are in its VM, which the control plane never reaches, so Claude gets `floppy` (the team) and `floppy-mac` (this Mac), and one skill (`server/src/floppy_server/mcp/SKILL.md`) that tells them apart.
+- **The team's server**: `/mcp/` on the control plane, behind its own OAuth 2.1 authorization server at the origin's root (PKCE, dynamic registration, Client ID Metadata Documents; migration 0006, `oauth_clients`, `oauth_authorizations`, `oauth_tokens`). A token acts as one membership, its scopes (`floppy:read`, `write`, `admin`) from each tool's hints, the role read on every call; each tool calls the router function of its REST endpoint, and the ones that would carry an S3 key or a password stay in the admin web. 32 tests in `server/tests/test_mcp.py`.
+- **The admin web**: the consent page (`/autorizza`, behind the usual sign-in by mail) and a "Claude" page with the setup command, the address for claude.ai and the person's connections, each disconnectable.
+- **This Mac's server**: `floppy-app mcp` on stdio, through the `floppy` command like the app: the disks' state, make available, free up space, this Mac's and the colleagues' activity, the trash, undo a rename, start; it never unmounts. 13 tests.
+- **Deploy**: Traefik routes `/mcp` and the OAuth paths to the control plane (`deploy/docker-compose.yml`, `deploy/local/compose.yml`), and `deploy/check/check.py` has two new checks, not run yet.
+- **Next**: the deploy to the first instance, a sign-in from Claude Code and from claude.ai against it, and a release that carries `floppy-app mcp` (ROADMAP 1).
+
 ## 13. The first people on it (21-22/10/2026)
 
 - **Getting started without help**: a member who signed in found an empty page pointing to an install link no mail carried, and the released app does not know a self-hosted team's address. The admin web now opens on a start page with the Homebrew command, this server's address to type in the app and the disks the person sees (`GET /access/mine`); the invitation mail says so (DECISIONS #12).
