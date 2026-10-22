@@ -2,6 +2,17 @@
 
 Log of the work done, most recent first. Plans are in [ROADMAP.md](ROADMAP.md), the reasons behind the choices in [ARCHITECTURE.md](ARCHITECTURE.md).
 
+## 13. The first people on it (21-22/10/2026)
+
+- **Getting started without help**: a member who signed in found an empty page pointing to an install link no mail carried, and the released app does not know a self-hosted team's address. The admin web now opens on a start page with the Homebrew command, this server's address to type in the app and the disks the person sees (`GET /access/mine`); the invitation mail says so (DECISIONS #12).
+- **The space for copies**: a tester read "Spazio massimo per Floppy: 12,9 GB" as the team disk's size. Settings now explains the copies and sets their space in steps of 5 GB (`cache_mb` in the disks file), up to everything the Mac spares; Floppy's own pick is rounded and kept once. A bigger choice grows the VM's disk at the next restart (`limactl edit --disk`, measured 12 to 25 GiB with the filesystem following), and an info note on the panel says what the figure means.
+- **The panel**: menus float from their row one at a time, with icons, groups and what the space actions do (concept-g, variant A); the disk's state is centred on its row; the menu bar icon stays a template image after a change of state (it went black on a tinted bar); a globe opens the team's web.
+- **Updates from the panel** (DECISIONS #10): the app reads its latest GitHub release once a day and installs it through `brew upgrade` in a shell of its own; Homebrew does not quit an app it runs inside, so the shell ends the old app and opens the new one (from 0.2.6). The control plane takes the latest version from the same releases, so the admin web flags outdated apps again.
+- **The Keychain**: without a Developer ID every build asks for the Mac's password once per item read, so the two secrets became one item: one question per update.
+- **Admin web**: light and dark only, starting from the system's.
+- **`v0.2.1` to `v0.2.6`**: six releases in two days, the instance redeployed with each server or web change; e2e 20 steps, engine tests 12.
+- **Next**: the team on the instance, CapCut in the pilot, a Developer ID if the Keychain question bothers the testers.
+
 ## 12. Two people on one disk (18-19/10/2026)
 
 - **Measured first** (ROADMAP): an open Finder window never showed a colleague's file, a clip being copied is visible at 0 bytes and grows in 64 MB steps, the Finder deletes at once and only JuiceFS's hidden trash keeps the file. Concept f decided the answers (DECISIONS #27).

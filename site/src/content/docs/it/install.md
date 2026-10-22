@@ -29,11 +29,13 @@ L’app non è notarizzata da Apple: il cask le toglie il flag di quarantena e m
 
 ## Aggiornamenti
 
+Quando esce una nuova versione, il pannello lo dice: scegli **Aggiorna** e l’app si aggiorna da sola con Homebrew, si chiude e si riapre in un paio di minuti; intanto il disco resta nel Finder. Dal Terminale si fa con:
+
 ```sh
 brew upgrade --cask %cask%
 ```
 
-Dopo l’aggiornamento riapri l’app. Quando la nuova versione porta un motore nuovo, il pannello lo dice e lo applica quando scegli **Aggiorna ora**: il disco si riavvia, quindi prima salva e chiudi i progetti aperti. I file, la cache e le impostazioni del disco restano come sono.
+e poi si riapre l’app. Quando la nuova versione porta un motore nuovo, il pannello lo dice e lo applica quando scegli **Aggiorna ora**: il disco si riavvia, quindi prima salva e chiudi i progetti aperti. I file, la cache e le impostazioni del disco restano come sono.
 
 ## Lavorare con il disco
 

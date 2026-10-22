@@ -29,11 +29,13 @@ The app is not notarized by Apple: the cask clears the quarantine flag on it, an
 
 ## Updates
 
+When a new version is out, the panel says so: choose **Update** and the app updates itself through Homebrew, closes and opens again in a couple of minutes; the disk stays in the Finder meanwhile. From the Terminal it is:
+
 ```sh
 brew upgrade --cask %cask%
 ```
 
-Open the app again after the upgrade. When the new version brings a new engine, the panel says so and applies it when you choose **Update now**: the disk restarts, so save and close open projects first. Your files, the cache and the disk's settings stay as they are.
+then open the app again. When the new version brings a new engine, the panel says so and applies it when you choose **Update now**: the disk restarts, so save and close open projects first. Your files, the cache and the disk's settings stay as they are.
 
 ## Working with the disk
 
