@@ -53,6 +53,8 @@ Serve un Mac con Apple Silicon e macOS 13 o successivo, ci vogliono circa 90 sec
 
 Un agente launchd controlla ogni 2 minuti che VM, JuiceFS e Samba siano attivi e che il disco sia montato, e svuota la cache se il Mac resta senza spazio. La dimensione della cache si calcola dallo spazio libero del Mac a ogni setup.
 
+**Con Claude**: la pagina "Claude" della web admin ha un comando che collega Claude Code al team (persone, dischi, accessi, attività) e a questo Mac (rendi disponibile, libera spazio, cestino), con una skill che insegna entrambi; al primo uso chiede il consenso nel browser. claude.ai prende lo stesso indirizzo `/mcp/` come connettore personalizzato.
+
 Nella versione per i team, senza un `config.env`, l'app nella barra dei menu guida lo stesso comando: scrive in `~/.floppy/disks.json` i dischi che la persona può vedere, passa i segreti a `floppy disks apply`, e ogni disco compare come una cartella di **Floppy**, in sola lettura o in lettura e scrittura; `floppy disks clear` li toglie tutti da un Mac revocato. Il contratto è in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#team-disks).
 
 ## Provare la versione per i team su un Mac

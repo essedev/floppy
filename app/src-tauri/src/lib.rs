@@ -10,6 +10,7 @@ mod commands;
 mod core;
 mod engine;
 mod installer;
+mod mcp;
 mod prefs;
 mod team;
 mod text;
@@ -104,6 +105,38 @@ fn bundled_engine(app: &tauri::App) -> Option<installer::Installer> {
 }
 
 /// The macOS version as the server accepts it (`^[0-9A-Za-z.+-]+$`).
+/// The Mac's session for the MCP server: a fresh Keychain read at every call
+/// (the bundle caches what it read), so a sign-in or sign-out in the app
+/// applies without restarting Claude.
+struct KeychainSession;
+
+impl mcp::DeviceSession for KeychainSession {
+    fn device(&self) -> Option<activity::DeviceAuth> {
+        account::stored_device(&secrets::Keychain::new())
+    }
+}
+
+/// `floppy-app mcp`: this Mac's MCP server on stdin and stdout, without the
+/// tray (mcp.rs); the exit code for the process.
+pub fn run_mcp() -> i32 {
+    let user_agent = format!(
+        "Floppy/{} MCP (macOS {})",
+        env!("CARGO_PKG_VERSION"),
+        macos_version()
+    );
+    let http = api::Http::new(&user_agent);
+    let session = KeychainSession;
+    let server = mcp::Server::new(engine::engine_path(), &session, &http);
+    let stdin = std::io::stdin();
+    match server.serve(stdin.lock(), std::io::stdout().lock()) {
+        Ok(()) => 0,
+        Err(e) => {
+            eprintln!("floppy-app mcp: {e}");
+            1
+        }
+    }
+}
+
 fn macos_version() -> String {
     std::process::Command::new("/usr/bin/sw_vers")
         .arg("-productVersion")

@@ -51,6 +51,9 @@ STACK=manual deploy/local/stack.sh up   # a second instance, manual storage on a
 cd web && pnpm dev             # http://localhost:4508; pnpm typecheck, lint, build
 make meta-check                # the meta service (meta/): one Valkey per disk
 FLOPPY_JUICEFS_DIST=spike/juicefs-replica/dist deploy/check/check.py   # the Dokploy compose behind Traefik on 443, 23 checks
+
+# Claude through MCP (DECISIONS #29): the team's server at /mcp/ (server/, oauth/ and mcp/), this Mac's on stdio
+printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | app/target/debug/floppy-app mcp
 ```
 
 ## Gotchas
@@ -68,6 +71,8 @@ FLOPPY_JUICEFS_DIST=spike/juicefs-replica/dist deploy/check/check.py   # the Dok
 **macOS `/bin/bash` is 3.2**: with `set -u` an empty array expanded as `"${a[@]}"` is an error. Write `${a[@]+"${a[@]}"}`.
 
 **No external network during install.** An office DNS did not resolve `cloud.debian.org`: the Debian image, the patched JuiceFS and the `.deb` closure of `PACKAGES` (`guest-install.sh`) travel in the app bundle (`scripts/build-engine.sh`). The `.deb` files come from a `debian:trixie` container with an empty dpkg status, or a plain `--download-only` misses the libraries the container already has.
+
+**MCP tools carry no secret.** A tool that would take an S3 key or a password stays in the admin web (DECISIONS #29): what a person types to Claude lands in the model's context and the client's transcript. A tool calls the router function of its REST endpoint, so both change together; the OAuth paths and `/mcp` are at the origin's root, and a new one needs its Traefik rule (`deploy/docker-compose.yml`, `deploy/local/compose.yml`) and the Vite proxy.
 
 **Samba's directory leases stay off** (`smb3 directory leases = no`): with them the macOS client keeps every folder it listed open, and a team disk can never be unmounted to apply lowered access.
 

@@ -53,6 +53,8 @@ It needs Apple Silicon and macOS 13 or later, takes about 90 seconds, and the di
 
 A launchd agent checks every 2 minutes that the VM, JuiceFS and Samba are running and that the disk is mounted, and empties the cache if the Mac runs low on space. The cache size is computed from the Mac's free space at every setup.
 
+**With Claude**: the admin web's "Claude" page has one command that connects Claude Code to the team (people, disks, access, the activity) and to this Mac (make available, free up space, the trash), with a skill that teaches both; the first use asks for consent in the browser. claude.ai takes the same `/mcp/` address as a custom connector.
+
 In the team version, without a `config.env`, the menu bar app drives the same command: it writes the disks the person may see to `~/.floppy/disks.json`, pipes the secrets to `floppy disks apply`, and each disk appears as a folder of **Floppy**, read-only or read-write; `floppy disks clear` removes them all from a revoked Mac. The contract is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#team-disks).
 
 ## Try the team version on one Mac

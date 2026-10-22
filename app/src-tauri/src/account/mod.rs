@@ -125,6 +125,18 @@ struct DeviceRecord {
     user_name: Option<String>,
 }
 
+/// Where and as whom this Mac calls the control plane, read straight from
+/// the Keychain by another process of the app (`floppy-app mcp`); None while
+/// signed out or not registered yet.
+pub fn stored_device(secrets: &dyn SecretStore) -> Option<crate::activity::DeviceAuth> {
+    let bytes = secrets.get(DEVICE_ITEM).ok().flatten()?;
+    let record: DeviceRecord = serde_json::from_slice(&bytes).ok()?;
+    record.registered.then_some(crate::activity::DeviceAuth {
+        server: record.server,
+        token: record.device_token,
+    })
+}
+
 impl std::fmt::Debug for DeviceRecord {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DeviceRecord")
