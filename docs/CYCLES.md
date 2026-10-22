@@ -10,6 +10,7 @@ Log of the work done, most recent first. Plans are in [ROADMAP.md](ROADMAP.md), 
 - **Updates from the panel** (DECISIONS #10): the app reads its latest GitHub release once a day and installs it through `brew upgrade` in a shell of its own; Homebrew does not quit an app it runs inside, so the shell ends the old app and opens the new one (from 0.2.6). The control plane takes the latest version from the same releases, so the admin web flags outdated apps again.
 - **The Keychain**: without a Developer ID every build asks for the Mac's password once per item read, so the two secrets became one item: one question per update.
 - **Admin web**: light and dark only, starting from the system's.
+- **Names with `/` or `:`**: Samba's `catia` stores the characters Windows forbids as U+F001-F027, and the activity and trash carry that form: the app drew a missing glyph, Show in Finder pointed at a path the Mac does not have, and warmup and free on such a folder looked for the Mac's name in the VM. The app now shows the Finder's name (`finderName`), Show in Finder translates back (`mac_path`) and the command encodes the path as Samba stores it (`vm_path`).
 - **`v0.2.1` to `v0.2.6`**: six releases in two days, the instance redeployed with each server or web change; e2e 20 steps, engine tests 12.
 - **Next**: the team on the instance, CapCut in the pilot, a Developer ID if the Keychain question bothers the testers.
 
