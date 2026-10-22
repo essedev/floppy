@@ -108,6 +108,18 @@ export const httpApi: Api = {
     testMail: () => request('POST', '/settings/mail/test'),
     probeStorage: (body) => request('POST', '/settings/storage/probe', body),
   },
+  oauth: {
+    request: (requestId) => request('GET', `/oauth/requests/${id(requestId)}`),
+    approve: (requestId, scopes) => request('POST', `/oauth/requests/${id(requestId)}/approve`, { scopes }),
+    deny: (requestId) => request('POST', `/oauth/requests/${id(requestId)}/deny`),
+  },
+  connections: {
+    list: () => request('GET', '/connections'),
+    revoke: (grantId) => request('POST', `/connections/${id(grantId)}/revoke`),
+  },
+  mcp: {
+    install: () => request('GET', '/mcp/install'),
+  },
 }
 
 /** The app's endpoints, for reference: the web never calls them (types at the end of types.ts). */

@@ -418,6 +418,8 @@ export type AuditAction =
   | 'disk_access_changed'
   | 'disk_deleted'
   | 'settings_updated'
+  | 'mcp_client_connected'
+  | 'mcp_client_disconnected'
 
 /** One audit_events row, append only. */
 export interface AuditEvent {
@@ -654,3 +656,40 @@ export interface DeviceHeartbeatResponse {
 
 // POST /device/sign-out: "Esci" in the app. The device is revoked (`signed_out`); no key
 // window, since its owner keeps access. No body, answers 204.
+
+/** What an MCP client may do with a connection: read, change, remove (each implies the next ones). */
+export type McpScope = 'floppy:read' | 'floppy:write' | 'floppy:admin'
+
+/** An MCP client's authorization request waiting for the signed-in person (`GET /oauth/requests/{id}`). */
+export interface ConsentRequest {
+  id: string
+  /** The name is the client's own claim; the host it goes back to is what proves it. */
+  client: { id: string; name: string | null; redirectHost: string; loopbackOnly: boolean }
+  scopes: McpScope[]
+  role: Role
+  expiresAt: string
+}
+
+/** Where the browser goes after a decision: the client, with the code or the refusal. */
+export interface ConsentDecision {
+  redirectTo: string
+}
+
+/** An MCP client connected as the signed-in person (`GET /connections`). */
+export interface Connection {
+  id: string
+  clientName: string
+  clientId: string
+  scopes: McpScope[]
+  grantedAt: string
+  lastUsedAt: string | null
+}
+
+/** The MCP address and the commands that connect Claude (`GET /mcp/install`). */
+export interface McpInstall {
+  url: string
+  enabled: boolean
+  claudeCodeCommand: string
+  localCommand: string
+  setupCommand: string
+}

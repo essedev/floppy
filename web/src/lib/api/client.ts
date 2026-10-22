@@ -23,6 +23,11 @@ import type {
   RevokeDeviceResponse,
   Rotation,
   Session,
+  ConsentDecision,
+  ConsentRequest,
+  Connection,
+  McpInstall,
+  McpScope,
   Settings,
   SignInStartResponse,
   SignInStatusResponse,
@@ -116,5 +121,20 @@ export interface Api {
     update(body: UpdateSettingsRequest): Promise<Settings>
     testMail(): Promise<MailTestResponse>
     probeStorage(body: StorageProbeRequest): Promise<void>
+  }
+  oauth: {
+    /** An open authorization request of an MCP client, for the consent page. */
+    request(id: string): Promise<ConsentRequest>
+    /** Approves with the ticked scopes (read is always granted). */
+    approve(id: string, scopes: McpScope[]): Promise<ConsentDecision>
+    deny(id: string): Promise<ConsentDecision>
+  }
+  connections: {
+    /** The caller's connected MCP clients. */
+    list(): Promise<Connection[]>
+    revoke(id: string): Promise<void>
+  }
+  mcp: {
+    install(): Promise<McpInstall>
   }
 }

@@ -4,7 +4,7 @@
   page and their own devices. On a narrow screen the sidebar folds into a bar on top.
 */
 
-import { FolderLock, HardDrive, House, KeyRound, LaptopMinimal, LayoutGrid, LogOut, Moon, ScrollText, SlidersHorizontal, Sun, Users, type LucideIcon } from 'lucide-react'
+import { FolderLock, HardDrive, House, KeyRound, LaptopMinimal, LayoutGrid, LogOut, Moon, Plug, ScrollText, SlidersHorizontal, Sun, Users, type LucideIcon } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router'
 import { IconButton } from '@/components/Button'
@@ -85,11 +85,13 @@ export function AppShell() {
                 <NavItem to="/chiave" icon={KeyRound} label={t.nav.key} extra={<KeyNavLed />} />
                 <NavItem to="/registro" icon={ScrollText} label={t.nav.audit} />
                 <NavItem to="/impostazioni" icon={SlidersHorizontal} label={t.nav.settings} />
+                <NavItem to="/claude" icon={Plug} label={t.claude.nav} />
               </>
             ) : (
               <>
                 <NavItem to="/" end icon={House} label={t.nav.start} />
                 <NavItem to="/dispositivi" icon={LaptopMinimal} label={t.nav.myDevices} />
+                <NavItem to="/claude" icon={Plug} label={t.claude.nav} />
               </>
             )}
           </nav>

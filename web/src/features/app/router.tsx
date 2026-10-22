@@ -4,6 +4,8 @@
 import { createBrowserRouter, Navigate } from 'react-router'
 import { AccessPage } from '@/features/access/AccessPage'
 import { AuditPage } from '@/features/audit/AuditPage'
+import { ClaudePage } from '@/features/claude/ClaudePage'
+import { ConsentPage } from '@/features/claude/ConsentPage'
 import { InvitationPage } from '@/features/auth/InvitationPage'
 import { MagicLinkPage } from '@/features/auth/MagicLinkPage'
 import { SignInPage } from '@/features/auth/SignInPage'
@@ -28,11 +30,14 @@ export const router = createBrowserRouter([
   {
     element: <RequireSession />,
     children: [
+      // An MCP client's consent (/authorize sends the browser here), outside the shell.
+      { path: 'autorizza', element: <ConsentPage /> },
       {
         element: <AppShell />,
         children: [
           { index: true, element: <Home /> },
           { path: 'dispositivi', element: <DevicesPage /> },
+          { path: 'claude', element: <ClaudePage /> },
           // The old address, kept for bookmarks.
           { path: 'mac', element: <Navigate to="/dispositivi" replace /> },
           {

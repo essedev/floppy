@@ -30,6 +30,8 @@ import {
   type AccessLevel,
   type AuditEvent,
   type AuditQuery,
+  type Connection,
+  type McpScope,
   type Device,
   type Disk,
   type DiskAccess,
@@ -966,6 +968,78 @@ export const fakeApi: Api = {
       probeWith(bucket.trim(), accessKeyId)
     },
   },
+  oauth: {
+    async request(id) {
+      await latency()
+      const me = requireUser()
+      if (decided.has(id)) throw new ApiError(410, 'request_expired', 'This authorization request is no longer open')
+      return {
+        id,
+        client: { id: 'fake-claude-code', name: 'Claude Code', redirectHost: 'localhost:53114', loopbackOnly: true },
+        scopes: ['floppy:admin', 'floppy:write', 'floppy:read'],
+        role: me.role,
+        expiresAt: iso(now() + 10 * 60_000),
+      }
+    },
+    async approve(id, scopes) {
+      await latency()
+      const me = requireUser()
+      if (decided.has(id)) throw new ApiError(410, 'request_expired', 'This authorization request is no longer open')
+      decided.add(id)
+      const granted = widest(scopes)
+      connections.unshift({ id: uid('grant'), clientName: 'Claude Code', clientId: 'fake-claude-code', scopes: granted, grantedAt: iso(), lastUsedAt: null })
+      log({ actor: actorOf(me), action: 'mcp_client_connected', category: 'access', target: { kind: 'person', id: me.id, label: labelOf(me) }, detail: { client: 'Claude Code', scopes: granted } })
+      save()
+      // The real answer sends the browser to the client's loopback; the fake has none.
+      return { redirectTo: '/claude?collegato=1' }
+    },
+    async deny(id) {
+      await latency()
+      requireUser()
+      decided.add(id)
+      return { redirectTo: '/claude' }
+    },
+  },
+  connections: {
+    async list() {
+      await latency()
+      requireUser()
+      return structuredClone(connections)
+    },
+    async revoke(id) {
+      await latency()
+      const me = requireUser()
+      const index = connections.findIndex((c) => c.id === id)
+      if (index < 0) throw new ApiError(404, 'not_found', 'No such connection')
+      const [gone] = connections.splice(index, 1)
+      log({ actor: actorOf(me), action: 'mcp_client_disconnected', category: 'access', target: { kind: 'person', id: me.id, label: labelOf(me) }, detail: { client: gone?.clientName ?? '', by: 'person' } })
+      save()
+    },
+  },
+  mcp: {
+    async install() {
+      await latency()
+      const origin = window.location.origin
+      return {
+        url: `${origin}/mcp/`,
+        enabled: true,
+        claudeCodeCommand: `claude mcp add --transport http --scope user floppy ${origin}/mcp/`,
+        localCommand: 'claude mcp add --scope user floppy-mac -- /Applications/Floppy.app/Contents/MacOS/floppy-app mcp',
+        setupCommand: `curl -fsS ${origin}/api/v1/mcp/setup.sh | sh`,
+      }
+    },
+  },
+}
+
+// MCP connections live in memory only: a reload starts again from one connected client.
+const decided = new Set<string>()
+const connections: Connection[] = [
+  { id: 'grant-seed', clientName: 'Claude Code', clientId: 'fake-claude-code', scopes: ['floppy:admin', 'floppy:write', 'floppy:read'], grantedAt: iso(now() - 3 * 86_400_000), lastUsedAt: iso(now() - 40 * 60_000) },
+]
+const SCOPE_ORDER: McpScope[] = ['floppy:admin', 'floppy:write', 'floppy:read']
+function widest(ticked: McpScope[]): McpScope[] {
+  const first = SCOPE_ORDER.findIndex((s) => ticked.includes(s))
+  return first < 0 ? ['floppy:read'] : SCOPE_ORDER.slice(first)
 }
 
 /** Controls of the fake, for the banner that marks it. */

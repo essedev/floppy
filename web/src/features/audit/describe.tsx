@@ -40,6 +40,8 @@ export function useDescribe() {
       if (typeof d.appVersion === 'string') parts.push(fmt(t.details.appVersion, { v: d.appVersion }))
       if (typeof d.blockSize === 'string') parts.push(fmt(t.details.blockSize, { v: d.blockSize }))
       if (typeof d.bucket === 'string' && d.bucket) parts.push(fmt(t.details.bucket, { bucket: d.bucket }))
+      if (typeof d.client === 'string' && d.client) parts.push(fmt(t.details.client, { client: d.client }))
+      if (e.action === 'mcp_client_disconnected' && has(t.details.clientBy, d.by)) parts.push(t.details.clientBy[d.by])
       for (const key of ['trashDays', 'cacheExpireDays'] as const) {
         const change = d[key]
         if (Array.isArray(change) && change.length === 2) parts.push(fmt(t.details[key], { from: String(change[0]), to: String(change[1]) }))

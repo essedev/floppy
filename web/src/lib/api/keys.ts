@@ -16,5 +16,8 @@ export const queryKeys = {
   auditAll: ['audit'] as const,
   health: ['health'] as const,
   settings: ['settings'] as const,
+  connections: ['connections'] as const,
+  mcpInstall: ['mcp', 'install'] as const,
+  consent: (id: string) => ['oauth', 'request', id] as const,
   signIn: (id: string) => ['sign-in', id] as const,
 }

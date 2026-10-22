@@ -21,7 +21,10 @@ export default defineConfig({
     port: 4508,
     strictPort: true,
     fs: { allow: [searchForWorkspaceRoot(process.cwd()), design] },
-    proxy: { '/api': { target: api, changeOrigin: false } },
+    // The API, and the MCP surface with its authorization server (server/src/floppy_server/oauth/routes.py).
+    proxy: Object.fromEntries(
+      ['/api', '/mcp', '/.well-known/oauth-', '/authorize', '/token', '/register', '/revoke'].map((path) => [path, { target: api, changeOrigin: false }]),
+    ),
   },
   preview: { port: 4508, strictPort: true },
 })
