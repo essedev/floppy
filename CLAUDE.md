@@ -58,55 +58,47 @@ printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | app/target/debu
 
 ## Gotchas
 
-**Never `juicefs mount` directly on macOS.** With FUSE-T it fails (`no FUSE mount utility found`), with macFUSE's FSKit backend it hangs, and the only working path is the kernel extension, which makes every Mac go through recovery mode. JuiceFS runs in Linux (the VM), the Mac mounts SMB.
+**Never `juicefs mount` directly on macOS.** FUSE-T fails, macFUSE's FSKit backend hangs, and the kernel extension sends every Mac through recovery mode. JuiceFS runs in the VM, the Mac mounts SMB.
 
-**The mount point must stay `/Volumes/Floppy`, but it is never assumed.** CapCut references videos by full path: with `Floppy-1` projects lose their files. macOS picks `-1` when the folder of a previous mount is still there, and it happened after the Mac slept. Mount only on a free name (`mount_share`), and read the mount point from `/sbin/mount` (`mount_point`), never `VOLUME=/Volumes/Floppy`.
+**The mount point must stay `/Volumes/Floppy`, but it is never assumed.** CapCut references videos by full path, and macOS picks `Floppy-1` when a previous mount's folder is left (after sleep). Mount only on a free name (`mount_share`), read the mount point from `/sbin/mount` (`mount_point`), never `VOLUME=/Volumes/Floppy`.
 
-**Never unmount or remount a mounted disk automatically.** A disk busy with a large copy answers slowly and looks dead: the agent force-unmounted it halfway through a `cp` and the copy failed. `tick` mounts only if the disk is missing (`mount_share keep`); remounting is only in `floppy start`, asked for by the user, and never with `force`.
+**Never unmount or remount a mounted disk automatically.** A disk busy with a large copy looks dead; forcing it broke a `cp` halfway. `tick` mounts only a missing disk (`mount_share keep`); remounting is only in `floppy start`, asked for by the user, never with `force`.
 
-**The VM does not see the Mac's disk.** JuiceFS's space check (`--free-space-ratio`) looks at the VM's disk, which believes it is large; on a tester's Mac the cache filled the disk and the VM's filesystem failed. Space limits are computed on the Mac side (`cache_limit_mb`, `RESERVE_MB`, the check in `tick`), and a VM that Lima calls "Running" can be broken inside (`vm_healthy`).
+**The VM does not see the Mac's disk.** JuiceFS's `--free-space-ratio` checks the VM's disk, and a full Mac broke the VM's filesystem. Space limits are computed on the Mac (`cache_limit_mb`, `RESERVE_MB`, `tick`), and a VM Lima calls "Running" can be broken inside (`vm_healthy`).
 
-**No script messages in the log, and fd 3 closed for limactl.** Functions often run with redirected output (`lima start >>lima.log`) and the error trap inherits that redirection: it wrote its blocks into `lima.log`, once per function level, and on a tester's Mac the log filled the disk. Messages go to fd 3, the terminal saved at startup. But `lima start` leaves a host agent in the background that inherits fd 3 and keeps the install's terminal open forever: `lima()` closes it (`3>&-`).
+**No script messages in the log, and fd 3 closed for limactl.** The error trap inherits redirections like `lima start >>lima.log` and once filled a disk: messages go to fd 3, the terminal saved at startup. `lima start` leaves a host agent that would keep fd 3 open forever: `lima()` closes it (`3>&-`).
 
-**macOS `/bin/bash` is 3.2**: with `set -u` an empty array expanded as `"${a[@]}"` is an error. Write `${a[@]+"${a[@]}"}`.
+**macOS `/bin/bash` is 3.2**: with `set -u` an empty `"${a[@]}"` is an error. Write `${a[@]+"${a[@]}"}`.
 
-**No external network during install.** An office DNS did not resolve `cloud.debian.org`: the Debian image, the patched JuiceFS and the `.deb` closure of `PACKAGES` (`guest-install.sh`) travel in the app bundle (`scripts/build-engine.sh`). The `.deb` files come from a `debian:trixie` container with an empty dpkg status, or a plain `--download-only` misses the libraries the container already has.
+**No external network during install.** An office DNS blocked `cloud.debian.org`: the Debian image, the patched JuiceFS and the `.deb` closure of `PACKAGES` (`guest-install.sh`) travel in the app bundle (`scripts/build-engine.sh`). The `.deb` files come from a `debian:trixie` container with an empty dpkg status, or `--download-only` misses what the container has.
 
-**MCP tools carry no secret.** A tool that would take an S3 key or a password stays in the admin web (DECISIONS #29): what a person types to Claude lands in the model's context and the client's transcript. A tool calls the router function of its REST endpoint, so both change together; the OAuth paths and `/mcp` are at the origin's root, and a new one needs its Traefik rule (`deploy/docker-compose.yml`, `deploy/local/compose.yml`) and the Vite proxy.
+**Samba's directory leases stay off** (`smb3 directory leases = no`): with them the Mac keeps every listed folder open, and a team disk can never be unmounted to apply lowered access.
 
-**Samba's directory leases stay off** (`smb3 directory leases = no`): with them the macOS client keeps every folder it listed open, and a team disk can never be unmounted to apply lowered access.
-
-**Team disks change mount options only in `disks apply`, with a plain unmount**: a busy disk is reported `pending` and retried, never forced (see the gotcha on remounting).
+**Team disks change mount options only in `disks apply`, with a plain unmount**: a busy disk is reported `pending` and retried, never forced.
 
 **Lima's socket paths must fit in 104 characters**: a test `FLOPPY_HOME` needs a short real path, since Lima resolves symlinks.
 
-**`systemctl is-active` with several units says yes if at least one is active.** A check on `floppy-mount smbd` together missed a stopped Samba. One unit per call.
+**`systemctl is-active` with several units says yes if any is active.** One unit per call.
 
-**Absolute paths for system tools.** In some shells and under launchd `/usr/sbin` is not in the PATH: `diskutil` "not found" made a benchmark's remounts fail silently. Write `/usr/sbin/diskutil`, `/usr/bin/osascript`, `/sbin/mount`.
+**Absolute paths for system tools**: `/usr/sbin` is not in every PATH (launchd, some shells). Write `/usr/sbin/diskutil`, `/usr/bin/osascript`, `/sbin/mount`.
 
-**Do not uninstall or delete the VM to "start clean".** `floppy uninstall` and `limactl delete` throw away the metadata: the data in the bucket stays but can no longer be read, and a reinstall with the same `VOLUME_NAME` on the same bucket collides with the old one. To apply changes, rerun `setup`.
+**Do not uninstall or delete the VM to "start clean".** `floppy uninstall` and `limactl delete` throw away the metadata: the bucket's data becomes unreadable, and a reinstall with the same `VOLUME_NAME` collides with it. To apply changes, rerun `setup`.
 
-**`setup` does not change the RAM of an existing VM.** `memory` in `lima.yaml` applies only at creation; an existing VM needs `limactl edit --memory <GiB> floppy` while stopped. The rest (`vm/guest/`, config) `setup` reapplies.
+**`setup` does not change the RAM of an existing VM**: `memory` in `lima.yaml` applies at creation; otherwise `limactl edit --memory <GiB> floppy` while stopped. The rest (`vm/guest/`, config) `setup` reapplies.
 
-**JuiceFS behind Samba needs `--enable-xattr`.** Without it, Samba (`fruit` module, which needs the `samba-vfs-modules` package) cannot store the Finder's metadata and deleting a file from the Mac gives `Operation not supported`.
+**JuiceFS behind Samba needs `--enable-xattr`**, and Samba's `fruit` module the `samba-vfs-modules` package: without them deleting from the Mac gives `Operation not supported`.
 
-**JuiceFS does not cache uploaded blocks** unless `--cache-large-write` is on (off by default). The docs assumed it and it was false.
+**JuiceFS does not cache uploaded blocks** unless `--cache-large-write` is on (off by default).
 
-**macOS gives up on an SMB read after 30 s** and the Finder gets an I/O error. The command raises `max_resp_timeout` only for the VM's name and address, in a `# floppy begin/end` block of `~/Library/Preferences/nsmb.conf`: never rewrite that file whole, it holds the user's configuration. The same block maps the name to the address (`addr=`), which is how the share mounts as `//drive@floppy/Floppy`; `addr` is only a fallback, the SMB client resolves the name first, so a name that resolves is mounted by address (`share_server`). The block also cuts the client's folder cache to 1 s (`dir_cache_min`, `dir_cache_max`), or colleagues' new files reach the Mac 30 s late.
+**`nsmb.conf` gets a `# floppy begin/end` block, never a rewrite**: the file holds the user's configuration. The block raises `max_resp_timeout` for the VM's name and address (macOS gives up on an SMB read after 30 s), maps the name with `addr=` (a fallback: a name that resolves is mounted by address, `share_server`) and cuts `dir_cache_min`/`dir_cache_max` to 1 s, or colleagues' new files arrive 30 s late.
 
-**The site describes the finished product**: no status or "not published yet", no dates on measures, competitors by linkable facts only. The current state lives in README and ROADMAP.
+**Never `docker network prune`**: the development Mac's networks belong to other projects too; every compose file here pins its subnet.
 
-**Never `docker network prune`**: the development Mac's networks belong to other projects too, and Docker ran out of default subnets there, so every compose file here pins its subnet.
+**Samba multiplies metadata operations** (about 2,700 for a listing of 300 files). Do not tune Samba or caches around it: reads must come from the local replica (DECISIONS #5).
 
-**A UI is verified in a real browser.** The mockup passed checks in node and in the browser drew one variant out of three because of a JavaScript error. Load it in headless Chrome (Playwright with Chrome's `executablePath`) and look at the screenshot.
+**Names in the VM are not the Mac's.** Samba (`catia`) stores the characters Windows forbids as U+F001-F027: the Finder's `A / B` is `A : B` on the Mac and `A` U+F022 `B` in the VM, the form of the activity and the trash. Translate when crossing: `vm_path` (Mac to VM), `mac_path` in `core.rs`, `finderName` in the app.
 
-**Samba multiplies metadata operations.** Listing 300 files from the Finder costs about 2,700 file system operations (lookups of `._` names, extended attributes); with the metadata across a network each is a round trip (117 s at 15 ms). Do not tune Samba or caches around it: reads must come from the local replica (DECISIONS #5).
-
-**Names in the VM are not the Mac's.** Samba (`catia`) stores the characters Windows forbids as U+F001-F027: a folder the Finder shows as `A / B` is `A : B` on the Mac and `A` U+F022 `B` in the VM, and the activity and trash carry the VM's form. A path crossing over is translated: `vm_path` (Mac to VM), `mac_path` in `core.rs` (Show in Finder), `finderName` in the app (what the user reads).
-
-**Unmount SMB with `-f` in scripts.** A gentle unmount can leave a stale session, and the next mount of the same share answers I/O errors.
-
-**A device's Valkey user needs more than reads and writes**: INFO (the patch's probe), PSYNC, REPLCONF and PING for its replica, and on a writable disk `@transaction`, EVAL and EVALSHA for the optimistic writes; `-@dangerous` also drops INFO, PSYNC and REPLCONF, so they are added after it. The lists are in `spike/perdisk.py` and the server.
+**Unmount SMB with `-f` in scripts**: a gentle unmount can leave a stale session, and the next mount answers I/O errors.
 
 ## Secrets
 
@@ -146,5 +138,5 @@ These are default rules for this repo: the global instructions sit below, and wh
 - [docs/ROADMAP.md](docs/ROADMAP.md): next steps.
 - [docs/CYCLES.md](docs/CYCLES.md): what was done and when.
 - [docs/architecture.html](docs/architecture.html): the team architecture (control plane, central Valkey with a replica per VM, login) as diagrams and flows; a proposal until it lands in ARCHITECTURE.md.
-- [.claude/rules/](.claude/rules/): `app.md`, `server.md`, `spike.md`, loaded when a file under their path is touched.
+- [.claude/rules/](.claude/rules/): rules per path (app, server, site, spike), loaded when a file under it is touched.
 - [docs/concepts/](docs/concepts/): HTML concepts with variants side by side, one file per design decision.
