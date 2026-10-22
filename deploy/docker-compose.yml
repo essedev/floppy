@@ -102,6 +102,7 @@ services:
       FLOPPY_BOOTSTRAP_STORAGE_ADMIN_CREDENTIALS: ${FLOPPY_BOOTSTRAP_STORAGE_ADMIN_CREDENTIALS:-}
       # `-`, not `:-`: set empty, it turns the release lookup off.
       FLOPPY_APP_RELEASES_URL: ${FLOPPY_APP_RELEASES_URL-https://api.github.com/repos/essedev/floppy/releases/latest}
+      FLOPPY_MCP_ENABLED: ${FLOPPY_MCP_ENABLED:-true}
       FLOPPY_LATEST_APP_VERSION: ${FLOPPY_LATEST_APP_VERSION:-0.1.0}
     networks: [internal, proxy]
     healthcheck:
