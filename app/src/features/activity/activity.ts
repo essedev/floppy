@@ -6,7 +6,7 @@
  */
 
 import { it } from "@/i18n/it";
-import { bytes } from "@/lib/format";
+import { bytes, finderName } from "@/lib/format";
 import type { FeedEvent, LiveFile, Op, PersonRef } from "@/lib/types";
 
 /** The type filter: added (and folders made), renamed or moved, deleted or replaced. */
@@ -42,8 +42,9 @@ export function parentOf(path: string): string {
   return i < 0 ? "" : path.slice(0, i);
 }
 
+/** The last name of a path, as the Finder shows it. */
 export function nameOf(path: string): string {
-  return path.slice(path.lastIndexOf("/") + 1);
+  return finderName(path.slice(path.lastIndexOf("/") + 1));
 }
 
 function under(path: string, folder: string): boolean {
@@ -156,7 +157,7 @@ export function people(groups: Group[]): { key: string; label: string }[] {
 
 /** The folder's name in a sentence: the disk's own at the top. */
 function place(folder: string, disk: string): string {
-  return folder === "" ? disk : folder;
+  return folder === "" ? disk : finderName(folder);
 }
 
 /** One row's sentence: who in bold, then what. */

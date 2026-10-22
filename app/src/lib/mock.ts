@@ -381,6 +381,7 @@ const FEED: FeedEvent[] = [
     }),
   ),
   happened(1.6, MARCO, "renamed", "Fondazione Lirica - Backstage", { kind: "folder", to: "Fondazione Lirica - Backstage Tosca" }),
+  happened(2, MARCO, "created", "Marketing \uf022 growth/Pillole formatori", { kind: "folder" }),
   ...Array.from({ length: 48 }, (_, i) =>
     happened(4 + i / 120, YOU, "added", `Cantine Arnaldi - Vendemmia/Girato/A002_C${String(i + 1).padStart(3, "0")}_1018.mov`, { size: 470 * MB }),
   ),

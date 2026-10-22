@@ -97,6 +97,8 @@ FLOPPY_JUICEFS_DIST=spike/juicefs-replica/dist deploy/check/check.py   # the Dok
 
 **Samba multiplies metadata operations.** Listing 300 files from the Finder costs about 2,700 file system operations (lookups of `._` names, extended attributes); with the metadata across a network each is a round trip (117 s at 15 ms). Do not tune Samba or caches around it: reads must come from the local replica (DECISIONS #5).
 
+**Names in the VM are not the Mac's.** Samba (`catia`) stores the characters Windows forbids as U+F001-F027: a folder the Finder shows as `A / B` is `A : B` on the Mac and `A` U+F022 `B` in the VM, and the activity and trash carry the VM's form. A path crossing over is translated: `vm_path` (Mac to VM), `mac_path` in `core.rs` (Show in Finder), `finderName` in the app (what the user reads).
+
 **Unmount SMB with `-f` in scripts.** A gentle unmount can leave a stale session, and the next mount of the same share answers I/O errors.
 
 **A device's Valkey user needs more than reads and writes**: INFO (the patch's probe), PSYNC, REPLCONF and PING for its replica, and on a writable disk `@transaction`, EVAL and EVALSHA for the optimistic writes; `-@dangerous` also drops INFO, PSYNC and REPLCONF, so they are added after it. The lists are in `spike/perdisk.py` and the server.

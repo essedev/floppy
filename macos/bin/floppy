@@ -171,17 +171,32 @@ mount_alive() {
   return 1
 }
 
+# A name from the Mac as Samba stores it in the VM: the characters Windows
+# forbids become U+F020-F027 (the `catia` map; the controls, U+F001-F01F, are
+# left out). A folder the Finder shows as "A / B" is "A : B" on the Mac and
+# "A U+F022 B" in the VM.
+samba_name() {
+  LC_ALL=C sed -e "s/\"/$(printf '\357\200\240')/g" -e "s/[*]/$(printf '\357\200\241')/g" \
+    -e "s/:/$(printf '\357\200\242')/g" -e "s/</$(printf '\357\200\243')/g" \
+    -e "s/>/$(printf '\357\200\244')/g" -e "s/?/$(printf '\357\200\245')/g" \
+    -e "s/\\\\/$(printf '\357\200\246')/g" -e "s/|/$(printf '\357\200\247')/g"
+}
+
 # Maps a path under the Finder volume to the same path inside the VM. In the
-# team version the first folder is the disk, and the disk is mounted there too.
+# team version the first folder is the disk, and the disk is mounted there too,
+# under the name the command gave it, not one Samba stored.
 vm_path() {
-  local p mp
+  local p mp rel keep=
   mp=$(mount_point)
   [ -n "$mp" ] || die "the disk is not mounted"
   p=$(cd "$(dirname "$1")" && pwd)/$(basename "$1")
   case "$p" in
-    "$mp"|"$mp"/*) printf '/mnt/drive%s' "${p#"$mp"}" ;;
+    "$mp"|"$mp"/*) rel=${p#"$mp"}; rel=${rel#/} ;;
     *) die "$1 is not on $mp" ;;
   esac
+  if team; then keep=${rel%%/*}; rel=${rel#"$keep"}; rel=${rel#/}; fi
+  [ -z "$rel" ] || rel=/$(printf '%s' "$rel" | samba_name)
+  printf '/mnt/drive%s%s' "${keep:+/$keep}" "$rel"
 }
 
 # Space on the Mac. The VM cannot see it: its disk is a sparse file that grows

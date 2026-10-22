@@ -4,6 +4,7 @@
  */
 
 import { it } from "@/i18n/it";
+import { finderName } from "@/lib/format";
 import type { Restored, TrashDisk, TrashEntry } from "@/lib/types";
 
 export type KindFilter = "all" | "deleted" | "replaced";
@@ -52,7 +53,7 @@ export function matches(e: TrashEntry, q: string, kind: KindFilter): boolean {
   if (kind === "replaced" && !e.replaced) return false;
   const needle = q.trim().toLocaleLowerCase("it");
   if (!needle) return true;
-  return `${e.name}\n${e.from ?? ""}`.toLocaleLowerCase("it").includes(needle);
+  return finderName(`${e.name}\n${e.from ?? ""}`).toLocaleLowerCase("it").includes(needle);
 }
 
 export interface DayGroup {
@@ -79,7 +80,7 @@ export function byDay(entries: TrashEntry[], now: number): DayGroup[] {
 /** Where the entry was: its folder, the disk's name at the top. */
 function origin(e: TrashEntry, disk: string): string | null {
   if (e.from === null) return null;
-  return e.from === "" ? disk : e.from;
+  return e.from === "" ? disk : finderName(e.from);
 }
 
 /** The line under the name. */
@@ -98,5 +99,5 @@ export function restoreLabel(e: TrashEntry): string {
 
 export function restoredLine(r: Restored): string {
   if (r.moved) return it.trash.restoredTop;
-  return r.renamed ? it.trash.restoredAs(r.name) : it.trash.restored;
+  return r.renamed ? it.trash.restoredAs(finderName(r.name)) : it.trash.restored;
 }

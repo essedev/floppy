@@ -675,7 +675,7 @@ impl Core {
                 Path::new(mp).join(&d.folder)
             }
         };
-        Some(base.join(path).display().to_string())
+        Some(base.join(mac_path(path)).display().to_string())
     }
 
     /// Starts a job: the bundled install, `floppy start|stop|setup`, or
@@ -1149,6 +1149,20 @@ fn setup_step(line: &str) -> Option<u8> {
 }
 
 /// The non-hidden folders directly under `dir`, sorted by name.
+/// A path inside the VM as this Mac sees it under the mount: Samba stores the
+/// characters Windows forbids as U+F001-F027 (the `catia` map), and the Mac's
+/// SMB client turns them back into `" * : < > ? \ |` and the controls.
+fn mac_path(path: &str) -> String {
+    const PRIVATE: &[u8] = b"\"*:<>?\\|";
+    path.chars()
+        .map(|c| match c as u32 {
+            n @ 0xf001..=0xf01f => char::from((n - 0xf000) as u8),
+            n @ 0xf020..=0xf027 => char::from(PRIVATE[(n - 0xf020) as usize]),
+            _ => c,
+        })
+        .collect()
+}
+
 pub fn list_folders(dir: &Path, timeout: Duration) -> Result<Vec<Folder>, CoreError> {
     let (tx, rx) = mpsc::channel();
     let dir = dir.to_path_buf();
@@ -2022,5 +2036,14 @@ esac"#
             Some("replica")
         );
         assert_eq!(mount_report(&[]).replica_mode, None);
+    }
+
+    #[test]
+    fn mac_path_turns_samba_characters_back() {
+        assert_eq!(
+            mac_path("Marketing \u{f022} growth/a\u{f025}\u{f027}\u{f001}.mov"),
+            "Marketing : growth/a?|\u{1}.mov"
+        );
+        assert_eq!(mac_path("Progetti/clip è.mp4"), "Progetti/clip è.mp4");
     }
 }

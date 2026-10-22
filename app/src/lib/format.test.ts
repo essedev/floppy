@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fillOf, gb } from "@/lib/format";
+import { fillOf, finderName, gb } from "@/lib/format";
 
 describe("gb", () => {
   it("writes Italian decimals and drops a zero decimal", () => {
@@ -16,5 +16,14 @@ describe("fillOf", () => {
     expect(fillOf(50, 0)).toBe(0);
     expect(fillOf(150, 100)).toBe(1);
     expect(fillOf(25, 100)).toBe(0.25);
+  });
+});
+
+describe("finderName", () => {
+  it("shows Samba's private characters as the Finder does", () => {
+    expect(finderName("Marketing \uf022 growth/Pillole")).toBe("Marketing / growth/Pillole");
+    expect(finderName("Marketing : growth")).toBe("Marketing / growth");
+    expect(finderName("a\uf025\uf027\uf020\uf026b")).toBe('a?|"\\b');
+    expect(finderName("clip è.mp4")).toBe("clip è.mp4");
   });
 });

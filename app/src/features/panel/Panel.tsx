@@ -21,7 +21,7 @@ import { keys, useAppInfo, useAppUpdate, useCountdown, useDiskAction, useFolders
 import { diskLook, noDisksCase, teamOf } from "@/features/disk/team";
 import { it } from "@/i18n/it";
 import { backend } from "@/lib/backend";
-import { gb, gbUnit } from "@/lib/format";
+import { finderName, gb, gbUnit } from "@/lib/format";
 import { MenuHeading, MenuItem, MenuProvider, MenuSeparator, RowMenu, useMenu } from "./Menu";
 import type { CommandError, DiskStatus, DiskView, Folder, LiveFile, TeamView } from "@/lib/types";
 
@@ -196,7 +196,7 @@ function StatusSection({ status }: { status: DiskStatus }) {
     case "connected": {
       const job = status.job;
       if (isBusy(status) && job) {
-        const name = job.name ?? "";
+        const name = finderName(job.name ?? "");
         title = job.kind === "warmup" ? it.panel.activity.warmup(name) : it.panel.activity.free(name);
         body = job.kind === "warmup" ? it.panel.activity.warmupBody : it.panel.activity.freeBody;
         actions = (
@@ -771,6 +771,7 @@ interface FolderRowProps {
 
 function FolderRow(p: FolderRowProps) {
   const menu = useMenu(`folder:${p.folder.path}`);
+  const name = finderName(p.folder.name);
   const active = menu.open || p.confirming;
   const choose = (fn: () => void) => () => {
     menu.close();
@@ -787,7 +788,7 @@ function FolderRow(p: FolderRowProps) {
           <FolderIcon size={15} strokeWidth={1.6} aria-hidden="true" className="mr-2 shrink-0 text-ink-3" />
         )}
         <span className="min-w-0 flex-1 py-1">
-          <span className="block truncate text-[13px]">{p.folder.name}</span>
+          <span className="block truncate text-[13px]">{name}</span>
           {p.live && !p.working && <span className="block truncate text-[12px] leading-[1.35] text-ink-2">{p.live.line}</span>}
         </span>
         {p.working ? (
@@ -799,7 +800,7 @@ function FolderRow(p: FolderRowProps) {
           type="button"
           data-menu-trigger
           className={`grid size-[30px] shrink-0 place-items-center rounded-lg border-0 text-ink-2 hover:bg-sunken hover:text-ink ${menu.open ? "bg-sunken text-ink" : "bg-transparent"}`}
-          aria-label={it.folders.actions(p.folder.name)}
+          aria-label={it.folders.actions(name)}
           aria-haspopup="menu"
           aria-expanded={menu.open}
           onClick={() => {
@@ -810,8 +811,8 @@ function FolderRow(p: FolderRowProps) {
           <Ellipsis size={16} strokeWidth={1.7} aria-hidden="true" />
         </button>
         {menu.open && (
-          <RowMenu label={it.folders.actions(p.folder.name)} onClose={menu.close}>
-            <MenuHeading>{p.folder.name}</MenuHeading>
+          <RowMenu label={it.folders.actions(name)} onClose={menu.close}>
+            <MenuHeading>{name}</MenuHeading>
             <MenuItem icon={<Download {...ICON} />} note={it.folders.makeAvailableNote} disabled={p.busy} onClick={choose(p.onWarmup)}>
               {it.folders.makeAvailable}
             </MenuItem>
@@ -829,7 +830,7 @@ function FolderRow(p: FolderRowProps) {
       {p.confirming && (
         <Confirm
           className="mx-1 mt-1 mb-2"
-          title={it.folders.freeConfirm.title(p.folder.name)}
+          title={it.folders.freeConfirm.title(name)}
           body={it.folders.freeConfirm.body}
           confirm={it.folders.freeConfirm.confirm}
           cancel={it.panel.cancel}

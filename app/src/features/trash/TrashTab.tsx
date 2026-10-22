@@ -11,7 +11,7 @@ import { File, Film, Folder, RefreshCw, RotateCcw, Search } from "lucide-react";
 import { Button, Led, Notice, SlotMark } from "@/components/ui";
 import { it } from "@/i18n/it";
 import { backend } from "@/lib/backend";
-import { bytes } from "@/lib/format";
+import { bytes, finderName } from "@/lib/format";
 import type { CommandError, Restored, TrashDisk, TrashEntry } from "@/lib/types";
 import {
   byDay,
@@ -201,7 +201,7 @@ function Row({ entry, disk, done, onDone }: RowProps) {
       <div className="flex items-center gap-3">
         <Icon size={16} strokeWidth={1.6} aria-hidden="true" className="shrink-0 text-ink-2" />
         <div className="min-w-0 flex-1">
-          <span className="block truncate text-[13.5px] font-medium">{entry.name}</span>
+          <span className="block truncate text-[13.5px] font-medium">{finderName(entry.name)}</span>
           {done ? (
             <small className="flex items-center gap-1.5 truncate text-[12px] text-ink-2">
               <Led state="ok" />

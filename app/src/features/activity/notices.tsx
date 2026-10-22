@@ -13,7 +13,7 @@ import { nameOf, parentOf, who } from "@/features/activity/activity";
 import { useActivitySnapshot } from "@/features/activity/hooks";
 import { it } from "@/i18n/it";
 import { backend } from "@/lib/backend";
-import { bytes } from "@/lib/format";
+import { bytes, finderName } from "@/lib/format";
 import type { ActivityNotice, Alert, CommandError } from "@/lib/types";
 
 const n = it.activityNotices;
@@ -116,7 +116,7 @@ function Item({ notice: x }: { notice: ActivityNotice }) {
     case "renamed": {
       const name = nameOf(x.path);
       const moved = parentOf(x.to) !== parentOf(x.path);
-      const where = parentOf(x.to) || disk;
+      const where = finderName(parentOf(x.to)) || disk;
       if (x.state === "done") {
         title = n.renamed.done;
         body = n.renamed.doneBody(name, x.by.you ? null : who(x.by));
