@@ -15,7 +15,11 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 
 from fastapi import APIRouter, FastAPI, Request, Response
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
+from mcp.server.auth.middleware.auth_context import AuthContextMiddleware
+from mcp.server.auth.middleware.bearer_auth import BearerAuthBackend
+from starlette.middleware.authentication import AuthenticationMiddleware
+from starlette.routing import Mount, Route
 
 from floppy_server import background
 from floppy_server.access.router import router as access_router
@@ -42,6 +46,12 @@ from floppy_server.infra.meta import (
 from floppy_server.infra.metadata import FakeMetadataAdmin, ValkeyMetadataAdmin
 from floppy_server.infra.storage import FakeStorageProber, S3StorageProber
 from floppy_server.keys.router import router as keys_router
+from floppy_server.mcp.install import router as mcp_install_router
+from floppy_server.mcp.server import FloppyMcp
+from floppy_server.oauth.provider import Provider
+from floppy_server.oauth.resource import RESOURCE_PATH, RequireToken
+from floppy_server.oauth.router import router as oauth_router
+from floppy_server.oauth.routes import build_routes
 from floppy_server.paths import API_PREFIX
 from floppy_server.people.router import router as people_router
 from floppy_server.settings.router import router as settings_router
@@ -93,21 +103,25 @@ def build_context(settings: Settings) -> Context:
 
 def create_app(ctx: Context) -> FastAPI:
     """The application around a context."""
+    provider = Provider(ctx)
+    surface = FloppyMcp(ctx)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         tasks = background.start(ctx) if ctx.settings.background_tasks else []
         if ctx.settings.juicefs_backend is Backend.FAKE:
             log.warning("JuiceFS is faked: disks are recorded but not formatted")
-        try:
-            yield
-        finally:
-            for task in tasks:
-                task.cancel()
-            for task in tasks:
-                with contextlib.suppress(asyncio.CancelledError):
-                    await task
-            await ctx.engine.dispose()
+        # The mounted transport's own lifespan never runs: its session manager runs here.
+        async with surface.session_manager.run():
+            try:
+                yield
+            finally:
+                for task in tasks:
+                    task.cancel()
+                for task in tasks:
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await task
+                await ctx.engine.dispose()
 
     production = ctx.settings.env is Environment.PRODUCTION
     app = FastAPI(
@@ -120,6 +134,7 @@ def create_app(ctx: Context) -> FastAPI:
         redoc_url=None,
     )
     app.state.ctx = ctx
+    app.state.oauth_provider = provider
     install_error_handlers(app)
 
     @app.middleware("http")
@@ -127,8 +142,11 @@ def create_app(ctx: Context) -> FastAPI:
         request: Request, call_next: Callable[[Request], Awaitable[Response]]
     ) -> Response:
         origin = request.headers.get("origin")
+        # Only the cookie-authenticated API: the OAuth endpoints and `/mcp/` take no cookie,
+        # and browser-based MCP clients call them cross-origin.
         if (
-            request.method in UNSAFE_METHODS
+            request.url.path.startswith(f"{API_PREFIX}/")
+            and request.method in UNSAFE_METHODS
             and origin is not None
             and origin != ctx.settings.public_origin
         ):
@@ -136,6 +154,15 @@ def create_app(ctx: Context) -> FastAPI:
                 {"code": "forbidden", "message": "Cross-origin request refused", "details": {}},
                 status_code=403,
             )
+        if request.url.path == "/authorize":
+            limits = ctx.settings.rate_limits.get("authorize")
+            address = request.client.host if request.client else "unknown"
+            if limits and (wait := ctx.rate_limiter.hit("authorize", address, limits)) is not None:
+                return JSONResponse(
+                    {"error": "slow_down", "error_description": "Too many authorization requests"},
+                    status_code=429,
+                    headers={"Retry-After": str(int(wait) + 1)},
+                )
         response = await call_next(request)
         response.headers.setdefault("Cache-Control", "no-store")
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
@@ -153,7 +180,25 @@ def create_app(ctx: Context) -> FastAPI:
         health_router,
         settings_router,
         device_router,
+        oauth_router,
+        mcp_install_router,
     ):
         api.include_router(router)
     app.include_router(api)
+
+    # The authorization server at the origin's root, and the MCP surface behind its gate:
+    # the bearer is verified (a live membership included), then audience and scope.
+    for route in build_routes(ctx.settings, provider):
+        app.router.routes.append(route)
+    gated = AuthenticationMiddleware(
+        AuthContextMiddleware(RequireToken(surface.asgi_app, ctx.settings)),
+        backend=BearerAuthBackend(provider),
+    )
+
+    async def bare(_: Request) -> RedirectResponse:
+        # 307 keeps the method and body: a client configured without the slash still works.
+        return RedirectResponse(f"{RESOURCE_PATH}/", status_code=307)
+
+    app.router.routes.append(Mount(RESOURCE_PATH, app=gated))
+    app.router.routes.append(Route(RESOURCE_PATH, bare, methods=["GET", "POST", "DELETE"]))
     return app

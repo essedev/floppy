@@ -1,6 +1,6 @@
 # Database schema
 
-The control plane's data model, in PostgreSQL. **Status: built**: `server/`, models in `server/src/floppy_server/models.py`, migrations `0001_initial` to `0005`. `0003` moved the control plane from one Valkey instance and one bucket per organization to one of each per disk, with access per person and per disk (DECISIONS #23, #24); what it changed is listed in [Migration 0003](#migration-0003).
+The control plane's data model, in PostgreSQL. **Status: built**: `server/`, models in `server/src/floppy_server/models.py`, migrations `0001_initial` to `0006`. `0003` moved the control plane from one Valkey instance and one bucket per organization to one of each per disk, with access per person and per disk (DECISIONS #23, #24); what it changed is listed in [Migration 0003](#migration-0003).
 
 The design started as the paper of the build roadmap (ROADMAP 3), written from the team architecture ([architecture.html](architecture.html), sections 06 to 11), the concepts ([concept-d-onboarding](concepts/concept-d-onboarding.html), [concept-e-admin](concepts/concept-e-admin.html)) and the admin web's API contract (`web/src/lib/api/types.ts`, `http.ts`, and the rules the fake in `web/src/lib/api/fake/` keeps). This file changes in the same commit as every migration.
 
@@ -638,6 +638,67 @@ Indexes: `(organization_id, received_at, id)` for the devices' cursor; `(volume_
 
 Created with `fillfactor = 70`, like `device_status`: a report every few seconds rewrites it. Index: `(organization_id, reported_at)`.
 
+### oauth_clients
+
+(0006) An MCP client the authorization server knows (DECISIONS #29): registered by dynamic registration (`POST /register`), or described by a Client ID Metadata Document at its `client_id` URL. Global, not per organization: Claude Code is the same client everywhere. Soft deleted.
+
+| Column | Type | Null | Default | Notes |
+|---|---|---|---|---|
+| `id` | `uuid` | | `uuidv7()` | Primary key |
+| `client_id` | `text` | | | The SDK's generated id (DCR) or the document's HTTPS URL (CIMD). `CHECK (length BETWEEN 1 AND 512)`; unique `WHERE deleted_at IS NULL` |
+| `source` | `text` | | | `CHECK IN ('dcr', 'cimd')` |
+| `client_name` | `text` | yes | | The client's own claim, shown on the consent page next to the host it returns to |
+| `info` | `jsonb` | | | The SDK's `OAuthClientInformationFull` whole, so the schema does not chase the SDK's fields. `CHECK (jsonb_typeof(info) = 'object')` |
+| `fresh_until` | `timestamptz` | yes | | CIMD only (`CHECK`): until when the fetched document is reused; its `max-age`, capped at 60 minutes. A stale copy is still used when the document does not answer |
+| `created_at`, `updated_at` | `timestamptz` | | `now()` | |
+| `deleted_at` | `timestamptz` | yes | | |
+
+### oauth_authorizations
+
+(0006) An authorization request and, once a person approves it in the admin web, its code: one row in two moments. Opened by `GET /authorize` with no person; the consent binds it to the session's membership.
+
+| Column | Type | Null | Default | Notes |
+|---|---|---|---|---|
+| `id` | `uuid` | | `uuidv7()` | Primary key; travels in the consent page's address (`/autorizza?richiesta=`), and authorizes nothing by itself |
+| `client_id` | `text` | | | Not a foreign key: a CIMD client may have no row yet |
+| `redirect_uri` | `text` | | | As requested, port included (the loopback exception, OAuth 2.1 #2.3.1) |
+| `redirect_uri_explicit` | `boolean` | | | Whether the client sent it: only then is it checked again at the token call |
+| `scopes` | `text[]` | | | Requested and expanded; at approval, what the person ticked |
+| `code_challenge` | `text` | | | PKCE S256, checked by the SDK at the token call |
+| `state` | `text` | yes | | Returned to the client as sent |
+| `resource` | `text` | yes | | RFC 8707: the audience the token will carry |
+| `organization_id`, `membership_id` | `uuid` | yes | | Composite foreign key, set at approval: `CHECK ((approved_at IS NULL) = (membership_id IS NULL))` |
+| `user_id` | `uuid` | yes | | Foreign key, set at approval |
+| `code_hash` | `bytea` | yes | | SHA-256 of the code. `UNIQUE`; `CHECK ((approved_at IS NULL) = (code_hash IS NULL))` |
+| `created_at` | `timestamptz` | | `now()` | |
+| `expires_at` | `timestamptz` | | | Creation plus 10 minutes (`FLOPPY_OAUTH_REQUEST_MINUTES`), for the consent and the code alike |
+| `approved_at`, `denied_at` | `timestamptz` | yes | | At most one: `CHECK (approved_at IS NULL OR denied_at IS NULL)` |
+| `consumed_at` | `timestamptz` | yes | | The code spent; a second exchange revokes every token the code produced |
+
+### oauth_tokens
+
+(0006) An access or refresh token of an MCP client, by SHA-256. A token acts as one membership: the role is read from it on every call, and a membership that is no longer active makes its tokens fail at once.
+
+| Column | Type | Null | Default | Notes |
+|---|---|---|---|---|
+| `id` | `uuid` | | `uuidv7()` | Primary key; `UNIQUE (organization_id, id)` |
+| `organization_id`, `membership_id` | `uuid` | | | Composite foreign key |
+| `user_id` | `uuid` | | | Foreign key |
+| `grant_id` | `uuid` | | | The connection: kept through refreshes, so the person sees one row per client and revoking it revokes both halves |
+| `authorization_id` | `uuid` | | | Foreign key to `oauth_authorizations`, carried through refreshes: a replayed code revokes exactly what it produced |
+| `kind` | `text` | | | `CHECK IN ('access', 'refresh')` |
+| `token_hash` | `bytea` | | | SHA-256 of the 256-bit token. `UNIQUE` |
+| `client_id`, `client_name` | `text` | | | Copied from the client, for the connections list |
+| `scopes` | `text[]` | | | Expanded: `floppy:admin` implies `floppy:write`, which implies `floppy:read` |
+| `resource` | `text` | yes | | The audience; the gate refuses a token whose resource is not this surface's |
+| `created_at` | `timestamptz` | | `now()` | |
+| `granted_at` | `timestamptz` | | | The grant's approval, kept through refreshes |
+| `last_used_at` | `timestamptz` | yes | | Access tokens, written at most every 5 minutes |
+| `expires_at` | `timestamptz` | | | Access 60 minutes, refresh 30 days (`FLOPPY_OAUTH_ACCESS_TOKEN_MINUTES`, `_REFRESH_TOKEN_DAYS`) |
+| `revoked_at`, `revoke_reason` | | yes | | `CHECK IN ('refreshed', 'revoked', 'code_replayed', 'membership_removed')`; `CHECK ((revoked_at IS NULL) = (revoke_reason IS NULL))` |
+
+Indexes: `(grant_id)`, `(authorization_id)`, `(membership_id) WHERE revoked_at IS NULL`, to revoke a removed person's tokens.
+
 ## Secrets
 
 | Secret | Stored | How | Why this way |
@@ -652,6 +713,7 @@ Created with `fillfactor = 70`, like `device_status`: a report every few seconds
 | Session cookie | `web_sessions.token_hash` | SHA-256 | Same |
 | Magic link token, invitation token, app authorization code | `*_hash` columns | SHA-256 | Same, and single use |
 | 6-digit code | `sign_in_requests.code_hmac` | HMAC-SHA256 with a server key, over the request id and the code | One million values: any plain or slow hash is reversed in seconds from a dump. Keyed, a dump alone reveals nothing; online guessing is bounded by 5 attempts and 15 minutes |
+| (0006) MCP clients' authorization codes, access and refresh tokens | `oauth_authorizations.code_hash`, `oauth_tokens.token_hash` | SHA-256 | Same as the device token; a code is single use, a refresh token rotates at every use |
 | SMB password | Not in PostgreSQL | | Between the Mac and its own VM only |
 
 **Encryption**: AES-256-GCM with a random 96-bit nonce, stored as one `bytea`: a format byte, a key id, the nonce, the ciphertext with its tag. The additional authenticated data is `table.column:row id`, so a ciphertext copied into another row or column fails to decrypt. The key comes from `FLOPPY_SECRET_KEY` (32 random bytes, base64), from the environment or a Docker secret, never from the database. A key ring (`FLOPPY_SECRET_KEYS`, id to key) allows rotating it: new writes use the newest key, a command re-encrypts old rows, then the old key is dropped. The HMAC key for codes is derived from the same secret with HKDF and its own label, so a self-hoster manages one secret.
@@ -662,7 +724,7 @@ Created with `fillfactor = 70`, like `device_status`: a report every few seconds
 
 ## Audit log
 
-What it records, the `CHECK` list after `0003`:
+What it records, the `CHECK` list after `0006`:
 
 | Action | Category | Actor | Target | Detail |
 |---|---|---|---|---|
@@ -686,6 +748,8 @@ What it records, the `CHECK` list after `0003`:
 | `key_window_closed` | key | person | key | `{disk, oldKeyTail, reasons}` |
 | `disk_created`, `disk_updated` | disks | person | disk | `{blockSize}`; `{trashDays: [old, new]}` and `{cacheExpireDays: [old, new]}` for what changed |
 | (0004) `disk_deleted` | disks | person | disk | `{bucket}`: where its objects stay |
+| (0006) `mcp_client_connected` | access | person | person | `{client, scopes}`: the person approved an MCP client on the consent page |
+| (0006) `mcp_client_disconnected` | access | person | person | `{client, by: "person" \| "client"}`: revoked from the admin web, or by the client (`POST /revoke`) |
 | `settings_updated` | settings | person | organization | `{fields: [...]}`: the names of what changed, never values of secrets |
 
 Sign-in attempts on unknown addresses are not recorded: they belong to no organization, and logging them would store addresses of people who are not users.
@@ -789,6 +853,12 @@ The admin web's contract, under `/api/v1`. The OpenAPI document and its pages (`
 | `GET /settings`, `PATCH /settings` (admin) | `organizations`, live `volumes` (the default endpoint is frozen once a disk exists: `storage_in_use`, and `storageLocked` says so) | `organizations`, `audit_events`. `storage {endpoint, region}`; `storageMode`, `storageProvider` are shown, set only at creation |
 | `POST /settings/mail/test` (admin) | `organizations` | `organization_status.mail_*` |
 | `POST /settings/storage/probe` (admin, manual) `{endpoint, region, bucket, accessKeyId, secretKey}` | | Nothing: a test write with a bucket and key before creating a disk |
+| (0006) `GET /oauth/requests/{id}` (anyone) | `oauth_authorizations`, `oauth_clients` (a CIMD client's document may be fetched, only after the session is checked) | Nothing: `{id, client {id, name, redirectHost, loopbackOnly}, scopes, role, expiresAt}`; `410 request_expired` once decided or past 10 minutes |
+| (0006) `POST /oauth/requests/{id}/approve` `{scopes}` | `oauth_authorizations` under lock | The request bound to the session's membership with the ticked scopes (`read` always, never more than asked), `code_hash`, `audit_events`; answers `{redirectTo}`, the client's redirect with `code`, `state` and `iss` |
+| (0006) `POST /oauth/requests/{id}/deny` | `oauth_authorizations` | `denied_at`; answers `{redirectTo}` with `error=access_denied` |
+| (0006) `GET /connections` | The caller's live refresh tokens, the access tokens' `last_used_at` | Nothing: `[{id, clientName, clientId, scopes, grantedAt, lastUsedAt}]`, `id` the grant |
+| (0006) `POST /connections/{id}/revoke` | `oauth_tokens` (the caller's only) | Both halves `revoked`, `audit_events`; `404` for another person's |
+| (0006) `GET /mcp/install`, `/mcp/skill`, `/mcp/setup.sh` (public) | | Nothing: the MCP address and the Claude Code commands, the skill as Markdown, a setup script; no secret |
 
 The app's API, not in the admin web's contract:
 
@@ -807,11 +877,13 @@ The app's API, not in the admin web's contract:
 | (0005) `GET /device/activity?diskId=&before=&limit=` | Nothing: a page of one disk's events, newest first, with the `before` of the next page; `404` for a disk the device does not see |
 | (0005) `POST /device/activity/deletes` `{diskId, items: [{path, at}]}` | Nothing: for each trash entry, who deleted or replaced that path closest to its time within 2 minutes, or null |
 
+(0006) **The authorization server and the MCP surface**, at the origin's root and not under `/api/v1` (the issuer is the origin; Traefik routes these paths to the control plane): `GET /.well-known/oauth-authorization-server` (RFC 8414, with CIMD, `iss` and the `none` method announced), `GET /.well-known/oauth-protected-resource/mcp` (RFC 9728), `GET /authorize` (opens an `oauth_authorizations` row, `302` to the consent page; rate limited, `authorize` 30 a minute), `POST /token` (codes and refreshes: `oauth_tokens`), `POST /register` (`oauth_clients`, DCR), `POST /revoke`, and `POST /mcp/` (the tools, behind the bearer: `401` with `WWW-Authenticate` and `resource_metadata` without a live token for this resource, `403 insufficient_scope`). The tools read and write what their REST endpoints do.
+
 **A device token refused** answers `401 unauthorized` with `details.reason`, so the app can word it: `token_unknown` (no such token, or none sent), `device_revoked` (revoked by an admin, its owner from the web, a person's removal or the reconciler), `device_signed_out` ("Esci" in the app), `device_not_registered` (still `pending`). The heartbeat of a revoked or signed-out device answers `200 {state: "revoked"}` instead, the app's cue to stop every disk and clear its cache and replicas.
 
 **Error codes** beyond the contract's: `invalid_state` (409, an action the current state does not allow), `mail_failed` (503, the SMTP server refused; the request is not recorded as sent), `metadata_unavailable` (503, a disk's instance did not answer an action that needs it), `meta_unavailable` (the meta service could not give a disk an instance: lands in the disk's `format_error`), `format_failed` (502, JuiceFS refused a `juicefs config`; a failed `juicefs format` lands in `format_error` instead), `probe_failed` (422, a test write failed; `details.code` and `details.request`), `bucket_taken` (409, another disk uses this bucket), `provider_failed` (502, the storage adapter's call to the provider failed; `details.reason` says why) and `rate_limited` (429 with `Retry-After`).
 
-**Rate limits**, per client address and per rule, in memory: `sign-in` (`POST /auth/sign-in`, `/auth/app/sign-in`) 10 a minute and 60 an hour, `code` (`/auth/sign-in/{id}/code`, `/auth/app/token`) 30 a minute, `link` (`/auth/magic-link`, `/auth/invitation`, the app's link routes) 30 a minute; each configurable, 0 turns it off. Separately, more than 10 sign-ins an hour for one address return the latest request unchanged instead of mailing again.
+**Rate limits**, per client address and per rule, in memory: `sign-in` (`POST /auth/sign-in`, `/auth/app/sign-in`) 10 a minute and 60 an hour, `code` (`/auth/sign-in/{id}/code`, `/auth/app/token`) 30 a minute, `link` (`/auth/magic-link`, `/auth/invitation`, the app's link routes) 30 a minute, (0006) `authorize` (`GET /authorize`) 30 a minute; each configurable, 0 turns it off. Separately, more than 10 sign-ins an hour for one address return the latest request unchanged instead of mailing again.
 
 **Bootstrap** (`floppy-server bootstrap --from-env`): `FLOPPY_BOOTSTRAP_ORGANIZATION_NAME`, `_ORGANIZATION_SLUG`, `_ADMIN_EMAIL`, `_S3_ENDPOINT` and `_S3_REGION` (the defaults of new disks), `_MAIL_LANGUAGE`, `_STORAGE_MODE`, `_STORAGE_PROVIDER`, `_STORAGE_ADMIN_CREDENTIALS` (JSON). (0003) A manual organization starts with no key (each disk brings its own); a managed one gets the control plane's key from the adapter. The Valkey address and bucket are gone from the bootstrap: both are per disk.
 
@@ -856,6 +928,10 @@ Built: `server/migrations/versions/0004_disk_deleted.py`. `audit_events`: `disk_
 ## Migration 0005
 
 Built: `server/migrations/versions/0005_file_events.py`. New tables `file_events` and `device_activity` (DECISIONS #27), with `SELECT, INSERT, DELETE` on `file_events` and `SELECT, INSERT, UPDATE` on `device_activity` for the application role. `downgrade()` drops both: they are observations nothing else references.
+
+## Migration 0006
+
+Built: `server/migrations/versions/0006_oauth.py`. New tables `oauth_clients`, `oauth_authorizations`, `oauth_tokens` (DECISIONS #29), with `SELECT, INSERT, UPDATE` for the application role; `mcp_client_connected` and `mcp_client_disconnected` join the audit actions. `downgrade()` refuses while such an event exists.
 
 ## Decisions taken
 

@@ -1,7 +1,7 @@
 # A self-hosted Floppy instance, for Dokploy (or any host whose Traefik reads Docker labels):
 # the control plane, the admin web, PostgreSQL 18 and the meta service, on one domain.
 #
-#   https://<FLOPPY_DOMAIN>            the admin web; /api/ goes to the control plane (same origin)
+#   https://<FLOPPY_DOMAIN>            the admin web; /api/, /mcp/ and the OAuth paths go to the control plane
 #   <label>.meta.<FLOPPY_DOMAIN>:443   each disk's Valkey, routed by name in the TLS handshake
 #
 # Traefik is the host's own (Dokploy's), never a second one: it needs the blocks of
@@ -112,7 +112,7 @@ services:
     labels:
       - traefik.enable=true
       - traefik.docker.network=${FLOPPY_PROXY_NETWORK:-dokploy-network}
-      - traefik.http.routers.${FLOPPY_ROUTER_PREFIX:-floppy}-api.rule=Host(`${FLOPPY_DOMAIN}`) && PathPrefix(`/api/`)
+      - traefik.http.routers.${FLOPPY_ROUTER_PREFIX:-floppy}-api.rule=Host(`${FLOPPY_DOMAIN}`) && (PathPrefix(`/api/`) || PathPrefix(`/mcp`) || PathPrefix(`/.well-known/oauth-`) || Path(`/authorize`) || Path(`/token`) || Path(`/register`) || Path(`/revoke`))
       - traefik.http.routers.${FLOPPY_ROUTER_PREFIX:-floppy}-api.entrypoints=${FLOPPY_TRAEFIK_ENTRYPOINT:-websecure}
       - traefik.http.routers.${FLOPPY_ROUTER_PREFIX:-floppy}-api.tls=true
       - traefik.http.routers.${FLOPPY_ROUTER_PREFIX:-floppy}-api.tls.certresolver=${FLOPPY_WEB_CERT_RESOLVER:-letsencrypt}

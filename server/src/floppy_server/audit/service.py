@@ -47,6 +47,8 @@ ACTIONS: dict[str, tuple[str, frozenset[str]]] = {
     "disk_access_changed": ("disks", frozenset({"person", "from", "to"})),
     "disk_deleted": ("disks", frozenset({"bucket"})),
     "settings_updated": ("settings", frozenset({"fields"})),
+    "mcp_client_connected": ("access", frozenset({"client", "scopes"})),
+    "mcp_client_disconnected": ("access", frozenset({"client", "by"})),
 }
 
 SEARCH_DAYS_MAX = 90

@@ -174,6 +174,18 @@ class Settings(BaseSettings):
     link_per_minute: int = Field(default=30, ge=0)
     trusted_proxies: str = "127.0.0.1"
 
+    # The MCP surface and its authorization server (oauth/, mcp/; DECISIONS #29). The issuer
+    # is `public_url`: the admin web and the API share the origin. Access tokens are short,
+    # refresh tokens rotate at every use; codes and consent requests last minutes.
+    mcp_enabled: bool = True
+    oauth_access_token_minutes: int = Field(default=60, ge=1)
+    oauth_refresh_token_days: int = Field(default=30, ge=1)
+    oauth_request_minutes: int = Field(default=10, ge=1)
+    oauth_cimd_cache_minutes: int = Field(default=60, ge=1)
+    oauth_cimd_timeout_seconds: float = 5.0
+    oauth_cimd_max_bytes: int = 16_384
+    authorize_per_minute: int = Field(default=30, ge=0)
+
     @model_validator(mode="after")
     def _check(self) -> Self:
         if self.secret_key is None and self.secret_keys is None:
@@ -249,6 +261,7 @@ class Settings(BaseSettings):
             "sign-in": (Limit(self.sign_in_per_minute, 60), Limit(self.sign_in_per_hour, 3600)),
             "code": (Limit(self.code_per_minute, 60),),
             "link": (Limit(self.link_per_minute, 60),),
+            "authorize": (Limit(self.authorize_per_minute, 60),),
         }
         return {
             name: kept
@@ -270,6 +283,11 @@ class Settings(BaseSettings):
         """Scheme, host and port of `public_url`, as browsers send it in `Origin`."""
         scheme, _, rest = self.public_url.partition("://")
         return f"{scheme}://{rest.split('/', 1)[0]}"
+
+    @property
+    def issuer(self) -> str:
+        """The authorization server's issuer: the public origin, without a trailing slash."""
+        return self.public_url.rstrip("/")
 
     @property
     def session_idle(self) -> timedelta:

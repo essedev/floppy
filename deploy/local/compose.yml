@@ -65,7 +65,7 @@ services:
       FLOPPY_SIGN_IN_PER_MINUTE: "60"
       FLOPPY_SIGN_IN_PER_HOUR: "1000"
     labels:
-      - traefik.http.routers.floppy-local-api.rule=PathPrefix(`/api/`)
+      - traefik.http.routers.floppy-local-api.rule=(PathPrefix(`/api/`) || PathPrefix(`/mcp`) || PathPrefix(`/.well-known/oauth-`) || Path(`/authorize`) || Path(`/token`) || Path(`/register`) || Path(`/revoke`))
       - traefik.http.routers.floppy-local-api.entrypoints=local
       - traefik.http.routers.floppy-local-api.service=floppy-api
       - traefik.http.routers.floppy-local-api.middlewares=floppy-api-headers

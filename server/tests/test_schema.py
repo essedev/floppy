@@ -26,7 +26,7 @@ async def test_every_table_is_migrated(owner_engine: AsyncEngine) -> None:
             ).scalars()
         )
     assert set(TABLES) <= present
-    assert len(TABLES) == 21
+    assert len(TABLES) == 24
 
 
 @pytest.mark.parametrize("table", TABLES)

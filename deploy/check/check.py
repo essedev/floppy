@@ -229,6 +229,15 @@ def web_checks():
     status, headers, body = http_get("/api/v1/healthz")
     record("c02 API under /api/v1 on the same origin", f"{status} {body[:60]!r}", "200",
            status == 200 and headers.get("strict-transport-security", "").startswith("max-age=63072000"))
+    status, _, body = http_get("/.well-known/oauth-authorization-server")
+    issuer = json.loads(body).get("issuer") if status == 200 else None
+    record("c02 OAuth metadata reaches the control plane", f"{status} issuer {issuer}", f"200 https://{DOMAIN}",
+           issuer == f"https://{DOMAIN}")
+    # 401 with the challenge, never the transport's 421: its Host allowlist names the domain.
+    status, headers, _ = http_get("/mcp/")
+    challenge = headers.get("www-authenticate", "")
+    record("c02 MCP answers behind its OAuth gate", f"{status} {challenge[:40]!r}", "401 Bearer resource_metadata",
+           status == 401 and "resource_metadata=" in challenge)
     status, headers, _ = http_get("/", tls=False)
     record("c03 plain HTTP redirects", f"{status} -> {headers.get('location')}", "301/308 https",
            status in (301, 308) and headers.get("location", "").startswith(f"https://{DOMAIN}/"))

@@ -97,6 +97,9 @@ VERSIONING_STATES = ("enabled", "suspended", "off", "unknown")
 FILE_OPS = ("created", "added", "written", "replaced", "renamed", "deleted")
 WRITING_OPS = ("added", "written", "replaced")
 ENTRY_KINDS = ("file", "folder")
+OAUTH_CLIENT_SOURCES = ("dcr", "cimd")
+OAUTH_TOKEN_KINDS = ("access", "refresh")
+OAUTH_REVOKE_REASONS = ("refreshed", "revoked", "code_replayed", "membership_removed")
 AUDIT_ACTIONS = (
     "organization_created",
     "signed_in",
@@ -121,6 +124,8 @@ AUDIT_ACTIONS = (
     "disk_access_changed",
     "disk_deleted",
     "settings_updated",
+    "mcp_client_connected",
+    "mcp_client_disconnected",
 )
 
 
@@ -1004,6 +1009,138 @@ class DeviceActivity(Base):
         JSONB, server_default=text("'[]'::jsonb")
     )
     reported_at: Mapped[datetime] = _ts()
+
+
+class OAuthClient(Base):
+    """
+    An MCP client the authorization server knows: registered (DCR) or described by a Client
+    ID Metadata Document at its `client_id` URL (CIMD). Global: Claude Code is the same client
+    for every organization. The SDK's client model is stored whole in `info`.
+    """
+
+    __tablename__ = "oauth_clients"
+    __table_args__ = (
+        CheckConstraint(_in("source", *OAUTH_CLIENT_SOURCES), name="source"),
+        CheckConstraint("length(client_id) BETWEEN 1 AND 512", name="client_id_length"),
+        CheckConstraint("jsonb_typeof(info) = 'object'", name="info_object"),
+        CheckConstraint("source = 'cimd' OR fresh_until IS NULL", name="fresh_until_cimd"),
+        Index(
+            "uq_oauth_clients_client_id",
+            "client_id",
+            unique=True,
+            postgresql_where=text("deleted_at IS NULL"),
+        ),
+    )
+
+    id: Mapped[UUID] = _id()
+    client_id: Mapped[str] = mapped_column(Text)
+    source: Mapped[str] = mapped_column(Text)
+    client_name: Mapped[str | None] = mapped_column(Text)
+    info: Mapped[dict[str, object]] = mapped_column(JSONB)
+    # CIMD only: until when the fetched document is reused without fetching it again.
+    fresh_until: Mapped[datetime | None] = _ts(nullable=True)
+    created_at: Mapped[datetime] = _ts(default=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=NOW, onupdate=func.now()
+    )
+    deleted_at: Mapped[datetime | None] = _ts(nullable=True)
+
+
+class OAuthAuthorization(Base):
+    """
+    An authorization request and, once the person approves it in the admin web, its code:
+    one row in two moments. The person and organization are set at approval, from the web
+    session that approved; the code is stored as its SHA-256 and spent once (`consumed_at`).
+    """
+
+    __tablename__ = "oauth_authorizations"
+    __table_args__ = (
+        _tenant_fk(["membership_id"], "memberships"),
+        UniqueConstraint("code_hash", name="uq_oauth_authorizations_code_hash"),
+        CheckConstraint(
+            "code_hash IS NULL OR octet_length(code_hash) = 32", name="code_hash_length"
+        ),
+        CheckConstraint("approved_at IS NULL OR denied_at IS NULL", name="decided_once"),
+        CheckConstraint("(approved_at IS NULL) = (code_hash IS NULL)", name="code_on_approval"),
+        CheckConstraint(
+            "(approved_at IS NULL) = (membership_id IS NULL)", name="person_on_approval"
+        ),
+        CheckConstraint("consumed_at IS NULL OR approved_at IS NOT NULL", name="consumed_approved"),
+    )
+
+    id: Mapped[UUID] = _id()
+    client_id: Mapped[str] = mapped_column(Text)
+    redirect_uri: Mapped[str] = mapped_column(Text)
+    # RFC 6749: a redirect_uri the client did not send must not be checked at the token call.
+    redirect_uri_explicit: Mapped[bool] = mapped_column(Boolean)
+    scopes: Mapped[list[str]] = mapped_column(ARRAY(Text))
+    code_challenge: Mapped[str] = mapped_column(Text)
+    state: Mapped[str | None] = mapped_column(Text)
+    # RFC 8707: the resource the token will be issued for, its audience.
+    resource: Mapped[str | None] = mapped_column(Text)
+    organization_id: Mapped[UUID | None] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("organizations.id")
+    )
+    membership_id: Mapped[UUID | None] = mapped_column(PgUUID(as_uuid=True))
+    user_id: Mapped[UUID | None] = mapped_column(PgUUID(as_uuid=True), ForeignKey("users.id"))
+    code_hash: Mapped[bytes | None] = mapped_column(LargeBinary)
+    created_at: Mapped[datetime] = _ts(default=True)
+    expires_at: Mapped[datetime] = _ts()
+    approved_at: Mapped[datetime | None] = _ts(nullable=True)
+    denied_at: Mapped[datetime | None] = _ts(nullable=True)
+    consumed_at: Mapped[datetime | None] = _ts(nullable=True)
+
+
+class OAuthToken(Base):
+    """
+    An access or refresh token of an MCP client, by SHA-256. `grant_id` ties the two halves of
+    one grant: revoking either revokes both. A token acts as its person in one organization,
+    with the role read from the membership on every request.
+    """
+
+    __tablename__ = "oauth_tokens"
+    __table_args__ = (
+        _tenant_unique("oauth_tokens"),
+        _tenant_fk(["membership_id"], "memberships"),
+        UniqueConstraint("token_hash", name="uq_oauth_tokens_token_hash"),
+        CheckConstraint("octet_length(token_hash) = 32", name="token_hash_length"),
+        CheckConstraint(_in("kind", *OAUTH_TOKEN_KINDS), name="kind"),
+        CheckConstraint(_in("revoke_reason", *OAUTH_REVOKE_REASONS), name="revoke_reason"),
+        CheckConstraint("(revoked_at IS NULL) = (revoke_reason IS NULL)", name="revoked"),
+        Index("ix_oauth_tokens_grant_id", "grant_id"),
+        Index("ix_oauth_tokens_authorization_id", "authorization_id"),
+        Index(
+            "ix_oauth_tokens_membership_id_live",
+            "membership_id",
+            postgresql_where=text("revoked_at IS NULL"),
+        ),
+    )
+
+    id: Mapped[UUID] = _id()
+    organization_id: Mapped[UUID] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("organizations.id")
+    )
+    membership_id: Mapped[UUID] = mapped_column(PgUUID(as_uuid=True))
+    user_id: Mapped[UUID] = mapped_column(PgUUID(as_uuid=True), ForeignKey("users.id"))
+    grant_id: Mapped[UUID] = mapped_column(PgUUID(as_uuid=True))
+    # The authorization the grant comes from, carried through refreshes: a replayed code
+    # revokes exactly what it produced.
+    authorization_id: Mapped[UUID] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("oauth_authorizations.id")
+    )
+    kind: Mapped[str] = mapped_column(Text)
+    token_hash: Mapped[bytes] = mapped_column(LargeBinary)
+    client_id: Mapped[str] = mapped_column(Text)
+    client_name: Mapped[str | None] = mapped_column(Text)
+    scopes: Mapped[list[str]] = mapped_column(ARRAY(Text))
+    resource: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = _ts(default=True)
+    # The grant's first approval, kept through refreshes, for the connections list.
+    granted_at: Mapped[datetime] = _ts()
+    last_used_at: Mapped[datetime | None] = _ts(nullable=True)
+    expires_at: Mapped[datetime] = _ts()
+    revoked_at: Mapped[datetime | None] = _ts(nullable=True)
+    revoke_reason: Mapped[str | None] = mapped_column(Text)
 
 
 async def lock_organization(session: AsyncSession, organization_id: UUID) -> None:

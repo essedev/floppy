@@ -31,6 +31,7 @@ from floppy_server.models import (
     Device,
     Invitation,
     Membership,
+    OAuthToken,
     Organization,
     User,
     Volume,
@@ -398,6 +399,17 @@ async def remove(ctx: Context, actor: Actor, user_id: UUID) -> tuple[PersonOut, 
                 WebSession.organization_id == actor.organization_id,
                 WebSession.membership_id == membership.id,
                 WebSession.revoked_at.is_(None),
+            )
+            .values(revoked_at=now, revoke_reason="membership_removed")
+        )
+        # The MCP clients connected as them: the token check refuses them anyway, this
+        # keeps the rows truthful for the connections list.
+        await db.execute(
+            update(OAuthToken)
+            .where(
+                OAuthToken.organization_id == actor.organization_id,
+                OAuthToken.membership_id == membership.id,
+                OAuthToken.revoked_at.is_(None),
             )
             .values(revoked_at=now, revoke_reason="membership_removed")
         )

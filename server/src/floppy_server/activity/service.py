@@ -22,11 +22,11 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from floppy_server.access.service import wanted
-from floppy_server.api import CamelModel
+from floppy_server.api import Actor, CamelModel
 from floppy_server.context import Context, utcnow
 from floppy_server.device.service import active_device
 from floppy_server.errors import not_found, validation
-from floppy_server.models import Device, DeviceActivity, FileEvent, User
+from floppy_server.models import Device, DeviceActivity, DiskAccess, FileEvent, User, Volume
 
 KEEP = timedelta(days=30)
 HORIZON = timedelta(seconds=5)
@@ -369,6 +369,88 @@ async def history(
         page = events[:limit]
         return ActivityPage(
             events=await _out(db, device, page),
+            before=_encode(page[-1].occurred_at, page[-1].id) if len(events) > limit else None,
+        )
+
+
+def _like_escaped(text: str) -> str:
+    """A text matched literally inside a LIKE pattern escaped with a backslash."""
+    return text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+async def person_history(
+    ctx: Context,
+    actor: Actor,
+    disk_id: UUID,
+    before: str | None,
+    limit: int,
+    path: str | None = None,
+) -> ActivityPage:
+    """
+    A page of one disk's events for a signed-in person (the MCP surface), newest first, on a
+    disk they may read or write; `path` keeps events whose path or destination contains it.
+    """
+    async with ctx.sessions() as db:
+        visible = await db.scalar(
+            select(DiskAccess.volume_id)
+            .join(
+                Volume,
+                (Volume.id == DiskAccess.volume_id)
+                & (Volume.organization_id == DiskAccess.organization_id),
+            )
+            .where(
+                DiskAccess.organization_id == actor.organization_id,
+                DiskAccess.membership_id == actor.membership_id,
+                DiskAccess.volume_id == disk_id,
+                DiskAccess.access.in_(("read", "write")),
+                Volume.state == "ready",
+                Volume.deleted_at.is_(None),
+            )
+        )
+        if visible is None:
+            raise not_found("Not a disk you see")
+        query = select(FileEvent).where(
+            FileEvent.organization_id == actor.organization_id,
+            FileEvent.volume_id == disk_id,
+            FileEvent.occurred_at >= utcnow() - KEEP,
+        )
+        if path:
+            pattern = f"%{_like_escaped(path)}%"
+            query = query.where(
+                FileEvent.path.ilike(pattern, escape="\\")
+                | FileEvent.dest.ilike(pattern, escape="\\")
+            )
+        if before:
+            at, event_id = _decode(before)
+            query = query.where(tuple_(FileEvent.occurred_at, FileEvent.id) < tuple_(at, event_id))
+        events = list(
+            (
+                await db.execute(
+                    query.order_by(FileEvent.occurred_at.desc(), FileEvent.id.desc()).limit(
+                        limit + 1
+                    )
+                )
+            ).scalars()
+        )
+        page = events[:limit]
+        names = await _people(db, {e.user_id for e in page})
+        return ActivityPage(
+            events=[
+                EventOut(
+                    id=e.id,
+                    disk_id=e.volume_id,
+                    at=e.occurred_at,
+                    op=e.op,
+                    kind=e.kind,
+                    path=e.path,
+                    to=e.dest,
+                    size=e.size,
+                    by=Person(name=names.get(e.user_id, ""), you=e.user_id == actor.user_id),
+                    this_device=False,
+                    local_id=e.local_id,
+                )
+                for e in page
+            ],
             before=_encode(page[-1].occurred_at, page[-1].id) if len(events) > limit else None,
         )
 
