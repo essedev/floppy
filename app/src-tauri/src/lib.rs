@@ -6,6 +6,7 @@
 
 mod account;
 mod activity;
+mod awake;
 mod commands;
 mod core;
 mod engine;

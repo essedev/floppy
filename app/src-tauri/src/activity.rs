@@ -15,6 +15,7 @@ use crate::account::api::{
     ActivityApi, ActivityRequest, ApiError, DeleteQuery, DeletesRequest, EventIn, PersonRef,
     RemoteEvent, RemoteWriting, WritingIn,
 };
+use crate::awake::Awake;
 use crate::core::{Core, CoreError, RestoreView};
 use crate::engine::{
     self, Access, ActivityReport, LocalEvent, Op, OpenFile, RenameBackRefusal, TrashKind,
@@ -280,6 +281,8 @@ pub struct Activity {
     state: Mutex<State>,
     emit: Emit,
     worker: AtomicBool,
+    /// The Mac stays awake while this Mac writes to a disk or makes one available.
+    awake: Awake,
 }
 
 fn now_s() -> f64 {
@@ -405,7 +408,21 @@ impl Activity {
             }),
             emit: Box::new(emit),
             worker: AtomicBool::new(false),
+            awake: Self::awake(),
         })
+    }
+
+    #[cfg(not(test))]
+    fn awake() -> Awake {
+        Awake::new()
+    }
+
+    /// Tests never start a real caffeinate.
+    #[cfg(test)]
+    fn awake() -> Awake {
+        Awake::with(Box::new(|| {
+            std::process::Command::new("/usr/bin/true").spawn()
+        }))
     }
 
     fn lock(&self) -> MutexGuard<'_, State> {
@@ -475,6 +492,16 @@ impl Activity {
 
     /// One pass: the engine, then the control plane, then the notices.
     pub fn tick(&self) {
+        self.pass();
+        let warming = self
+            .core
+            .status()
+            .job
+            .is_some_and(|j| j.kind == engine::JobKind::Warmup);
+        self.awake.update(warming || !self.lock().writing.is_empty());
+    }
+
+    fn pass(&self) {
         if !self.core.activity_ready() {
             return;
         }

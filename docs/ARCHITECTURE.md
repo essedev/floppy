@@ -209,6 +209,7 @@ The problems each feature answers, to verify in the pilot:
 | The Mac is full | Space used by the cache, freeing per project, the least recently used blocks freed when the cache is full |
 | Credentials on every Mac | Sign-in in the browser, one revocable user per Mac |
 | The network drops | Read-only browsing from the local replica, stated in the panel |
+| A copy stops halfway when the Mac sleeps | The app keeps the Mac awake (`caffeinate -i`, `app/src-tauri/src/awake.rs`) while this Mac writes to a disk or makes one available, and two minutes more; a closed lid still sleeps |
 | It does not work and nobody knows why | "Send diagnostics" with logs and status |
 
 **macOS only for now, with the system layer isolated.** The interface (status, cache, warmup) is shared; only how JuiceFS runs changes, behind a single interface (mount, unmount, status, warmup, free up space) with one module per system selected by `#[cfg(target_os)]`, like Portsage's scanner:
