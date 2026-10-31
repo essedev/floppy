@@ -290,8 +290,9 @@ cache_per_disk_mb() {
   echo "$per"
 }
 
-# The VM's memory in the team version: 1 GiB holds one disk (JuiceFS peaks
-# near 420 MB copying), and each more disk adds about 50 MB at rest (a replica
+# The VM's memory in the team version: 1 GiB holds one disk (JuiceFS stays near
+# 430 MB copying, its heap held by GOMEMLIMIT in floppy-disks, which shares the
+# VM among the disks), and each more disk adds about 50 MB at rest (a replica
 # of 12-15 MB, a mount of 34-39 MB). Rounded to quarter GiB, at most 4 GiB.
 vm_memory_mib() {
   local n="$1" m
