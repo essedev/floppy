@@ -223,6 +223,30 @@ pub fn dismiss_notice(activity: ActivityState, id: u64) {
     activity.dismiss(id);
 }
 
+/// Stops showing an upload's outcome (`remove: false`) or deletes an
+/// incomplete copy to the disk's trash (`remove: true`); false when the VM
+/// no longer has it.
+#[tauri::command]
+pub async fn upload_action(
+    activity: ActivityState<'_>,
+    disk: Option<String>,
+    path: String,
+    remove: bool,
+) -> Result<bool, CommandError> {
+    let activity = Arc::clone(&activity);
+    let action = if remove {
+        crate::engine::UploadAction::Remove
+    } else {
+        crate::engine::UploadAction::Dismiss
+    };
+    tauri::async_runtime::spawn_blocking(move || {
+        activity.upload_action(action, disk.as_deref(), &path)
+    })
+    .await
+    .map_err(io_error)?
+    .map_err(CommandError::from)
+}
+
 /// Puts trash entries back; `disk` is null for the single-user volume.
 #[tauri::command]
 pub async fn restore_trash(

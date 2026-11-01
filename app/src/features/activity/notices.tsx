@@ -31,6 +31,10 @@ export function alertText(a: Alert): { title: string; body: string } {
       return it.alerts.arriving(a.by, a.file, a.folder, a.size != null ? bytes(a.size) : null);
     case "arrived":
       return it.alerts.arrived(a.by, a.folder);
+    case "uploads_done":
+      return it.alerts.uploadsDone(a.files);
+    case "upload_incomplete":
+      return it.alerts.uploadIncomplete(finderName(a.file));
   }
 }
 

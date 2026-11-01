@@ -339,10 +339,53 @@ export type ActivityNotice = {
   | { kind: "renamed_back"; disk: string | null; path: string; to: string; by: PersonRef }
 );
 
-/** The notices and what is being written now. */
+/** A file this Mac is sending to a disk now (activity.rs, `Sending`). */
+export interface Sending {
+  disk: string | null;
+  path: string;
+  /** Bytes written so far. */
+  size: number;
+  since: number;
+  /** Still growing; otherwise all of it is on the disk and the rest is the sending. */
+  copying: boolean;
+}
+
+/** One disk's upload to its bucket (engine.rs, `UploadDisk`). */
+export interface UploadDisk {
+  disk: string | null;
+  /** Bytes written and not yet in the bucket. */
+  waiting: number;
+  /** Bytes a second. */
+  rate: number;
+  /** Bytes waiting and none sent for a while: the line is gone. */
+  paused: boolean;
+}
+
+/** How a file this Mac wrote ended up (engine.rs, `UploadFile`). */
+export interface UploadFile {
+  disk: string | null;
+  path: string;
+  size: number | null;
+  /** When the write closed, Unix seconds. */
+  closed: number;
+  state: "checking" | "done" | "incomplete" | "check";
+  /** `finder` or `video` for an incomplete copy, `outage` for one to check. */
+  reason: string | null;
+  finder_path: string | null;
+}
+
+/** What this Mac uploads (activity.rs, `UploadsView`). */
+export interface UploadsView {
+  sending: Sending[];
+  disks: UploadDisk[];
+  files: UploadFile[];
+}
+
+/** The notices, what is being written now and what this Mac uploads. */
 export interface ActivitySnapshot {
   notices: ActivityNotice[];
   live: LiveFile[];
+  uploads: UploadsView;
 }
 
 /** A notification about the disks' activity, worded by the dictionary (activity.rs, `Alert`). */
@@ -351,7 +394,9 @@ export type Alert =
   | { kind: "renamed"; by: PersonRef; from: string; to: string }
   | { kind: "renamed_back"; by: string; from: string; to: string }
   | { kind: "arriving"; by: string; file: string; folder: string; size: number | null }
-  | { kind: "arrived"; by: string; folder: string };
+  | { kind: "arrived"; by: string; folder: string }
+  | { kind: "uploads_done"; files: number }
+  | { kind: "upload_incomplete"; file: string };
 
 /** Why a rename could not be undone (engine.rs, `RenameBackRefusal`). */
 export type RenameRefusal = "gone" | "taken" | "no_folder";

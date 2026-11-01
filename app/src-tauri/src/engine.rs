@@ -659,6 +659,58 @@ pub struct OpenFile {
     pub path: String,
 }
 
+/// One disk's upload to its bucket, from the VM's JuiceFS.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+pub struct UploadDisk {
+    pub disk: Option<String>,
+    /// Bytes written to the disk and not yet in the bucket.
+    pub waiting: u64,
+    /// Bytes a second, an average of the last seconds.
+    pub rate: u64,
+    /// Bytes are waiting and none has reached the bucket for a while: the
+    /// line is gone. JuiceFS sends them by itself when it comes back.
+    pub paused: bool,
+}
+
+/// How a file this Mac wrote ended up on the disk.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UploadOutcome {
+    /// Closed a moment ago: the Finder may still clear its mark. Its data is
+    /// in the bucket already (a close waits for it).
+    Checking,
+    /// All of it is in the bucket (and a video's boxes add up).
+    Done,
+    /// The file is there but cut short: a Finder copy that failed, or a
+    /// video whose boxes run past its end.
+    Incomplete,
+    /// Not a video, not a Finder copy, and the line stopped while it was
+    /// written: only opening it tells.
+    Check,
+}
+
+/// A file this Mac wrote, with its outcome, until it is old or dismissed.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub struct UploadFile {
+    pub disk: Option<String>,
+    pub path: String,
+    pub size: Option<u64>,
+    /// When the write closed, Unix seconds.
+    pub closed: f64,
+    pub state: UploadOutcome,
+    /// `finder` or `video` for an incomplete file, `outage` for one to check.
+    pub reason: Option<String>,
+}
+
+/// What this Mac is sending to the buckets, from `floppy activity`.
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
+pub struct Uploads {
+    #[serde(default)]
+    pub disks: Vec<UploadDisk>,
+    #[serde(default)]
+    pub files: Vec<UploadFile>,
+}
+
 /// What `floppy activity` prints.
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct ActivityReport {
@@ -667,6 +719,9 @@ pub struct ActivityReport {
     pub last: u64,
     pub writing: Vec<Writing>,
     pub open: Vec<OpenFile>,
+    /// Absent from an engine older than the uploads.
+    #[serde(default)]
+    pub uploads: Uploads,
 }
 
 /// This Mac's events after `after`, and what it writes and has open now.
@@ -714,6 +769,49 @@ pub fn rename_back(
     let done = run_with_input(
         bin,
         &["activity", "rename-back", disk.unwrap_or("-")],
+        Some(body.as_bytes()),
+        ACTIVITY_TIMEOUT,
+    )?;
+    if !done.status.success() {
+        return Err(failed(&done));
+    }
+    parse_json(&done.stdout)
+}
+
+/// What the panel can do with an upload's outcome.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UploadAction {
+    /// Stops showing it; the file stays as it is.
+    Dismiss,
+    /// Deletes an incomplete copy: it goes to the disk's trash.
+    Remove,
+}
+
+/// What `floppy activity upload-dismiss|upload-remove` prints.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+pub struct UploadDone {
+    pub done: bool,
+    /// `not_incomplete` when the file is not recorded as an incomplete copy.
+    #[serde(default)]
+    pub reason: Option<String>,
+}
+
+/// Dismisses an upload's outcome or deletes an incomplete copy; the path
+/// travels on stdin.
+pub fn upload_action(
+    bin: &Path,
+    action: UploadAction,
+    disk: Option<&str>,
+    path: &str,
+) -> Result<UploadDone, EngineError> {
+    let body = serde_json::json!({ "path": path }).to_string();
+    let name = match action {
+        UploadAction::Dismiss => "upload-dismiss",
+        UploadAction::Remove => "upload-remove",
+    };
+    let done = run_with_input(
+        bin,
+        &["activity", name, disk.unwrap_or("-")],
         Some(body.as_bytes()),
         ACTIVITY_TIMEOUT,
     )?;

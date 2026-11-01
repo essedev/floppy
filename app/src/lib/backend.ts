@@ -73,6 +73,8 @@ export interface Backend {
   renameBack(disk: string | null, path: string, to: string): Promise<RenameRefusal | null>;
   undoNotice(id: number): Promise<void>;
   dismissNotice(id: number): Promise<void>;
+  /** Stops showing an upload's outcome, or with `remove` deletes an incomplete copy to the disk's trash. */
+  uploadAction(disk: string | null, path: string, remove: boolean): Promise<boolean>;
   getSetup(): Promise<SetupProgress>;
   runSetup(): Promise<void>;
   /** Installs or updates the engine from the app, then sets it up. */
@@ -150,6 +152,7 @@ const tauriBackend: Backend = {
   renameBack: (disk, path, to) => invoke("rename_back", { disk, path, to }),
   undoNotice: (id) => invoke("undo_notice", { id }),
   dismissNotice: (id) => invoke("dismiss_notice", { id }),
+  uploadAction: (disk, path, remove) => invoke("upload_action", { disk, path, remove }),
   getSetup: () => invoke("get_setup"),
   runSetup: () => invoke("run_setup"),
   installEngine: () => invoke("install_engine"),

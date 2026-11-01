@@ -24,7 +24,8 @@ const BLINK_PERIOD: Duration = Duration::from_millis(550);
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Look {
     Connected,
-    /// Connected and moving data (a warmup or a free the app started).
+    /// Connected and moving data: a warmup or a free the app started, or
+    /// this Mac's uploads.
     Activity,
     Unreachable,
     Off,
@@ -43,12 +44,13 @@ impl Look {
     }
 }
 
-/// The look for a status.
-pub fn look(status: &DiskStatus) -> Look {
-    let busy = status
-        .job
-        .as_ref()
-        .is_some_and(|j| matches!(j.kind, JobKind::Warmup | JobKind::Free));
+/// The look for a status, and whether this Mac is uploading.
+pub fn look(status: &DiskStatus, uploading: bool) -> Look {
+    let busy = uploading
+        || status
+            .job
+            .as_ref()
+            .is_some_and(|j| matches!(j.kind, JobKind::Warmup | JobKind::Free));
     let failing = status.team.as_ref().is_some_and(|t| t.failing > 0);
     match status.state {
         DiskState::Connected if failing => Look::Unreachable,
@@ -71,6 +73,8 @@ pub fn initial_icon() -> tauri::Result<Image<'static>> {
 pub struct TrayState {
     icon: TrayIcon,
     current: Mutex<(Look, bool)>,
+    /// The last status and whether this Mac uploads: each comes on its own.
+    last: Mutex<(Option<DiskStatus>, bool)>,
 }
 
 impl TrayState {
@@ -79,6 +83,7 @@ impl TrayState {
         let state = Arc::new(TrayState {
             icon,
             current: Mutex::new((Look::Starting, false)),
+            last: Mutex::new((None, false)),
         });
         let blinker = Arc::clone(&state);
         thread::spawn(move || {
@@ -92,12 +97,39 @@ impl TrayState {
 
     /// Shows the look and tooltip for a status.
     pub fn show(&self, status: &DiskStatus) {
-        let look = look(status);
+        let uploading = {
+            let mut last = self.last.lock().unwrap_or_else(|e| e.into_inner());
+            last.0 = Some(status.clone());
+            last.1
+        };
+        self.apply(status, uploading);
+    }
+
+    /// Whether this Mac is uploading, from the activity.
+    pub fn uploads(&self, uploading: bool) {
+        let status = {
+            let mut last = self.last.lock().unwrap_or_else(|e| e.into_inner());
+            if last.1 == uploading {
+                return;
+            }
+            last.1 = uploading;
+            last.0.clone()
+        };
+        if let Some(status) = status {
+            self.apply(&status, uploading);
+        }
+    }
+
+    fn apply(&self, status: &DiskStatus, uploading: bool) {
+        let look = look(status, uploading);
         let busy = look == Look::Activity;
         let failing = status.team.as_ref().is_some_and(|t| t.failing > 0);
-        let _ = self
-            .icon
-            .set_tooltip(Some(text::tooltip(status.state, busy, failing)));
+        let _ = self.icon.set_tooltip(Some(text::tooltip(
+            status.state,
+            busy,
+            failing,
+            uploading,
+        )));
         let mut cur = self.current.lock().unwrap_or_else(|e| e.into_inner());
         if cur.0 != look {
             *cur = (look, false);

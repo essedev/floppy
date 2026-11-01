@@ -4,6 +4,7 @@ import type { ComponentProps } from "react";
 import type { Faceplate } from "@/components/Faceplate";
 import { it } from "@/i18n/it";
 import { fillOf, gb } from "@/lib/format";
+import type { UploadSummary } from "@/features/activity/uploads";
 import type { DiskStatus } from "@/lib/types";
 
 type FaceProps = ComponentProps<typeof Faceplate>;
@@ -13,8 +14,8 @@ export function isBusy(s: DiskStatus): boolean {
   return s.state === "connected" && (s.job?.kind === "warmup" || s.job?.kind === "free");
 }
 
-/** The faceplate for a status. */
-export function faceFor(s: DiskStatus): FaceProps {
+/** The faceplate for a status, and this Mac's uploads when they come first. */
+export function faceFor(s: DiskStatus, up?: UploadSummary): FaceProps {
   const used = s.space?.cache_used_mb ?? null;
   const limit = s.space?.cache_limit_mb ?? null;
   const fill = fillOf(used, limit);
@@ -24,9 +25,11 @@ export function faceFor(s: DiskStatus): FaceProps {
       // A team disk that stays failed lights the faceplate red; the others
       // keep working and the row says which one.
       if ((s.team?.failing ?? 0) > 0) return { led: "err", readout: it.face.problem, fill, right };
-      return isBusy(s)
-        ? { led: "dl", blink: true, readout: it.face.activity, fill, right, activity: true }
-        : { led: "ok", readout: it.face.connected, fill, right };
+      if (up?.phase === "incomplete") return { led: "err", readout: it.uploads.face.incomplete, fill, right };
+      if (isBusy(s)) return { led: "dl", blink: true, readout: it.face.activity, fill, right, activity: true };
+      if (up?.phase === "paused") return { led: "dl", readout: it.uploads.face.paused, fill, right };
+      if (up?.phase === "sending") return { led: "dl", blink: true, readout: it.uploads.face.sending, fill, right, activity: true };
+      return { led: "ok", readout: it.face.connected, fill, right };
     case "starting":
       return { led: "dl", blink: true, readout: it.face.starting, fill, right };
     case "stopping":

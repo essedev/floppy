@@ -8,9 +8,10 @@ pub const MENU_SETTINGS: &str = "Impostazioni…";
 pub const MENU_QUIT: &str = "Esci da Floppy";
 
 /// The tray tooltip for a state; `failing` when a team disk has a problem.
-pub fn tooltip(state: DiskState, busy: bool, failing: bool) -> &'static str {
+pub fn tooltip(state: DiskState, busy: bool, failing: bool, uploading: bool) -> &'static str {
     match state {
         DiskState::Connected if failing => "Floppy: un disco ha un problema",
+        DiskState::Connected if uploading => "Floppy: sto caricando",
         DiskState::Connected if busy => "Floppy: al lavoro",
         DiskState::Connected => "Floppy: collegato",
         DiskState::Starting => "Floppy: avvio",

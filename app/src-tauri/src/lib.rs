@@ -47,9 +47,10 @@ fn on_event(app: &tauri::AppHandle, tray: &tray::TrayState, event: Event) {
     }
 }
 
-fn on_activity(app: &tauri::AppHandle, event: ActivityEvent) {
+fn on_activity(app: &tauri::AppHandle, tray: &tray::TrayState, event: ActivityEvent) {
     match event {
         ActivityEvent::Changed(snapshot) => {
+            tray.uploads(snapshot.uploads.moving());
             let _ = app.emit("activity", &snapshot);
         }
         // The panel's webview words it with the dictionary and posts it.
@@ -191,6 +192,7 @@ pub fn run() {
             commands::rename_back,
             commands::undo_notice,
             commands::dismiss_notice,
+            commands::upload_action,
             commands::get_setup,
             commands::run_setup,
             commands::install_engine,
@@ -243,6 +245,7 @@ pub fn run() {
                 })
                 .build(app)?;
             let tray = tray::TrayState::new(icon);
+            let activity_tray = Arc::clone(&tray);
 
             let core = Core::new(
                 engine::engine_path(),
@@ -288,7 +291,7 @@ pub fn run() {
                 http,
                 Arc::clone(&account) as Arc<dyn activity::Session>,
                 prefs,
-                move |event| on_activity(&activity_handle, event),
+                move |event| on_activity(&activity_handle, &activity_tray, event),
             );
             activity.start_worker();
             app.manage(activity);

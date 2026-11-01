@@ -4,6 +4,7 @@ paths:
 ---
 # The menu bar app
 
+- **The panel's title says what matters most now, by a fixed priority** (DECISIONS #31): a disk in trouble, a copy to redo, the job this Mac started, an upload paused or in progress, the uploads done for a few minutes, then connected. Details belong to the rows; a new state takes a place in that order rather than a notice of its own.
 - **The app never forces a disk**: it runs `floppy start`, stop and restart only when the user asks (CLAUDE.md, "Never unmount or remount a mounted disk automatically"). Team disks change only through `floppy disks apply` from `team.rs`, which remounts a disk only when it is free and reports it `pending` otherwise; apply never runs while Floppy is stopped (it would start it), nor during install, setup, start, stop or restart.
 - **Sign-out and revocation clear the disks first**: `floppy disks clear`, then the Keychain; a failed clear stays pending in `prefs.json` and is retried, since the server revokes without a rotation window on that assumption.
 - **Base CSS rules go in `@layer base`**: outside a layer they beat Tailwind's utilities (a primary button rendered invisible).

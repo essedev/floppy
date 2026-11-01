@@ -7,7 +7,9 @@
  * version's are `team_<case>`, `team_activity` with the activity's notices
  * and a colleague's copy arriving. The disk window (`view=disk&tab=activity|trash`)
  * shows three team disks; its scenarios are `trash_empty`, `trash_error`,
- * `trash_none`, `activity_offline`, `activity_local` and `activity_empty`. The
+ * `trash_none`, `activity_offline`, `activity_local` and `activity_empty`. This
+ * Mac's uploads (concept H) are `upload_sending`, `upload_paused`, `upload_done`,
+ * `upload_incomplete`, `upload_check` and `upload_many`, on the team's disks. The
  * app itself never uses this module. Folder names come from concept-a-panel
  * and concept-f.
  */
@@ -31,6 +33,7 @@ import type {
   TeamView,
   TrashEntry,
   TrashReport,
+  UploadsView,
 } from "@/lib/types";
 
 const params = new URLSearchParams(globalThis.location?.search ?? "");
@@ -191,6 +194,12 @@ const SCENARIOS: Record<string, Partial<DiskStatus>> = {
   },
   team_single: { ...team({ refused_single: true }), mode: "single" },
   team_activity: team(),
+  upload_sending: team(),
+  upload_paused: team(),
+  upload_done: team(),
+  upload_incomplete: team(),
+  upload_check: team(),
+  upload_many: team(),
 };
 // The disk window looks at the team's disks of concept-f.
 const diskTeam = team({
@@ -470,8 +479,62 @@ let notices: ActivityNotice[] =
         },
       ]
     : [];
+// This Mac's uploads: three clips copied from a camera card into the Christmas spot.
+const SPOT = "pastificio-moretti-spot-natale";
+const upNow = Date.now() / 1000;
+const upFile = (path: string, state: UploadsView["files"][number]["state"], size: number, reason: string | null = null) => ({
+  disk: SPOT,
+  path,
+  size,
+  closed: upNow - 40,
+  state,
+  reason,
+  finder_path: `/Volumes/Floppy/Pastificio Moretti - Spot Natale/${path}`,
+});
+const UPLOADS: Record<string, UploadsView> = {
+  upload_sending: {
+    sending: [
+      { disk: SPOT, path: "Girato/C0272.MP4", size: 8792 * MB, since: upNow - 300, copying: false },
+      { disk: SPOT, path: "Girato/C0315.MP4", size: 420 * MB, since: upNow - 40, copying: true },
+    ],
+    disks: [{ disk: SPOT, waiting: 1520 * MB, rate: 5 * MB, paused: false }],
+    files: [upFile("Montaggio/Montaggio finale.mp4", "done", 139 * MB)],
+  },
+  upload_paused: {
+    sending: [{ disk: SPOT, path: "Girato/C0272.MP4", size: 8792 * MB, since: upNow - 300, copying: false }],
+    disks: [{ disk: SPOT, waiting: 1330 * MB, rate: 0, paused: true }],
+    files: [],
+  },
+  upload_done: {
+    sending: [],
+    disks: [],
+    files: [
+      upFile("Girato/C0272.MP4", "done", 8792 * MB),
+      upFile("Girato/C0315.MP4", "done", 1007 * MB),
+      upFile("Montaggio/Montaggio finale.mp4", "done", 139 * MB),
+    ],
+  },
+  upload_incomplete: {
+    sending: [],
+    disks: [],
+    files: [upFile("Girato/C0272.MP4", "incomplete", 2148 * MB, "finder"), upFile("Girato/C0315.MP4", "done", 1007 * MB)],
+  },
+  upload_check: { sending: [], disks: [], files: [upFile("Grafiche/Grafiche Spot Natale.zip", "check", 236 * MB, "outage")] },
+  upload_many: {
+    sending: Array.from({ length: 39 }, (_, i) => ({
+      disk: SPOT,
+      path: `Girato/C${String(409 + i).padStart(4, "0")}.MP4`,
+      size: 1200 * MB,
+      since: upNow - 600,
+      copying: i === 0,
+    })),
+    disks: [{ disk: SPOT, waiting: 41_000 * MB, rate: 5 * MB, paused: false }],
+    files: Array.from({ length: 9 }, (_, i) => upFile(`Girato/C${String(400 + i).padStart(4, "0")}.MP4`, "done", 1200 * MB)),
+  },
+};
+let uploads: UploadsView = UPLOADS[scenario] ?? { sending: [], disks: [], files: [] };
 const activityListeners = new Set<(s: ActivitySnapshot) => void>();
-const snapshot = (): ActivitySnapshot => ({ notices, live: scenario === "team_activity" || view === "disk" ? liveNow() : [] });
+const snapshot = (): ActivitySnapshot => ({ notices, live: scenario === "team_activity" || view === "disk" ? liveNow() : [], uploads });
 function publishActivity(next: ActivityNotice[]) {
   notices = next;
   activityListeners.forEach((cb) => cb(snapshot()));
@@ -618,6 +681,14 @@ export const mockBackend: Backend = {
     });
   },
   dismissNotice: async (id) => publishActivity(notices.filter((x) => x.id !== id)),
+  uploadAction: (disk, path) =>
+    new Promise((resolve) =>
+      later(500, () => {
+        uploads = { ...uploads, files: uploads.files.filter((f) => !(f.disk === disk && f.path === path)) };
+        publishActivity(notices);
+        resolve(true);
+      }),
+    ),
   getSetup: async () => setup,
   runSetup: async () => {
     publishSetup({ running: true, step: 1, done: false, error: null });

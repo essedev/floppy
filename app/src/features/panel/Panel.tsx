@@ -8,13 +8,14 @@
 
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { ChevronRight, Download, Ellipsis, Eraser, ExternalLink, Folder as FolderIcon, Globe, History, Info, Power, RefreshCw, Settings, Trash2 } from "lucide-react";
+import { ChevronRight, CircleCheck, Download, Ellipsis, Eraser, ExternalLink, Folder as FolderIcon, Globe, History, Info, Power, RefreshCw, Settings, Trash2 } from "lucide-react";
 import { Faceplate } from "@/components/Faceplate";
 import { Button, Confirm, Led, Notice, Readout, SlotMark } from "@/components/ui";
 import { useAuth } from "@/features/account/hooks";
 import { diskArrivals, projectLive } from "@/features/activity/activity";
 import { useActivitySnapshot } from "@/features/activity/hooks";
 import { ActivityNotices, alertText } from "@/features/activity/notices";
+import { type UploadRow, type UploadSummary, uploadDiskLine, uploadRows, uploadSummary, uploadTitle } from "@/features/activity/uploads";
 import { lostAccess } from "@/features/account/view";
 import { faceFor, isBusy } from "@/features/disk/face";
 import { keys, useAppInfo, useAppUpdate, useCountdown, useDiskAction, useFolders, useStatus } from "@/features/disk/hooks";
@@ -23,13 +24,15 @@ import { it } from "@/i18n/it";
 import { backend } from "@/lib/backend";
 import { finderName, gb, gbUnit } from "@/lib/format";
 import { MenuHeading, MenuItem, MenuProvider, MenuSeparator, RowMenu, useMenu } from "./Menu";
-import type { CommandError, DiskStatus, DiskView, Folder, LiveFile, TeamView } from "@/lib/types";
+import type { CommandError, DiskStatus, DiskView, Folder, LiveFile, TeamView, UploadsView } from "@/lib/types";
 
 const WITH_SPACE = new Set(["connected", "unreachable", "starting", "stopping"]);
 const WITH_DISKS = new Set(["connected", "unreachable", "starting", "no_disks"]);
 
 export function Panel() {
   const { data: status } = useStatus();
+  const uploads = useActivitySnapshot().data?.uploads;
+  const up = uploadSummary(uploads);
   const info = useAppInfo();
   const qc = useQueryClient();
   const root = useRef<HTMLDivElement>(null);
@@ -77,17 +80,17 @@ export function Panel() {
         {status ? (
           <>
             <div className="mx-2 mt-2">
-              <Faceplate {...faceFor(status)} />
+              <Faceplate {...faceFor(status, status.state === "connected" ? up : undefined)} />
             </div>
-            <StatusSection status={status} />
+            <StatusSection status={status} uploads={up} />
             <AppUpdateNotice />
             <ActivityNotices />
             <RevokedSection />
             {WITH_SPACE.has(status.state) && status.space?.cache_used_mb != null && <SpaceSection status={status} />}
             {team && !team.refused_single ? (
-              WITH_DISKS.has(status.state) && team.disks.length > 0 && <DiskList status={status} team={team} />
+              WITH_DISKS.has(status.state) && team.disks.length > 0 && <DiskList status={status} team={team} uploads={uploads} />
             ) : (
-              status.state === "connected" && <FolderList status={status} />
+              status.state === "connected" && <FolderList status={status} uploads={uploads} />
             )}
             <Footer status={status} version={info.data?.version} />
           </>
@@ -167,7 +170,7 @@ function ActionError({ error }: { error: CommandError | null }) {
   return <Notice led="err">{it.errors[error.code] ?? error.message}</Notice>;
 }
 
-function StatusSection({ status }: { status: DiskStatus }) {
+function StatusSection({ status, uploads }: { status: DiskStatus; uploads: UploadSummary }) {
   const seconds = useCountdown(status);
   const { data: auth } = useAuth();
   const team = teamOf(status);
@@ -195,7 +198,15 @@ function StatusSection({ status }: { status: DiskStatus }) {
   switch (status.state) {
     case "connected": {
       const job = status.job;
-      if (isBusy(status) && job) {
+      const failing = team?.failing ?? 0;
+      // The title says what matters most now (concept H): a disk in trouble,
+      // a copy to redo, the job this Mac started, then the uploads.
+      const upload = uploadTitle(uploads);
+      if (failing === 0 && upload && uploads.phase === "incomplete") {
+        title = upload.title;
+        body = upload.body;
+        actions = finder;
+      } else if (isBusy(status) && job) {
         const name = finderName(job.name ?? "");
         title = job.kind === "warmup" ? it.panel.activity.warmup(name) : it.panel.activity.free(name);
         body = job.kind === "warmup" ? it.panel.activity.warmupBody : it.panel.activity.freeBody;
@@ -207,8 +218,11 @@ function StatusSection({ status }: { status: DiskStatus }) {
             </Button>
           </>
         );
+      } else if (failing === 0 && upload) {
+        title = upload.title;
+        body = upload.body;
+        actions = finder;
       } else {
-        const failing = team?.failing ?? 0;
         const copy = status.mode === "team" ? it.panel.connectedTeam : it.panel.connected;
         title = failing > 0 ? it.panel.failing.title(failing) : copy.title;
         body = failing > 0 ? it.panel.failing.body : copy.body;
@@ -480,7 +494,7 @@ function LegendRow({ color, label, value }: { color: string; label: string; valu
 }
 
 /** The projects at the top of the disk, or inside one team disk (`path`, nested in its row). */
-function FolderList({ status, path, disk }: { status: DiskStatus; path?: string; disk?: string }) {
+function FolderList({ status, path, disk, uploads }: { status: DiskStatus; path?: string; disk?: string; uploads?: UploadsView }) {
   const folders = useFolders(status.state === "connected" && !!status.mount_point, path);
   const live = useActivitySnapshot().data?.live ?? [];
   const [confirm, setConfirm] = useState<string | null>(null);
@@ -548,6 +562,7 @@ function FolderList({ status, path, disk }: { status: DiskStatus; path?: string;
         <span>{it.folders.heading}</span>
         {folders.data && <b className="font-ro text-[12px] font-normal tracking-[0.02em] text-ink">{list.length}</b>}
       </div>
+      <UploadList summary={uploadSummary(uploads, null)} />
       {content}
       {failure && (
         <div className="px-1 pt-1">
@@ -559,7 +574,7 @@ function FolderList({ status, path, disk }: { status: DiskStatus; path?: string;
 }
 
 /** The team's disks: one row each, its state on the LED, its projects inside. */
-function DiskList({ status, team }: { status: DiskStatus; team: TeamView }) {
+function DiskList({ status, team, uploads }: { status: DiskStatus; team: TeamView; uploads: UploadsView | undefined }) {
   const [expanded, setExpanded] = useState<string | null>(null);
   return (
     <section className="mx-2 rounded-[14px] bg-sunken px-1 pt-3.5 pb-1.5" aria-label={it.disks.heading}>
@@ -579,6 +594,7 @@ function DiskList({ status, team }: { status: DiskStatus; team: TeamView }) {
           applying={team.applying}
           expanded={expanded === d.id && !!d.path}
           onExpand={() => setExpanded(expanded === d.id ? null : d.id)}
+          uploads={uploadSummary(uploads, d.id)}
         />
       ))}
     </section>
@@ -591,13 +607,16 @@ interface DiskRowProps {
   applying: boolean;
   expanded: boolean;
   onExpand: () => void;
+  /** This Mac's uploads to this disk. */
+  uploads: UploadSummary;
 }
 
 const ICON = { size: 15, strokeWidth: 1.7 } as const;
 
-function DiskRow({ disk, status, applying, expanded, onExpand }: DiskRowProps) {
+function DiskRow({ disk, status, applying, expanded, onExpand, uploads }: DiskRowProps) {
   const menu = useMenu(`disk:${disk.id}`);
   const look = diskLook(disk, applying);
+  const up = uploadDiskLine(uploads);
   const live: LiveFile[] = useActivitySnapshot().data?.live ?? [];
   const arriving = disk.path ? diskArrivals(live, disk.id) : null;
   const [confirm, setConfirm] = useState<"off" | "free" | null>(null);
@@ -611,7 +630,10 @@ function DiskRow({ disk, status, applying, expanded, onExpand }: DiskRowProps) {
     <>
       <div className={`relative flex min-h-12 items-center rounded-[10px] pr-1 pl-3 hover:bg-raised ${menu.open || confirm ? "bg-raised" : ""}`}>
         <span className="mr-[9px] -ml-px flex">
-          <Led state={working || arriving ? "dl" : (look.led ?? undefined)} blink={working || !!arriving || look.blink} />
+          <Led
+            state={working || arriving ? "dl" : (up?.led ?? look.led ?? undefined)}
+            blink={working || !!arriving || (up ? up.blink : look.blink)}
+          />
         </span>
         <div className="min-w-0 flex-1 py-1.5">
           <button
@@ -632,7 +654,9 @@ function DiskRow({ disk, status, applying, expanded, onExpand }: DiskRowProps) {
               />
             )}
           </button>
-          <span className="mt-px block text-[12px] leading-[1.35] text-ink-2">{arriving ? `${arriving} · ${look.line}` : look.line}</span>
+          <span className="mt-px block text-[12px] leading-[1.35] text-ink-2">
+            {up ? up.line : arriving ? `${arriving} · ${look.line}` : look.line}
+          </span>
         </div>
         <Readout className="mr-1 ml-3 shrink-0 text-[11px]">{working ? it.folders.working : look.readout}</Readout>
         <button
@@ -748,7 +772,132 @@ function DiskRow({ disk, status, applying, expanded, onExpand }: DiskRowProps) {
           <ActionError error={failure} />
         </div>
       )}
+      <UploadList summary={uploads} nested />
       {expanded && disk.path && <FolderList status={status} path={disk.path} disk={disk.id} />}
+    </>
+  );
+}
+
+/** At most this many files of an upload once opened; the rest is counted. */
+const UPLOAD_ROWS = 4;
+
+/**
+ * This Mac's uploads to one disk (concept H): a copy to redo or to check is
+ * always in view, under its disk; the files on their way and the ones just
+ * arrived open with "Mostra i file".
+ */
+function UploadList({ summary, nested }: { summary: UploadSummary; nested?: boolean }) {
+  const [open, setOpen] = useState(false);
+  const { pinned, rest } = uploadRows(summary);
+  if (pinned.length === 0 && rest.length === 0) return null;
+  const shown = open ? rest.slice(0, UPLOAD_ROWS) : [];
+  return (
+    <div className={nested ? "mb-1 ml-[18px] border-l border-line pl-2" : "mb-1"} role="group" aria-label={it.uploads.label}>
+      {pinned.map((r) => (
+        <UploadFileRow key={r.key} row={r} />
+      ))}
+      {shown.map((r) => (
+        <UploadFileRow key={r.key} row={r} />
+      ))}
+      {open && rest.length > UPLOAD_ROWS && <p className="m-0 py-1 pl-[33px] text-[12px] text-ink-2">{it.uploads.more(rest.length - UPLOAD_ROWS)}</p>}
+      {rest.length > 0 && (
+        <button
+          type="button"
+          className="cursor-pointer border-0 bg-transparent py-1 pl-2.5 text-left text-[12.5px] font-semibold text-ink underline underline-offset-2"
+          aria-expanded={open}
+          onClick={() => setOpen(!open)}
+        >
+          {open ? it.uploads.hideFiles : it.uploads.showFiles(rest.length)}
+        </button>
+      )}
+    </div>
+  );
+}
+
+function UploadFileRow({ row }: { row: UploadRow }) {
+  const menu = useMenu(`upload:${row.key}`);
+  const [confirm, setConfirm] = useState(false);
+  const reveal = useDiskAction<string>(backend.revealInFinder);
+  const act = useDiskAction<{ remove: boolean }>(({ remove }) => backend.uploadAction(row.file!.disk, row.file!.path, remove).then(() => undefined));
+  const f = row.file;
+  const problem = f && (f.state === "incomplete" || f.state === "check");
+  const choose = (fn: () => void) => () => {
+    menu.close();
+    fn();
+  };
+  return (
+    <>
+      <div className={`relative flex min-h-9 items-center rounded-[10px] pr-1 pl-2.5 hover:bg-raised ${menu.open || confirm ? "bg-raised" : ""}`}>
+        <span className="mr-[9px] -ml-px flex">
+          <Led state={row.led} blink={row.blink} />
+        </span>
+        <span className="min-w-0 flex-1 py-1">
+          <span className="block truncate text-[13px]">{row.name}</span>
+          <span className="block truncate text-[12px] leading-[1.35] text-ink-2">{row.line}</span>
+        </span>
+        {!problem && <Readout className="mr-1 ml-2 shrink-0 text-[11px]">{row.readout}</Readout>}
+        {problem && (
+          <button
+            type="button"
+            data-menu-trigger
+            className={`grid size-[30px] shrink-0 cursor-pointer place-items-center rounded-lg border-0 text-ink-2 hover:bg-sunken hover:text-ink ${menu.open ? "bg-sunken text-ink" : "bg-transparent"}`}
+            aria-label={it.uploads.actions(row.name)}
+            aria-haspopup="menu"
+            aria-expanded={menu.open}
+            onClick={() => {
+              setConfirm(false);
+              menu.toggle();
+            }}
+          >
+            <Ellipsis size={16} strokeWidth={1.7} aria-hidden="true" />
+          </button>
+        )}
+        {menu.open && f && (
+          <RowMenu label={it.uploads.actions(row.name)} onClose={menu.close}>
+            <MenuHeading>{row.name}</MenuHeading>
+            {f.finder_path && (
+              <MenuItem icon={<FolderIcon {...ICON} />} onClick={choose(() => reveal.mutate(f.finder_path!))}>
+                {it.uploads.showInFinder}
+              </MenuItem>
+            )}
+            <MenuSeparator />
+            {f.state === "incomplete" ? (
+              <>
+                <MenuItem icon={<Trash2 {...ICON} />} note={it.uploads.removeNote} onClick={choose(() => setConfirm(true))}>
+                  {it.uploads.remove}
+                </MenuItem>
+                <MenuSeparator />
+                <MenuItem icon={<CircleCheck {...ICON} />} onClick={choose(() => act.mutate({ remove: false }))}>
+                  {it.uploads.hide}
+                </MenuItem>
+              </>
+            ) : (
+              <MenuItem icon={<CircleCheck {...ICON} />} onClick={choose(() => act.mutate({ remove: false }))}>
+                {it.uploads.fine}
+              </MenuItem>
+            )}
+          </RowMenu>
+        )}
+      </div>
+      {confirm && (
+        <Confirm
+          className="mx-1 mt-1 mb-2"
+          title={it.uploads.removeConfirm.title(row.name)}
+          body={it.uploads.removeConfirm.body}
+          confirm={it.uploads.removeConfirm.confirm}
+          cancel={it.panel.cancel}
+          onConfirm={() => {
+            setConfirm(false);
+            act.mutate({ remove: true });
+          }}
+          onCancel={() => setConfirm(false)}
+        />
+      )}
+      {(act.error ?? reveal.error) && (
+        <div className="px-1 pt-1">
+          <ActionError error={act.error ?? reveal.error} />
+        </div>
+      )}
     </>
   );
 }

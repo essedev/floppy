@@ -19,7 +19,7 @@ use crate::awake::Awake;
 use crate::core::{Core, CoreError, RestoreView};
 use crate::engine::{
     self, Access, ActivityReport, LocalEvent, Op, OpenFile, RenameBackRefusal, TrashKind,
-    TrashReport, Writing,
+    TrashReport, UploadAction, UploadDisk, UploadFile, UploadOutcome, Uploads, Writing,
 };
 use crate::prefs::{ActivityPrefs, PrefsStore};
 use serde::Serialize;
@@ -52,6 +52,14 @@ const PAGES: usize = 10;
 /// Events per report: the server's limit.
 const REPORT_PAGE: usize = 500;
 const MAX_RENAME_NOTICES: usize = 5;
+/// Writes under this size, an app's autosave, are not shown as uploads
+/// (the VM applies the same floor to the outcomes it records).
+pub const UPLOAD_SHOWN: u64 = 20 * 1024 * 1024;
+/// A file whose size has not changed for this long is all on the disk:
+/// what is left is the sending.
+pub const COPY_STILL_S: f64 = 10.0;
+/// An upload this long tells when it is done; a short one does not.
+pub const UPLOAD_NOTIFY_S: f64 = 60.0;
 
 /// Where and as whom this Mac calls the control plane.
 #[derive(Clone, PartialEq, Eq)]
@@ -221,6 +229,57 @@ pub enum Alert {
     },
     /// The colleague finished copying into that folder.
     Arrived { by: String, folder: String },
+    /// This Mac's uploads, after at least a minute, are all in the buckets.
+    UploadsDone { files: u64 },
+    /// A file this Mac wrote is on the disk cut short.
+    UploadIncomplete { file: String },
+}
+
+/// A file this Mac is sending to a disk now.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Sending {
+    pub disk: Option<String>,
+    pub path: String,
+    /// Bytes written so far.
+    pub size: u64,
+    pub since: f64,
+    /// Still growing: the Finder or the app is writing it. Otherwise all of
+    /// it is on the disk and what is left goes to the bucket.
+    pub copying: bool,
+}
+
+/// A file's outcome, with where it is in the Finder.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct UploadFileView {
+    #[serde(flatten)]
+    pub file: UploadFile,
+    pub finder_path: Option<String>,
+}
+
+/// What this Mac uploads (concept H): the files on their way, each disk's
+/// bytes still to send, and how the recent ones ended up.
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+pub struct UploadsView {
+    pub sending: Vec<Sending>,
+    /// Only disks with something to send or paused.
+    pub disks: Vec<UploadDisk>,
+    pub files: Vec<UploadFileView>,
+}
+
+impl UploadsView {
+    /// Bytes are on their way: what the menu bar icon blinks for.
+    pub fn moving(&self) -> bool {
+        !self.sending.is_empty() || !self.disks.is_empty()
+    }
+
+    fn busy(&self) -> bool {
+        !self.sending.is_empty()
+            || !self.disks.is_empty()
+            || self
+                .files
+                .iter()
+                .any(|f| f.file.state == UploadOutcome::Checking)
+    }
 }
 
 /// What the panel and the disk window show live.
@@ -228,6 +287,7 @@ pub enum Alert {
 pub struct ActivitySnapshot {
     pub notices: Vec<ActivityNotice>,
     pub live: Vec<LiveFile>,
+    pub uploads: UploadsView,
 }
 
 /// What this module tells the app shell.
@@ -268,6 +328,13 @@ struct State {
     /// Folders (disk, folder path) where this Mac opened a file still
     /// arriving, with who copies it.
     told: HashMap<(String, String), String>,
+    uploads: Uploads,
+    /// The size of each file being written and when it last changed.
+    grew: HashMap<(Option<String>, String), (u64, f64)>,
+    /// Since when this Mac has been uploading; None when nothing moves.
+    upload_since: Option<f64>,
+    /// Incomplete copies already notified (or there before the first read).
+    told_incomplete: HashSet<(Option<String>, String, u64)>,
 }
 
 type Emit = Box<dyn Fn(ActivityEvent) + Send + Sync>;
@@ -450,6 +517,7 @@ impl Activity {
         ActivitySnapshot {
             notices: state.notices.clone(),
             live: Self::live(&state, None),
+            uploads: self.uploads(&state, now_s()),
         }
     }
 
@@ -457,7 +525,56 @@ impl Activity {
         (self.emit)(ActivityEvent::Changed(Box::new(ActivitySnapshot {
             notices: state.notices.clone(),
             live: Self::live(state, None),
+            uploads: self.uploads(state, now_s()),
         })));
+    }
+
+    /// The uploads as the panel shows them: large writes only, disks with
+    /// something to send.
+    fn uploads(&self, state: &State, now: f64) -> UploadsView {
+        let sending: Vec<Sending> = state
+            .writing
+            .iter()
+            .filter_map(|w| {
+                let size = w.size.filter(|s| *s >= UPLOAD_SHOWN)?;
+                let changed = state
+                    .grew
+                    .get(&(w.disk.clone(), w.path.clone()))
+                    .map_or(now, |(_, at)| *at);
+                Some(Sending {
+                    disk: w.disk.clone(),
+                    path: w.path.clone(),
+                    size,
+                    since: w.since,
+                    copying: now - changed < COPY_STILL_S,
+                })
+            })
+            .collect();
+        let disks = state
+            .uploads
+            .disks
+            .iter()
+            .filter(|d| {
+                d.waiting >= UPLOAD_SHOWN
+                    || (d.paused && d.waiting > 0)
+                    || sending.iter().any(|s| s.disk == d.disk)
+            })
+            .cloned()
+            .collect();
+        let files = state
+            .uploads
+            .files
+            .iter()
+            .map(|f| UploadFileView {
+                file: f.clone(),
+                finder_path: self.core.finder_path(f.disk.as_deref(), &f.path),
+            })
+            .collect();
+        UploadsView {
+            sending,
+            disks,
+            files,
+        }
     }
 
     fn live(state: &State, disk: Option<Option<&str>>) -> Vec<LiveFile> {
@@ -498,7 +615,12 @@ impl Activity {
             .status()
             .job
             .is_some_and(|j| j.kind == engine::JobKind::Warmup);
-        self.awake.update(warming || !self.lock().writing.is_empty());
+        let moving = {
+            let state = self.lock();
+            // A copy the Finder finished may still be in the VM's buffer.
+            !state.writing.is_empty() || state.uploads.disks.iter().any(|d| d.waiting > 0)
+        };
+        self.awake.update(warming || moving);
     }
 
     fn pass(&self) {
@@ -533,6 +655,7 @@ impl Activity {
             state.offline_since_ms = None;
         }
         changed |= self.arrivals();
+        changed |= self.upload_alerts(now_s());
         changed |= self.settle_bursts(Instant::now());
         self.save();
         if changed {
@@ -545,10 +668,36 @@ impl Activity {
         let mut state = self.lock();
         let first = state.seen.is_none();
         let mut changed = false;
+        let now = now_s();
         for r in reports {
-            changed |= state.writing != r.writing || !r.events.is_empty();
+            changed |= state.writing != r.writing
+                || !r.events.is_empty()
+                || state.uploads != r.uploads;
             state.writing = r.writing;
             state.open = r.open;
+            state.uploads = r.uploads;
+            let mut grew = HashMap::new();
+            for w in &state.writing {
+                let key = (w.disk.clone(), w.path.clone());
+                let size = w.size.unwrap_or(0);
+                let at = match state.grew.get(&key) {
+                    Some((before, at)) if *before == size => *at,
+                    _ => now,
+                };
+                grew.insert(key, (size, at));
+            }
+            state.grew = grew;
+            if first {
+                // Outcomes recorded before the app ran are shown, never notified.
+                let known: Vec<_> = state
+                    .uploads
+                    .files
+                    .iter()
+                    .filter(|f| f.state == UploadOutcome::Incomplete)
+                    .map(|f| (f.disk.clone(), f.path.clone(), f.closed as u64))
+                    .collect();
+                state.told_incomplete.extend(known);
+            }
             // A VM made again starts its ids above the old ones (`floppy-activity`);
             // an older engine restarted at 1: what it lists is new.
             if r.last < state.local_last {
@@ -982,6 +1131,74 @@ impl Activity {
             (self.emit)(ActivityEvent::Alert(a));
         }
         any
+    }
+
+    /// Notifies an incomplete copy once, and the end of an upload that
+    /// lasted a minute when every file of it arrived whole.
+    fn upload_alerts(&self, now: f64) -> bool {
+        let mut state = self.lock();
+        let mut alerts = Vec::new();
+        let fresh: Vec<_> = state
+            .uploads
+            .files
+            .iter()
+            .filter(|f| f.state == UploadOutcome::Incomplete)
+            .map(|f| (f.disk.clone(), f.path.clone(), f.closed as u64))
+            .filter(|k| !state.told_incomplete.contains(k))
+            .collect();
+        for key in fresh {
+            alerts.push(Alert::UploadIncomplete {
+                file: base(&key.1).to_string(),
+            });
+            state.told_incomplete.insert(key);
+        }
+        let busy = self.uploads(&state, now).busy();
+        match (busy, state.upload_since) {
+            (true, None) => state.upload_since = Some(now),
+            (false, Some(since)) => {
+                state.upload_since = None;
+                let files: Vec<&UploadFile> = state
+                    .uploads
+                    .files
+                    .iter()
+                    .filter(|f| f.closed >= since)
+                    .collect();
+                let whole = files.iter().all(|f| f.state == UploadOutcome::Done);
+                if now - since >= UPLOAD_NOTIFY_S && whole && !files.is_empty() {
+                    alerts.push(Alert::UploadsDone {
+                        files: files.len() as u64,
+                    });
+                }
+            }
+            _ => {}
+        }
+        drop(state);
+        let any = !alerts.is_empty();
+        for a in alerts {
+            (self.emit)(ActivityEvent::Alert(a));
+        }
+        any
+    }
+
+    /// Stops showing an upload's outcome, or deletes an incomplete copy (to
+    /// the disk's trash); then reads the engine again.
+    pub fn upload_action(
+        &self,
+        action: UploadAction,
+        disk: Option<&str>,
+        path: &str,
+    ) -> Result<bool, CoreError> {
+        self.core.vm_free()?;
+        let done = engine::upload_action(self.core.engine(), action, disk, path)?;
+        {
+            let mut state = self.lock();
+            state
+                .uploads
+                .files
+                .retain(|f| !(done.done && f.disk.as_deref() == disk && f.path == path));
+            self.publish(&state);
+        }
+        Ok(done.done)
     }
 
     fn folder_name(&self, disk: &str, folder: &str) -> String {

@@ -100,6 +100,7 @@ impl Rig {
   "status --json") echo '{status}' ;;
   "activity --after") cat "{d}/activity.json" ;;
   "activity rename-back") cat > "{d}/rename-back.in"; cat "{d}/rename-back.json" ;;
+  "activity upload-dismiss"|"activity upload-remove") cat > "{d}/upload.in"; echo "$*" > "{d}/upload.args"; echo '{{"done": true, "reason": null}}' ;;
   "trash ") cat "{d}/trash.json" ;;
   "trash restore") echo "$*" > "{d}/restore.args"; cat "{d}/restore.json" ;;
   *) exit 2 ;;
@@ -145,6 +146,16 @@ esac"#
         let body = format!(
             r#"{{"events": {}, "last": {last}, "writing": {writing}, "open": {open}}}"#,
             serde_json::Value::Array(events.to_vec())
+        );
+        std::fs::write(self.path("activity.json"), body).unwrap();
+    }
+
+    /// What the next `floppy activity` prints: these writes and uploads.
+    fn engine_uploads(&self, writing: &str, uploads: &str) {
+        // The engine prints one line of JSON.
+        let uploads = uploads.replace('\n', " ");
+        let body = format!(
+            r#"{{"events": [], "last": 0, "writing": {writing}, "open": [], "uploads": {uploads}}}"#
         );
         std::fs::write(self.path("activity.json"), body).unwrap();
     }
@@ -717,4 +728,208 @@ fn where_it_got_survives_a_restart() {
         (Some(3), 3, Some("c"))
     );
     assert_eq!(prefs.server.as_deref(), Some("https://floppy.test"));
+}
+
+const MB: u64 = 1024 * 1024;
+
+fn writing(path: &str, size: u64) -> String {
+    format!(
+        r#"{{"disk": "0192-a", "path": "{path}", "op": "added", "since": {}, "size": {size}}}"#,
+        now() - 30.0
+    )
+}
+
+fn outcome(path: &str, state: &str, closed: f64) -> String {
+    format!(
+        r#"{{"disk": "0192-a", "path": "{path}", "size": {}, "closed": {closed}, "state": "{state}", "reason": {}}}"#,
+        900 * MB,
+        if state == "incomplete" {
+            r#""finder""#
+        } else {
+            "null"
+        }
+    )
+}
+
+#[test]
+fn uploads_show_large_writes_and_the_disks_with_bytes_waiting() {
+    let rig = Rig::new(&writable(), true);
+    // CapCut's autosave (1 MB) is no upload; a clip is. The second disk keeps
+    // only JuiceFS's idle buffer.
+    rig.engine_uploads(
+        &format!(
+            "[{}, {}]",
+            writing("Spot/C0272.MP4", 900 * MB),
+            writing("Spot/progetto.json", MB)
+        ),
+        r#"{"disks": [{"disk": "0192-a", "waiting": 400000000, "rate": 5000000, "paused": false},
+                      {"disk": "0192-b", "waiting": 4456448, "rate": 0, "paused": false}], "files": []}"#,
+    );
+    rig.activity.tick();
+    let up = rig.activity.snapshot().uploads;
+    assert_eq!(up.sending.len(), 1);
+    assert_eq!(up.sending[0].path, "Spot/C0272.MP4");
+    assert!(
+        up.sending[0].copying,
+        "it just appeared: still being written"
+    );
+    assert_eq!(up.disks.len(), 1);
+    assert_eq!(up.disks[0].rate, 5_000_000);
+    // The same size a while later: all of it is on the disk, the rest is sending.
+    {
+        let mut state = rig.activity.lock();
+        for v in state.grew.values_mut() {
+            v.1 -= COPY_STILL_S + 1.0;
+        }
+    }
+    rig.activity.tick();
+    assert!(!rig.activity.snapshot().uploads.sending[0].copying);
+}
+
+#[test]
+fn an_incomplete_copy_notifies_once_and_never_for_one_found_at_start() {
+    let rig = Rig::new(&writable(), true);
+    rig.engine_uploads(
+        "[]",
+        &format!(
+            r#"{{"disks": [], "files": [{}]}}"#,
+            outcome("Spot/old.MP4", "incomplete", now() - 3600.0)
+        ),
+    );
+    rig.activity.tick();
+    assert!(rig.alerts().is_empty(), "there before the app ran");
+    assert_eq!(rig.activity.snapshot().uploads.files.len(), 1);
+    let files = format!(
+        r#"{{"disks": [], "files": [{}, {}]}}"#,
+        outcome("Spot/old.MP4", "incomplete", now() - 3600.0),
+        outcome("Spot/C0272.MP4", "incomplete", now() - 30.0)
+    );
+    rig.engine_uploads("[]", &files);
+    rig.activity.tick();
+    rig.activity.tick();
+    let alerts = rig.alerts();
+    assert_eq!(alerts.len(), 1);
+    assert!(matches!(&alerts[0], Alert::UploadIncomplete { file } if file == "C0272.MP4"));
+}
+
+#[test]
+fn a_long_upload_tells_when_every_file_arrived_whole() {
+    let rig = Rig::new(&writable(), true);
+    rig.engine_uploads(
+        &format!("[{}]", writing("Spot/C0272.MP4", 900 * MB)),
+        r#"{"disks": [{"disk": "0192-a", "waiting": 400000000, "rate": 5000000, "paused": false}], "files": []}"#,
+    );
+    rig.activity.tick();
+    let start = now() - 120.0;
+    rig.activity.lock().upload_since = Some(start);
+    // Closed and still being checked: not over yet.
+    rig.engine_uploads(
+        "[]",
+        &format!(
+            r#"{{"disks": [], "files": [{}]}}"#,
+            outcome("Spot/C0272.MP4", "checking", now())
+        ),
+    );
+    rig.activity.tick();
+    assert!(rig.alerts().is_empty());
+    rig.engine_uploads(
+        "[]",
+        &format!(
+            r#"{{"disks": [], "files": [{}]}}"#,
+            outcome("Spot/C0272.MP4", "done", now())
+        ),
+    );
+    rig.activity.tick();
+    let alerts = rig.alerts();
+    assert!(
+        matches!(alerts.as_slice(), [Alert::UploadsDone { files: 1 }]),
+        "{alerts:?}"
+    );
+}
+
+#[test]
+fn a_short_upload_or_one_with_an_incomplete_file_does_not_say_done() {
+    let rig = Rig::new(&writable(), true);
+    rig.engine_uploads(
+        &format!("[{}]", writing("Spot/a.MP4", 900 * MB)),
+        r#"{"disks": [], "files": []}"#,
+    );
+    rig.activity.tick();
+    rig.engine_uploads(
+        "[]",
+        &format!(
+            r#"{{"disks": [], "files": [{}]}}"#,
+            outcome("Spot/a.MP4", "done", now())
+        ),
+    );
+    rig.activity.tick();
+    assert!(
+        rig.alerts().is_empty(),
+        "a few seconds: nobody waited for it"
+    );
+
+    rig.engine_uploads(
+        &format!("[{}]", writing("Spot/b.MP4", 900 * MB)),
+        r#"{"disks": [], "files": []}"#,
+    );
+    rig.activity.tick();
+    rig.activity.lock().upload_since = Some(now() - 120.0);
+    rig.engine_uploads(
+        "[]",
+        &format!(
+            r#"{{"disks": [], "files": [{}, {}]}}"#,
+            outcome("Spot/b.MP4", "done", now()),
+            outcome("Spot/c.MP4", "incomplete", now())
+        ),
+    );
+    rig.activity.tick();
+    let alerts = rig.alerts();
+    assert!(
+        matches!(alerts.as_slice(), [Alert::UploadIncomplete { .. }]),
+        "only the incomplete one: {alerts:?}"
+    );
+}
+
+#[test]
+fn removing_an_incomplete_copy_goes_through_the_engine_with_the_path_on_stdin() {
+    let rig = Rig::new(&writable(), true);
+    rig.engine_uploads(
+        "[]",
+        &format!(
+            r#"{{"disks": [], "files": [{}]}}"#,
+            outcome("Spot/C0272 : finale.MP4", "incomplete", now())
+        ),
+    );
+    rig.activity.tick();
+    let done = rig
+        .activity
+        .upload_action(
+            UploadAction::Remove,
+            Some("0192-a"),
+            "Spot/C0272 : finale.MP4",
+        )
+        .unwrap();
+    assert!(done);
+    let args = std::fs::read_to_string(rig.path("upload.args")).unwrap();
+    assert_eq!(args.trim(), "activity upload-remove 0192-a");
+    let body: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(rig.path("upload.in")).unwrap()).unwrap();
+    assert_eq!(body["path"], "Spot/C0272 : finale.MP4");
+    assert!(rig.activity.snapshot().uploads.files.is_empty());
+}
+
+#[test]
+fn an_outcome_says_where_the_file_is_in_the_finder() {
+    let rig = Rig::new(&writable(), true);
+    rig.engine_uploads(
+        "[]",
+        &format!(
+            r#"{{"disks": [], "files": [{}]}}"#,
+            outcome("Spot/C0272.MP4", "incomplete", now())
+        ),
+    );
+    rig.activity.tick();
+    let files = rig.activity.snapshot().uploads.files;
+    let finder = files[0].finder_path.as_deref().unwrap();
+    assert!(finder.ends_with("/Spot/C0272.MP4"), "{finder}");
 }

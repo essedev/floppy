@@ -652,6 +652,75 @@ export const it = {
     disk: (n: number, by: string) => `${n === 1 ? "1 file" : `${n} file`} in arrivo da ${by}`,
   },
 
+  /** This Mac's uploads (concept H): the panel's title, the disk's row, a file's row. */
+  uploads: {
+    label: "Caricamenti di questo Mac",
+    title: {
+      sending: (n: number) => (n === 1 ? "Sto caricando 1 file" : `Sto caricando ${n} file`),
+      sendingRest: "Sto finendo di caricare",
+      paused: "Caricamento in pausa",
+      incomplete: (n: number) => (n === 1 ? "1 copia non completata" : `${n} copie non completate`),
+      check: (n: number) => (n === 1 ? "1 file da controllare" : `${n} file da controllare`),
+      done: "Tutto caricato",
+    },
+    body: {
+      sending: (left: string, eta: string | null) =>
+        `${eta ? `Mancano ${left}, ${eta}.` : `Mancano ${left}.`} Lascia il Mac acceso: lo tengo sveglio io.`,
+      copying: "Il Finder sta ancora copiando. Lascia il Mac acceso: lo tengo sveglio io.",
+      paused: (left: string) =>
+        `Il Mac non raggiunge Floppy: riprendo da solo appena torna la connessione. Mancano ${left}; lascia il Mac acceso.`,
+      incomplete: (name: string | null) =>
+        name ? `${name} è arrivato a metà: lo trovi qui sotto, da ricopiare.` : "Sono arrivate a metà: le trovi qui sotto, da ricopiare.",
+      check: (name: string) => `La connessione è caduta mentre si salvava ${name}: aprilo per vedere se è completo.`,
+      done: (n: number, name: string | null) =>
+        n === 1 && name ? `${name} è su Floppy. Puoi chiudere il Mac.` : `${n} file sono su Floppy. Puoi chiudere il Mac.`,
+    },
+    eta: {
+      lessThanMinute: "meno di un minuto",
+      minutes: (m: number) => (m === 1 ? "circa un minuto" : `circa ${m} minuti`),
+      hours: (h: number, m: number) => `circa ${h === 1 ? "un'ora" : `${h} ore`}${m ? ` e ${m} minuti` : ""}`,
+    },
+    disk: {
+      sending: (n: number, eta: string | null) => (eta ? `${n} file in invio · ${eta}` : `${n} file in invio`),
+      sendingRest: (left: string) => `Mancano ${left} da inviare`,
+      paused: "Caricamento in pausa: manca la connessione",
+      incomplete: (n: number) => (n === 1 ? "1 copia non completata" : `${n} copie non completate`),
+      check: (n: number) => (n === 1 ? "1 file da controllare" : `${n} file da controllare`),
+    },
+    row: {
+      copying: (size: string) => `${size} copiati`,
+      sending: "Copiato, si sta inviando a Floppy",
+      waiting: "Copiato, in attesa della connessione",
+      done: (size: string) => `${size} · su Floppy`,
+      incompleteFinder: (size: string) => `Arrivati ${size} · da ricopiare`,
+      incompleteVideo: "Il video è troncato · da ricopiare",
+      check: "La connessione è caduta mentre si salvava",
+    },
+    readout: {
+      copying: "Copia",
+      sending: "Invio",
+      paused: "In pausa",
+      done: "Caricato",
+      incomplete: "Incompleto",
+      check: "Controlla",
+    },
+    face: { sending: "INVIO", paused: "IN PAUSA", incomplete: "INCOMPLETO" },
+    showFiles: (n: number) => `Mostra i file (${n})`,
+    hideFiles: "Nascondi i file",
+    more: (n: number) => (n === 1 ? "Ancora 1 file" : `Ancora ${n} file`),
+    actions: (name: string) => `Azioni per ${name}`,
+    showInFinder: "Mostra nel Finder",
+    remove: "Elimina la copia incompleta",
+    removeNote: "Va nel cestino di Floppy. L'originale sul tuo Mac resta.",
+    hide: "Nascondi l'avviso",
+    fine: "Va bene così",
+    removeConfirm: {
+      title: (name: string) => `Eliminare ${name}?`,
+      body: "La copia su Floppy è a metà. Va nel cestino di Floppy, da dove si può rimettere; l'originale sul tuo Mac non si tocca. Poi copialo di nuovo.",
+      confirm: "Elimina",
+    },
+  },
+
   /** The activity's notices in the panel, each with its undo. */
   activityNotices: {
     massDelete: {
@@ -714,6 +783,14 @@ export const it = {
     arrived: (by: string, folder: string) => ({
       title: `${by} ha finito di copiare in ${folder}`,
       body: "I file sono completi: se ne avevi importato uno a metà in CapCut, importalo di nuovo.",
+    }),
+    uploadsDone: (files: number) => ({
+      title: "Caricato su Floppy",
+      body: `${files === 1 ? "Il file è arrivato" : `I ${files} file sono arrivati`} interi. Puoi chiudere il Mac.`,
+    }),
+    uploadIncomplete: (file: string) => ({
+      title: "Copia non completata",
+      body: `${file} è arrivato a metà su Floppy. Copialo di nuovo: lo trovi nel pannello.`,
     }),
   },
 
