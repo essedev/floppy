@@ -45,6 +45,7 @@ app/scripts/render-marks.sh    # tray PNGs and app icons from design/mark/
 # A local instance a real install can use (http://127.0.0.1:4583); the team chain end to end with a dev VM
 deploy/local/stack.sh up|down|mail <email>|hosts
 deploy/local/e2e.py
+deploy/local/upload-bench.py            # big copies under simulated lines on the dev VM: success, line use, metadata wait, memory
 STACK=manual deploy/local/stack.sh up   # a second instance, manual storage on a real S3 (:4593); e2e.py takes STACK too
 
 # Control plane: server/ (commands in .claude/rules/server.md); admin web, dev on the fake API
