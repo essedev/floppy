@@ -63,6 +63,10 @@
   Giro 3: il titolo non cambia per una copia incompleta. Il titolo dice lo stato di Floppy e
   cambia solo quando Floppy non funziona del tutto (oggi "1 disco con un problema"); un file da
   ricopiare è un fatto del progetto, e lo dicono le sue righe. "Floppy è collegato" resta.
+  Giro 4: in dubbio fra le due regole. c3 è c2 con il titolo che segue lo stato in tutti i casi,
+  con una priorità fissa: un problema di Floppy, una copia non completata, la pausa, il
+  caricamento, "Tutto caricato" per qualche minuto, poi "collegato". Il precedente: oggi
+  "Rendi disponibile" cambia il titolo finché lavora.
 
   Dati: nomi dei file sul modello di un disco vero (clip della Sony, export di CapCut,
   registrazioni dello schermo); dimensioni vere, velocità di una linea da 40 Mbit/s
@@ -245,6 +249,7 @@ const DESC = {
   c: 'sul progetto: il caricamento sta sulla riga del progetto di destinazione, come gli arrivi dei colleghi',
   c1: 'avviso corto: C con il non completato in una riga sola nello stato, le azioni nel menu',
   c2: 'solo sulla riga: C senza avviso nello stato, il file incompleto sotto il suo progetto con il suo menu',
+  c3: 'titolo per stato: c2, e il titolo dice la cosa più importante adesso, come fa già "Rendi disponibile"',
 };
 
 // Scenarios: one copy session seen at different moments. Sizes in MB.
@@ -429,6 +434,13 @@ function checkNotice(r) {
 // The status section's title and body, per variant.
 function statusCopy(v, sc, sub = v) {
   const c = counts(sc.rows);
+  if (sub === 'c3') {
+    if (c.failed.length && !state.hidden) return { t: '1 copia non completata', b: `${c.failed[0].f.name} è arrivato a metà: lo trovi qui sotto, nel suo progetto.` };
+    if (sc.paused) return { t: 'Caricamento in pausa', b: `Il Mac non raggiunge Floppy: riprendo da solo appena torna la connessione. Mancano ${gb(sc.pending)}; lascia il Mac acceso.` };
+    if (c.moving) return { t: `Sto caricando ${c.moving} file`, b: `Mancano ${gb(sc.pending)}, ${eta(sc.pending)}. Lascia il Mac acceso: lo tengo sveglio io.` };
+    if (c.check.length && !state.hidden) return { t: '1 file da controllare', b: `La connessione è caduta mentre si salvava ${c.check[0].f.name}: aprilo per vedere se è completo.` };
+    if (sc.notif === 'done') return { t: 'Tutto caricato', b: `${c.done} file sono su Floppy, i video controllati. Puoi chiudere il Mac.` };
+  }
   if (v === 'b') {
     if (c.failed.length) return { t: c.failed.length === 1 ? '1 copia non completata' : `${c.failed.length} copie non completate`, b: c.done ? `Gli altri ${c.done} file sono su Floppy. Questo va copiato di nuovo:` : 'Va copiata di nuovo:' };
     if (sc.paused) return { t: 'Caricamento in pausa', b: `Il Mac non raggiunge Floppy: riprendo da solo appena torna la connessione. Mancano ${gb(sc.pending)}; lascia il Mac acceso.` };
@@ -466,7 +478,7 @@ function diskList(sub, sc, state) {
   const c = counts(sc.rows);
   let dLed = led('ok'), dLine = 'Pronto', dRo = 'Collegato', projLed = null, projLine = '', projRo = '';
   if (v === 'c') {
-    if (c.failed.length) { dLed = led('err'); dLine = `1 copia non completata · Pronto`; projLed = led('err'); projLine = sub === 'c2' ? '1 copia non completata' : `${c.failed[0].f.name} è a metà`; projRo = 'Incompleto'; }
+    if (c.failed.length) { dLed = led('err'); dLine = `1 copia non completata · Pronto`; projLed = led('err'); projLine = sub === 'c2' || sub === 'c3' ? '1 copia non completata' : `${c.failed[0].f.name} è a metà`; projRo = 'Incompleto'; }
     else if (sc.paused) { dLed = led('dl'); dLine = 'Caricamento in pausa: manca la connessione'; projLed = led('dl'); projLine = `${c.moving} file in pausa · mancano ${gb(sc.pending)}`; projRo = 'In pausa'; }
     else if (c.moving) { dLed = led('dl', true); dLine = `${c.moving} file in invio · ${eta(sc.pending)}`; projLed = led('dl', true); projLine = `${c.moving} file · mancano ${gb(sc.pending)}`; projRo = 'In invio'; }
     else if (c.check.length) { projLed = led('dl'); projLine = `${c.check[0].f.name} da controllare`; projRo = 'Controlla'; }
@@ -476,8 +488,8 @@ function diskList(sub, sc, state) {
   const proj = `<div class="frow">${projLed ? `${projLed}` : svg('folder', 'i ficon')}<span class="b"><span class="n">${PROJECT}</span>${projLine ? `<span class="l">${projLine}</span>` : ''}</span>${projRo ? `<span class="ro">${projRo}</span>` : ''}<span class="dots">${svg('dots')}</span></div>`;
   const files = open ? (() => { const { shown, rest } = visibleRows(sc.rows); return `<div class="tree" style="margin-left:18px">${shown.map((r) => urow(r, sc.paused)).join('')}${restLine(rest)}</div>`; })() : '';
   // c2: an incomplete file shows under its project without opening it.
-  const pinned = sub === 'c2' && !state.hidden && !state.confirm ? c.failed.map((r) => `<div class="tree" style="margin-left:18px">${failedRow(r, state)}</div>`).join('') : '';
-  const confirmBox = sub === 'c2' && state.confirm ? `<div style="margin:4px 4px 8px">${failedNotice(c.failed[0], state)}</div>` : '';
+  const pinned = (sub === 'c2' || sub === 'c3') && !state.hidden && !state.confirm ? c.failed.map((r) => `<div class="tree" style="margin-left:18px">${failedRow(r, state)}</div>`).join('') : '';
+  const confirmBox = (sub === 'c2' || sub === 'c3') && state.confirm ? `<div style="margin:4px 4px 8px">${failedNotice(c.failed[0], state)}</div>` : '';
   const tree = v === 'c' ? `<div class="tree">${proj}${pinned}${confirmBox}${projLed ? `<button class="more" data-act="open" type="button" style="padding-left:10px">${open ? 'Nascondi i file' : 'Mostra i file'}</button>` : ''}${files}<div class="frow">${svg('folder', 'i ficon')}<span class="b"><span class="n">Spot Natale</span></span><span class="dots">${svg('dots')}</span></div></div>` : '';
   return `<section class="list"><div class="sec-h"><span>Dischi del team</span><b>1</b></div>
     <div class="drow">${dLed}<span class="b"><span class="n">Progetti ${svg('chev')}</span><span class="l">${dLine}</span></span><span class="ro">${dRo}</span><span class="dots">${svg('dots')}</span></div>${tree}</section>`;
@@ -509,7 +521,7 @@ function render() {
     }
     if (sc.rows.length) extra += `<button class="toggle" data-act="list" type="button">${state.list ? 'Nascondi i file' : `Mostra i file (${sc.rows.length})`}</button>`;
   }
-  if (v === 'c' && sub !== 'c2') {
+  if (v === 'c' && sub !== 'c2' && sub !== 'c3') {
     extra += c.failed.filter(() => !state.hidden).map((r) => (sub === 'c1' ? failedShort(r, state) : failedNotice(r, state))).join('');
   }
   const showFinder = v !== 'b' || (!c.moving || c.failed.length) ;
