@@ -1,0 +1,439 @@
+#!/usr/bin/python3
+"""
+Keeps uploads from filling the line's queue.
+
+A big copy makes JuiceFS send blocks as fast as the VM can, 20 PUTs at once. On a slow or
+bloated line the router queues them for seconds, and the metadata commands wait behind them:
+past JuiceFS's 5 s write timeout the write fails halfway (`write: Invalid argument` or an I/O
+error in the Finder). This service shapes what the VM sends to the internet just under the
+line's speed, so the queue forms here, in cake, which serves a flow's few packets (the
+metadata's) before the many of the blocks, and not in the router.
+
+Nobody knows the line's speed, and it changes (Wi-Fi, a colleague's upload), so it is found as
+cake-autorate does: a host past the router is pinged five times a second; while the round trip
+stays near its minimum and the uploads fill the shaped rate, the rate grows, fast far below the
+last rate that queued and slowly near it; when the round trip grows, the router's queue is
+filling, and the rate drops to the line's speed estimated from how fast the queue grew.
+"Grows" is 60 ms over the minimum (BLOAT_MS): a fast path's own delay reaches 30 ms at a few
+hundred Mbit/s, and a threshold there held a 500 Mbit/s line at half its speed, while 60 ms
+of queue is nothing to a metadata command with 5 s to answer.
+
+What is shaped: every packet longer than 255 bytes the VM sends on the device that reaches the
+pinged host, except to the Mac's own link (SMB). Short packets pass as before: download ACKs,
+so reads are never slowed by a low upload rate, and most metadata commands. With nobody to
+ping the shaping is removed, and uploads go out as they did without this service.
+
+The pinged host is one JuiceFS talks to (the metadata's or the bucket's), else 1.1.1.1 or
+9.9.9.9. /etc/floppy/uplink.env may set REFLECTORS (space-separated), MIN_MBPS, MAX_MBPS,
+BLOAT_MS. The state is in /run/floppy-uplink.json, the last rate in /var/lib/floppy/uplink.json,
+so a restart starts from the line it knew.
+
+  floppy-uplink run     the service
+  floppy-uplink stop    removes the shaping (ExecStopPost)
+"""
+
+from __future__ import annotations
+
+import ipaddress
+import json
+import os
+import re
+import select
+import signal
+import subprocess
+import sys
+import time
+from collections import Counter
+from pathlib import Path
+
+IFB = "ifb-floppy"
+CONF = Path("/etc/floppy/uplink.env")
+STATE = Path("/run/floppy-uplink.json")
+SAVED = Path("/var/lib/floppy/uplink.json")
+TICK = 0.5
+# After a decrease, the next one waits: the router's queue drains at the line's speed minus
+# the new rate, and the round trip stays high meanwhile.
+REFRACTORY = 1.0
+# Without a reply for this long the reflector is changed; without any, the shaping goes.
+SILENCE = 5.0
+RTT = re.compile(r"time=([0-9.]+) ms")
+# Absolute paths: a systemd service's PATH is not a shell's.
+TOOLS = {"ip": "/usr/bin/ip", "tc": "/usr/sbin/tc", "ss": "/usr/bin/ss"}
+PING = "/usr/bin/ping"
+
+
+def settings() -> dict[str, str]:
+    values: dict[str, str] = {}
+    if CONF.exists():
+        for line in CONF.read_text().splitlines():
+            key, sep, value = line.partition("=")
+            if sep and not key.strip().startswith("#"):
+                values[key.strip()] = value.strip().strip('"')
+    return values
+
+
+def run(tool: str, *args: str, check: bool = True) -> str:
+    """The output of ip, tc or ss; an error when `check` and it fails."""
+    # A fixed binary; the arguments are this file's own, or addresses read from the kernel.
+    result = subprocess.run(  # noqa: S603
+        [TOOLS[tool], *args], capture_output=True, text=True, check=False
+    )
+    if check and result.returncode != 0:
+        raise RuntimeError(f"{tool} {' '.join(args)}: {result.stderr.strip()}")
+    return result.stdout
+
+
+def mac_link() -> ipaddress.IPv4Network | None:
+    """The subnet of the default route's device: the Mac's vzNAT link, where SMB runs."""
+    routes = [line.split() for line in run("ip", "-4", "route", "show", "default").splitlines()]
+
+    def metric(r: list[str]) -> int:
+        return int(r[r.index("metric") + 1]) if "metric" in r else 0
+
+    routes = sorted((r for r in routes if "dev" in r), key=metric)
+    if not routes:
+        return None
+    dev = routes[0][routes[0].index("dev") + 1]
+    match = re.search(r"inet (\S+)", run("ip", "-4", "-o", "addr", "show", "dev", dev))
+    return ipaddress.ip_network(match.group(1), strict=False) if match else None
+
+
+def juicefs_peers(local: ipaddress.IPv4Network | None) -> list[str]:
+    """The addresses JuiceFS has connections to, the busiest first."""
+    counts: Counter[str] = Counter()
+    for line in run("ss", "-Htnp", "state", "established", check=False).splitlines():
+        if '"juicefs"' not in line:
+            continue
+        fields = line.split()
+        if len(fields) < 4:
+            continue
+        host = fields[3].rsplit(":", 1)[0].strip("[]")
+        try:
+            addr = ipaddress.ip_address(host)
+        except ValueError:
+            continue
+        if addr.version == 4 and not addr.is_loopback and not (local and addr in local):
+            counts[host] += 1
+    return [h for h, _ in counts.most_common()]
+
+
+def device_to(host: str) -> str | None:
+    match = re.search(r"\bdev (\S+)", run("ip", "-o", "route", "get", host, check=False))
+    return match.group(1) if match else None
+
+
+def answers(host: str) -> bool:
+    return (
+        subprocess.run(  # noqa: S603 (a fixed binary and an address)
+            [PING, "-n", "-c", "2", "-i", "0.2", "-W", "1", host], capture_output=True, check=False
+        ).returncode
+        == 0
+    )
+
+
+class Shaper:
+    """cake on an ifb, fed by a clsact redirect on the uplink device."""
+
+    def __init__(self) -> None:
+        self.dev: str | None = None
+        self.rate = 0.0
+
+    def install(self, dev: str, rate: float, local: ipaddress.IPv4Network | None) -> None:
+        self.remove()
+        run("ip", "link", "add", IFB, "type", "ifb", check=False)
+        run("ip", "link", "set", IFB, "up")
+        run(
+            "tc",
+            "qdisc",
+            "replace",
+            "dev",
+            IFB,
+            "root",
+            "cake",
+            "bandwidth",
+            f"{rate:.2f}mbit",
+            "besteffort",
+            "flows",
+        )
+        run("tc", "qdisc", "replace", "dev", dev, "clsact")
+        if local is not None:
+            run(
+                "tc",
+                "filter",
+                "add",
+                "dev",
+                dev,
+                "egress",
+                "prio",
+                "1",
+                "protocol",
+                "ip",
+                "u32",
+                "match",
+                "ip",
+                "dst",
+                str(local),
+                "action",
+                "ok",
+            )
+        # IPv4 packets shorter than 256 bytes: ACKs and small requests are never shaped.
+        run(
+            "tc",
+            "filter",
+            "add",
+            "dev",
+            dev,
+            "egress",
+            "prio",
+            "2",
+            "protocol",
+            "ip",
+            "u32",
+            "match",
+            "u16",
+            "0",
+            "0xff00",
+            "at",
+            "2",
+            "action",
+            "ok",
+        )
+        run(
+            "tc",
+            "filter",
+            "add",
+            "dev",
+            dev,
+            "egress",
+            "prio",
+            "3",
+            "matchall",
+            "action",
+            "mirred",
+            "egress",
+            "redirect",
+            "dev",
+            IFB,
+        )
+        self.dev, self.rate = dev, rate
+
+    def set(self, rate: float) -> None:
+        if self.dev and abs(rate - self.rate) >= 0.01:
+            run("tc", "qdisc", "change", "dev", IFB, "root", "cake", "bandwidth", f"{rate:.2f}mbit")
+            self.rate = rate
+
+    def remove(self) -> None:
+        for dev in {self.dev, *os.listdir("/sys/class/net")} - {None, IFB, "lo"}:
+            # Only a clsact that redirects to our ifb is ours to remove.
+            if IFB in run("tc", "filter", "show", "dev", dev, "egress", check=False):
+                run("tc", "qdisc", "del", "dev", dev, "clsact", check=False)
+        run("ip", "link", "del", IFB, check=False)
+        self.dev = None
+
+    def sent_bytes(self) -> int:
+        try:
+            return int(Path(f"/sys/class/net/{IFB}/statistics/tx_bytes").read_text())
+        except OSError:
+            return 0
+
+
+class Pinger:
+    def __init__(self, host: str) -> None:
+        self.host = host
+        self.proc = subprocess.Popen(  # noqa: S603 (a fixed binary and an address)
+            [PING, "-n", "-i", "0.2", "-W", "1", host],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+        )
+        self.fd = self.proc.stdout.fileno()  # type: ignore[union-attr]
+        os.set_blocking(self.fd, False)
+        self.last_reply = time.monotonic()
+        self.buffer = b""
+
+    def samples(self) -> list[float]:
+        out: list[float] = []
+        while select.select([self.fd], [], [], 0)[0]:
+            chunk = os.read(self.fd, 65536)
+            if not chunk:
+                break
+            self.buffer += chunk
+        *lines, self.buffer = self.buffer.split(b"\n")
+        for line in lines:
+            match = RTT.search(line.decode(errors="replace"))
+            if match:
+                out.append(float(match.group(1)))
+        if out:
+            self.last_reply = time.monotonic()
+        return out
+
+    def silent(self) -> bool:
+        return time.monotonic() - self.last_reply > SILENCE or self.proc.poll() is not None
+
+    def stop(self) -> None:
+        self.proc.terminate()
+        try:
+            self.proc.wait(2)
+        except subprocess.TimeoutExpired:
+            self.proc.kill()
+
+
+class Rate:
+    """The shaped rate in Mbit/s, from the round trips and what went through, tick by tick."""
+
+    def __init__(
+        self, start: float, min_mbps: float = 1.0, max_mbps: float = 4000.0, bloat_ms: float = 60.0
+    ) -> None:
+        self.min, self.max, self.bloat = min_mbps, max_mbps, bloat_ms
+        self.rate = min(max(start, min_mbps), max_mbps)
+        # The last rate that queued: growth slows near it. Not kept across restarts, nor
+        # across reflectors: the next line may be faster.
+        self.ceiling = 0.0
+        self.base = self.delta = self.prev_delta = 0.0
+        self.sent = 0.0
+        self.last_decrease = -REFRACTORY
+
+    def reset(self) -> None:
+        """A new reflector: its round trip and the line behind it are unknown."""
+        self.ceiling = self.base = self.delta = self.prev_delta = 0.0
+
+    def step(self, rtts: list[float], sent_mbps: float, now: float) -> float:
+        if rtts:
+            # The lowest of the tick: a queue raises every sample, jitter only some. The base is
+            # learned on a quiet line, as at the VM's start; started under a standing queue it
+            # takes that queue for the line's own round trip until the queue drains once.
+            low = min(rtts)
+            self.base = (
+                low
+                if self.base == 0.0 or low < self.base
+                else self.base + (low - self.base) * 0.002
+            )
+            self.prev_delta, self.delta = self.delta, low - self.base
+        self.sent = self.sent * 0.7 + sent_mbps * 0.3
+        # Uploading at all is enough: the rate may be far above the line (learned on a faster
+        # one), and then what gets through is a small part of it.
+        busy = self.sent >= 1.0
+        if rtts and self.delta > self.bloat and busy and now - self.last_decrease >= REFRACTORY:
+            slope = (self.delta - self.prev_delta) / 1000 / TICK
+            # The queue grows at (rate - line) / line seconds per second; with the router's
+            # queue full, what gets through is the line.
+            line = self.rate / (1 + slope) if slope > 0 else self.rate
+            self.ceiling = min(self.rate, self.sent)
+            self.rate = max(self.min, min(line * 0.9, self.sent * 0.9, self.rate * 0.95))
+            self.last_decrease = now
+        elif rtts and self.delta < self.bloat / 2 and sent_mbps >= 0.8 * self.rate:
+            if self.ceiling and self.rate > 1.2 * self.ceiling:
+                self.ceiling = 0.0  # well past the last queue without one: the line is faster now
+            near = self.ceiling and self.rate >= 0.9 * self.ceiling
+            self.rate = min(self.max, self.rate * (1.02 if near else 1.25))
+        return self.rate
+
+    def state(self) -> dict[str, float]:
+        return {
+            "base_ms": round(self.base, 1),
+            "delta_ms": round(self.delta, 1),
+            "rate_mbps": round(self.rate, 2),
+            "sent_mbps": round(self.sent, 2),
+            "ceiling_mbps": round(self.ceiling, 2),
+        }
+
+
+def load_saved(default: float) -> float:
+    try:
+        return float(json.loads(SAVED.read_text())["rate_mbps"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return default
+
+
+def write_json(path: Path, data: dict) -> None:
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data))
+    tmp.replace(path)
+
+
+def save(rate: float) -> None:
+    SAVED.parent.mkdir(parents=True, exist_ok=True)
+    write_json(SAVED, {"rate_mbps": rate})
+
+
+def serve() -> None:
+    conf = settings()
+    rate = Rate(
+        load_saved(50.0),
+        float(conf.get("MIN_MBPS", "1")),
+        float(conf.get("MAX_MBPS", "4000")),
+        float(conf.get("BLOAT_MS", "60")),
+    )
+    fixed = conf.get("REFLECTORS", "").split()
+    shaper = Shaper()
+    pinger: Pinger | None = None
+    last_search = last_peers = 0.0
+    last_saved, saved_at = rate.rate, time.monotonic()
+    sent = 0
+    stopping = False
+
+    def stop(*_: object) -> None:
+        nonlocal stopping
+        stopping = True
+
+    signal.signal(signal.SIGTERM, stop)
+    signal.signal(signal.SIGINT, stop)
+    try:
+        while not stopping:
+            now = time.monotonic()
+            # A fallback reflector gives way to JuiceFS's own peers once they appear: a peer is
+            # surely past the router the blocks go through.
+            stale = False
+            if pinger is not None and not fixed and now - last_peers >= 30:
+                last_peers = now
+                peers = juicefs_peers(mac_link())
+                stale = bool(peers) and pinger.host not in peers
+            if pinger is not None and (pinger.silent() or stale):
+                pinger.stop()
+                pinger = None
+                shaper.remove()
+                last_search = 0.0
+            if pinger is None and now - last_search >= 10:
+                last_search = now
+                local = mac_link()
+                for host in fixed or [*juicefs_peers(local), "1.1.1.1", "9.9.9.9"]:
+                    dev = device_to(host)
+                    if dev and answers(host):
+                        pinger = Pinger(host)
+                        rate.reset()
+                        shaper.install(dev, rate.rate, local)
+                        sent = shaper.sent_bytes()
+                        break
+            if pinger is not None:
+                total = shaper.sent_bytes()
+                shaper.set(rate.step(pinger.samples(), max(total - sent, 0) * 8 / TICK / 1e6, now))
+                sent = total
+                write_json(STATE, {"device": shaper.dev, "reflector": pinger.host, **rate.state()})
+                if rate.rate != last_saved and now - saved_at >= 30:
+                    save(rate.rate)
+                    last_saved, saved_at = rate.rate, now
+            else:
+                write_json(STATE, {"device": None, "reflector": None, "rate_mbps": None})
+            time.sleep(max(0.0, TICK - (time.monotonic() - now)))
+    finally:
+        if pinger is not None:
+            pinger.stop()
+        shaper.remove()
+        save(rate.rate)
+        STATE.unlink(missing_ok=True)
+
+
+def main() -> int:
+    command = sys.argv[1] if len(sys.argv) > 1 else ""
+    if command == "run":
+        serve()
+    elif command == "stop":
+        Shaper().remove()
+        STATE.unlink(missing_ok=True)
+    else:
+        print("usage: floppy-uplink run|stop", file=sys.stderr)
+        return 2
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

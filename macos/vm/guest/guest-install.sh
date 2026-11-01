@@ -77,6 +77,8 @@ install -m 755 floppy-activity /usr/local/sbin/floppy-activity
 install -m 644 floppy-activity.service /etc/systemd/system/floppy-activity.service
 install -m 755 floppy-notify /usr/local/sbin/floppy-notify
 install -m 644 floppy-notify.service /etc/systemd/system/floppy-notify.service
+install -m 755 floppy-uplink /usr/local/sbin/floppy-uplink
+install -m 644 floppy-uplink.service /etc/systemd/system/floppy-uplink.service
 install -d /etc/systemd/system/smbd.service.d
 id drive >/dev/null 2>&1 || useradd -M -s /usr/sbin/nologin drive
 systemctl disable --now nmbd 2>/dev/null || true
@@ -92,8 +94,8 @@ if [ -f config.env ]; then
   # shellcheck disable=SC2153 # set by config.env
   printf '%s\n%s\n' "$SMB_PASSWORD" "$SMB_PASSWORD" | smbpasswd -s -a drive >/dev/null
   systemctl daemon-reload
-  systemctl enable floppy-mount smbd floppy-activity
-  systemctl restart floppy-mount smbd floppy-activity
+  systemctl enable floppy-mount smbd floppy-activity floppy-uplink
+  systemctl restart floppy-mount smbd floppy-activity floppy-uplink
   exit 0
 fi
 
@@ -124,6 +126,6 @@ if [ "$(lsattr -d /mnt/drive | cut -c5)" != i ]; then
   chattr +i /mnt/drive
 fi
 systemctl daemon-reload
-systemctl enable smbd floppy-activity floppy-notify
+systemctl enable smbd floppy-activity floppy-notify floppy-uplink
 restart_samba
-systemctl restart floppy-activity floppy-notify
+systemctl restart floppy-activity floppy-notify floppy-uplink

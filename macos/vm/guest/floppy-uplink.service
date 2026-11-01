@@ -1,0 +1,13 @@
+[Unit]
+Description=Floppy uploads just under the line's speed (adaptive shaping)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/local/sbin/floppy-uplink run
+ExecStopPost=/usr/local/sbin/floppy-uplink stop
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
