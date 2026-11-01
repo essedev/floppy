@@ -54,6 +54,13 @@
   - Il tempo che manca è per disco, non per file: JuiceFS non dice quanto di un singolo file
     è ancora in memoria. Per file si sa quanto è stato scritto e se è chiuso.
 
+  Giro 2 (01/11/2026): piace C, ma il non completato occupa troppo spazio. Due versioni compatte
+  come sottovarianti di C, il resto di C invariato:
+    c1 avviso corto: nello stato una riga sola (il file, quanto è arrivato), le azioni nel menu
+       dei tre puntini come quelle dei dischi.
+    c2 solo sulla riga: nessun avviso nello stato; il file incompleto compare da solo sotto il suo
+       progetto, con il suo menu. Lo segnalano il faceplate rosso, la riga del disco e la notifica.
+
   Dati: nomi dei file sul modello di un disco vero (clip della Sony, export di CapCut,
   registrazioni dello schermo); dimensioni vere, velocità di una linea da 40 Mbit/s
   come quella misurata. Lo scenario "Tanti file" (48 clip di una scheda) è inventato.
@@ -189,6 +196,22 @@ svg.i { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-widt
 footer.f { display: flex; align-items: center; gap: 6px; padding: 10px 10px 10px 20px; font-size: 12px; color: var(--ink-3); }
 footer.f .v { margin-right: auto; font: 12px var(--f-ro); }
 
+/* The floating row menu (concept G, variant A). */
+.pop { position: absolute; right: 6px; z-index: 5; width: 250px; background: var(--menu); border-radius: 12px; padding: 5px; box-shadow: var(--menu-shadow); }
+.pop .mi { display: grid; grid-template-columns: 18px 1fr; column-gap: 10px; align-items: center; width: 100%; padding: 6px 9px; border: 0; border-radius: 8px; background: transparent; text-align: left; font-size: 13px; color: var(--ink); }
+.pop .mi:hover { background: var(--sunken); }
+.pop .mi svg { color: var(--ink-2); }
+.pop .mi small { grid-column: 2; font-size: 11.5px; color: var(--ink-2); line-height: 1.35; }
+.pop .sep { height: 1px; background: var(--line); margin: 4px 8px; }
+.pop .head { padding: 6px 9px 4px; font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.short { position: relative; display: flex; align-items: center; gap: 10px; padding: 8px 4px 8px 14px; background: var(--sunken); border-radius: 10px; }
+.short .b { flex: 1; min-width: 0; }
+.short b { display: block; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.short .l { display: block; font-size: 12px; color: var(--ink-2); }
+button.dots { border: 0; background: transparent; }
+button.dots[aria-expanded="true"] { background: var(--raised); color: var(--ink); }
+.frow { position: relative; }
+
 /* A macOS notification, for the cases that send one. */
 .nb { position: fixed; top: 54px; right: 18px; z-index: 50; width: 344px; display: grid; grid-template-columns: 38px 1fr auto; gap: 10px; align-items: start; padding: 11px 13px; border-radius: 16px; background: var(--nb-bg); backdrop-filter: blur(24px) saturate(1.6); -webkit-backdrop-filter: blur(24px) saturate(1.6); box-shadow: 0 0 0 .5px var(--nb-line), 0 12px 32px -8px rgba(0,0,0,.35); font: 13px/1.35 -apple-system, "SF Pro Text", sans-serif; color: var(--ink); }
 .nb .ic { width: 38px; height: 38px; border-radius: 9px; background: linear-gradient(#3a3835, #1c1b19); display: grid; place-items: center; }
@@ -217,6 +240,8 @@ const DESC = {
   a: 'lista: una sezione "In caricamento" con una riga per file e il suo stato, come i download di un browser',
   b: 'una risposta: lo stato in cima dice se si può chiudere il Mac e quanto manca; i file a richiesta',
   c: 'sul progetto: il caricamento sta sulla riga del progetto di destinazione, come gli arrivi dei colleghi',
+  c1: 'avviso corto: C con il non completato in una riga sola nello stato, le azioni nel menu',
+  c2: 'solo sulla riga: C senza avviso nello stato, il file incompleto sotto il suo progetto con il suo menu',
 };
 
 // Scenarios: one copy session seen at different moments. Sizes in MB.
@@ -311,6 +336,8 @@ const I = {
   gear: '<path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/>',
   globe: '<circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/>',
   power: '<path d="M12 2v10"/><path d="M18.4 6.6a9 9 0 1 1-12.77.04"/>',
+  trash: '<path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>',
+  eyeoff: '<path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.53 13.53 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><path d="m2 2 20 20"/>',
 };
 const svg = (n, cls = 'i') => `<svg class="${cls}" viewBox="0 0 24 24">${I[n]}</svg>`;
 const led = (s, blink) => `<span class="led"${s ? ` data-s="${s}"` : ''}${blink ? ' data-blink' : ''}></span>`;
@@ -375,13 +402,33 @@ function failedNotice(r, state) {
   }
   return `<div class="notice">${led('err')}<div><b class="t">Copia non completata: ${r.f.name}</b>Su Floppy ne sono arrivati ${gb(r.written)} di ${gb(r.f.size)}: il file c'è ma è a metà, e nel Finder ha l'icona grigia. Copialo di nuovo dal tuo Mac.<div class="acts"><button class="btn raised sm">Mostra nel Finder</button><button class="btn raised sm" data-act="ask" data-file="${r.f.name}">Elimina la copia incompleta</button><button class="btn ghost sm" data-act="hide">Nascondi</button></div></div></div>`;
 }
+function failedMenu(r, up) {
+  return `<div class="pop" style="${up ? 'bottom:36px' : 'top:40px'}" role="menu"><div class="head">${r.f.name}</div>
+    <button class="mi" type="button">${svg('folder')}<span>Mostra nel Finder</span></button>
+    <div class="sep"></div>
+    <button class="mi" type="button" data-act="ask" data-file="${r.f.name}">${svg('trash')}<span>Elimina la copia incompleta</span><small>Va nel cestino di Floppy. L'originale sul tuo Mac resta.</small></button>
+    <div class="sep"></div>
+    <button class="mi" type="button" data-act="hide">${svg('eyeoff')}<span>Nascondi l'avviso</span></button></div>`;
+}
+function failedShort(r, state) {
+  if (state.confirm === r.f.name) return failedNotice(r, state);
+  return `<div class="short">${led('err')}<span class="b"><b>${r.f.name} è arrivato a metà</b><span class="l">Arrivati ${gb(r.written)} di ${gb(r.f.size)} · da ricopiare</span></span>
+    <button class="dots" type="button" data-act="fmenu" aria-haspopup="menu" aria-expanded="${!!state.fmenu}">${svg('dots')}</button>${state.fmenu ? failedMenu(r) : ''}</div>`;
+}
+function failedRow(r, state) {
+  return `<div class="frow">${led('err')}<span class="b"><span class="n">${r.f.name}</span><span class="l">${gb(r.written)} di ${gb(r.f.size)} · da ricopiare</span></span>
+    <button class="dots" type="button" data-act="fmenu" aria-haspopup="menu" aria-expanded="${!!state.fmenu}">${svg('dots')}</button>${state.fmenu ? failedMenu(r, true) : ''}</div>`;
+}
 function checkNotice(r) {
   return `<div class="notice">${led('dl')}<div><b class="t">Da controllare: ${r.f.name}</b>La connessione è caduta mentre veniva salvato. Aprilo per vedere se è completo; se non lo è, salvalo di nuovo.<div class="acts"><button class="btn raised sm">Mostra nel Finder</button><button class="btn ghost sm" data-act="hide">Va bene così</button></div></div></div>`;
 }
 
 // The status section's title and body, per variant.
-function statusCopy(v, sc) {
+function statusCopy(v, sc, sub = v) {
   const c = counts(sc.rows);
+  if ((sub === 'c1' || sub === 'c2') && c.failed.length && !state.hidden) {
+    return { t: '1 copia non completata', b: sub === 'c1' ? 'Gli altri file sono su Floppy.' : `${c.failed[0].f.name} è arrivato a metà: lo trovi qui sotto, nel suo progetto.` };
+  }
   if (v === 'b') {
     if (c.failed.length) return { t: c.failed.length === 1 ? '1 copia non completata' : `${c.failed.length} copie non completate`, b: c.done ? `Gli altri ${c.done} file sono su Floppy. Questo va copiato di nuovo:` : 'Va copiata di nuovo:' };
     if (sc.paused) return { t: 'Caricamento in pausa', b: `Il Mac non raggiunge Floppy: riprendo da solo appena torna la connessione. Mancano ${gb(sc.pending)}; lascia il Mac acceso.` };
@@ -414,11 +461,12 @@ function spaceSection() {
     <li><span class="slot-mark" style="background:var(--idle)"></span><span>Libero sul Mac</span><span>118 GB</span></li></ul></section>`;
 }
 
-function diskList(v, sc, state) {
+function diskList(sub, sc, state) {
+  const v = sub.replace(/\d+$/, '');
   const c = counts(sc.rows);
   let dLed = led('ok'), dLine = 'Pronto', dRo = 'Collegato', projLed = null, projLine = '', projRo = '';
   if (v === 'c') {
-    if (c.failed.length) { dLed = led('err'); dLine = `1 copia non completata · Pronto`; projLed = led('err'); projLine = `${c.failed[0].f.name} è a metà`; projRo = 'Incompleto'; }
+    if (c.failed.length) { dLed = led('err'); dLine = `1 copia non completata · Pronto`; projLed = led('err'); projLine = sub === 'c2' ? '1 copia non completata' : `${c.failed[0].f.name} è a metà`; projRo = 'Incompleto'; }
     else if (sc.paused) { dLed = led('dl'); dLine = 'Caricamento in pausa: manca la connessione'; projLed = led('dl'); projLine = `${c.moving} file in pausa · mancano ${gb(sc.pending)}`; projRo = 'In pausa'; }
     else if (c.moving) { dLed = led('dl', true); dLine = `${c.moving} file in invio · ${eta(sc.pending)}`; projLed = led('dl', true); projLine = `${c.moving} file · mancano ${gb(sc.pending)}`; projRo = 'In invio'; }
     else if (c.check.length) { projLed = led('dl'); projLine = `${c.check[0].f.name} da controllare`; projRo = 'Controlla'; }
@@ -427,7 +475,10 @@ function diskList(v, sc, state) {
   const open = v === 'c' && state.open;
   const proj = `<div class="frow">${projLed ? `${projLed}` : svg('folder', 'i ficon')}<span class="b"><span class="n">${PROJECT}</span>${projLine ? `<span class="l">${projLine}</span>` : ''}</span>${projRo ? `<span class="ro">${projRo}</span>` : ''}<span class="dots">${svg('dots')}</span></div>`;
   const files = open ? (() => { const { shown, rest } = visibleRows(sc.rows); return `<div class="tree" style="margin-left:18px">${shown.map((r) => urow(r, sc.paused)).join('')}${restLine(rest)}</div>`; })() : '';
-  const tree = v === 'c' ? `<div class="tree">${proj}${v === 'c' && projLed ? `<button class="more" data-act="open" type="button" style="padding-left:10px">${open ? 'Nascondi i file' : 'Mostra i file'}</button>` : ''}${files}<div class="frow">${svg('folder', 'i ficon')}<span class="b"><span class="n">Spot Natale</span></span><span class="dots">${svg('dots')}</span></div></div>` : '';
+  // c2: an incomplete file shows under its project without opening it.
+  const pinned = sub === 'c2' && !state.hidden && !state.confirm ? c.failed.map((r) => `<div class="tree" style="margin-left:18px">${failedRow(r, state)}</div>`).join('') : '';
+  const confirmBox = sub === 'c2' && state.confirm ? `<div style="margin:4px 4px 8px">${failedNotice(c.failed[0], state)}</div>` : '';
+  const tree = v === 'c' ? `<div class="tree">${proj}${pinned}${confirmBox}${projLed ? `<button class="more" data-act="open" type="button" style="padding-left:10px">${open ? 'Nascondi i file' : 'Mostra i file'}</button>` : ''}${files}<div class="frow">${svg('folder', 'i ficon')}<span class="b"><span class="n">Spot Natale</span></span><span class="dots">${svg('dots')}</span></div></div>` : '';
   return `<section class="list"><div class="sec-h"><span>Dischi del team</span><b>1</b></div>
     <div class="drow">${dLed}<span class="b"><span class="n">Progetti ${svg('chev')}</span><span class="l">${dLine}</span></span><span class="ro">${dRo}</span><span class="dots">${svg('dots')}</span></div>${tree}</section>`;
 }
@@ -444,9 +495,10 @@ function uploadsA(sc, state) {
 }
 
 function render() {
-  const v = document.body.dataset.v;
+  const sub = document.body.dataset.v;
+  const v = sub.replace(/\d+$/, '');
   const sc = SCEN[state.scen];
-  const s = statusCopy(v, sc);
+  const s = statusCopy(v, sc, sub);
   const c = counts(sc.rows);
   let extra = '';
   if (v === 'b') {
@@ -457,8 +509,8 @@ function render() {
     }
     if (sc.rows.length) extra += `<button class="toggle" data-act="list" type="button">${state.list ? 'Nascondi i file' : `Mostra i file (${sc.rows.length})`}</button>`;
   }
-  if (v === 'c') {
-    extra += c.failed.filter(() => !state.hidden).map((r) => failedNotice(r, state)).join('');
+  if (v === 'c' && sub !== 'c2') {
+    extra += c.failed.filter(() => !state.hidden).map((r) => (sub === 'c1' ? failedShort(r, state) : failedNotice(r, state))).join('');
   }
   const showFinder = v !== 'b' || (!c.moving || c.failed.length) ;
   const panel = `<div class="panel">
@@ -467,7 +519,7 @@ function render() {
       <div style="display:flex;gap:8px"><button class="btn primary lg">${svg('ext')} Apri il Finder</button></div></section>
     ${v === 'a' ? uploadsA(sc, state) : ''}
     ${spaceSection()}
-    ${diskList(v, sc, state)}
+    ${diskList(sub, sc, state)}
     <footer class="f"><span class="v">Floppy 0.2.7</span><span class="dots">${svg('globe')}</span><span class="dots">${svg('gear')}</span><button class="btn ghost sm">${svg('power')} Spegni</button></footer>
   </div>`;
   document.querySelector('[data-panel]').innerHTML = panel;
@@ -493,7 +545,7 @@ function xSide(sc) {
 const state = { scen: 'up', list: false, open: false, hidden: false, confirm: null };
 document.querySelector('[data-scen]').innerHTML = Object.entries(SCEN).map(([k, s]) => `<button data-scen-k="${k}">${s.label}</button>`).join('');
 const setScen = (k) => {
-  Object.assign(state, { scen: k, hidden: false, confirm: null });
+  Object.assign(state, { scen: k, hidden: false, confirm: null, fmenu: false });
   document.querySelectorAll('[data-scen-k]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.scenK === k)));
   render();
 };
@@ -504,8 +556,9 @@ document.querySelector('[data-panel]').addEventListener('click', (e) => {
   const a = b.dataset.act;
   if (a === 'list') state.list = !state.list;
   if (a === 'open') state.open = !state.open;
-  if (a === 'hide') state.hidden = true;
-  if (a === 'ask') state.confirm = b.dataset.file;
+  if (a === 'hide') { state.hidden = true; state.fmenu = false; }
+  if (a === 'fmenu') state.fmenu = !state.fmenu;
+  if (a === 'ask') { state.confirm = b.dataset.file; state.fmenu = false; }
   if (a === 'cancel') state.confirm = null;
   if (a === 'del') { state.confirm = null; state.hidden = true; }
   render();
@@ -517,14 +570,15 @@ const root = document.documentElement, body = document.body;
 const load = () => { try { return JSON.parse(localStorage.getItem(KEY) || '{}'); } catch { return {}; } };
 const save = (s) => { try { localStorage.setItem(KEY, JSON.stringify(s)); } catch {} };
 const name = (v) => DESC[v].split(':')[0];
-document.querySelector('[data-buttons]').innerHTML = Object.keys(DESC).map((v) => `<button data-v="${v}">${v.toUpperCase()} ${name(v)}</button>`).join(' ');
+const baseOf = (v) => v.replace(/\d+$/, '');
+document.querySelector('[data-buttons]').innerHTML = Object.keys(DESC).map((v) => `<button data-v="${v}">${/\d$/.test(v) ? `${v.slice(-1)} ${baseOf(v).toUpperCase()}` : v.toUpperCase()} ${name(v)}</button>`).join(' ');
 const pick = (v) => {
   if (!DESC[v]) return;
   body.dataset.v = v;
   document.querySelectorAll('.switch [data-v]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.v === v)));
   document.querySelector('[data-desc]').textContent = DESC[v];
   history.replaceState(null, '', `${location.search}#${v}`);
-  state.list = false; state.open = false;
+  state.list = false; state.open = false; state.fmenu = false; state.confirm = null; state.hidden = false;
   render();
 };
 const setTheme = (t) => { root.dataset.theme = t; save({ ...load(), theme: t }); };
@@ -535,11 +589,14 @@ addEventListener('keydown', (e) => {
   const k = e.key.toLowerCase();
   if (k === 't') setTheme(root.dataset.theme === 'dark' ? 'light' : 'dark');
   else if (k === 'p') body.dataset.chrome = body.dataset.chrome === 'off' ? 'on' : 'off';
+  else if (/^\d$/.test(k)) pick(`${baseOf(body.dataset.v)}${k}`);
   else pick(k);
 });
 root.dataset.theme = load().theme || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
 setScen(SCEN[new URLSearchParams(location.search).get('s')] ? new URLSearchParams(location.search).get('s') : 'up');
 pick(DESC[location.hash.slice(1)] ? location.hash.slice(1) : 'x');
+// ?m=1 opens the incomplete file's menu, for a screenshot.
+if (new URLSearchParams(location.search).get('m')) { state.fmenu = true; render(); }
 </script>
 </body>
 </html>
