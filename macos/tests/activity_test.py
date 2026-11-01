@@ -14,6 +14,7 @@ import importlib.machinery
 import importlib.util
 import json
 import os
+import struct
 import sys
 import tempfile
 import unittest
@@ -444,6 +445,178 @@ class RenameBack(unittest.TestCase):
         for bad in ["", "/etc", "../x", "a/../../x", "a//b", "./a", None, 3]:
             self.assertIsNone(fa.inside(bad), bad)
         self.assertEqual(fa.inside("Clienti/Backstage Tosca"), "Clienti/Backstage Tosca")
+
+
+def box(kind: bytes, body: int) -> bytes:
+    """An MP4 box of `body` bytes after its header."""
+    return struct.pack(">I4s", 8 + body, kind) + b"\0" * body
+
+
+BROK = b"AFP\0" + b"\0\0\1\0" + b"\0" * 4 + b"\x80\0\0\0" + b"brokMACS" + b"\0" * 33
+
+
+class Uploads(unittest.TestCase):
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.dir.cleanup)
+        self.d = Path(self.dir.name)
+
+    def clip(self, name: str, data: bytes) -> str:
+        p = self.d / name
+        p.write_bytes(data)
+        return str(p)
+
+    def test_a_video_whole_with_its_index_at_either_end(self):
+        camera = self.clip("C0272.MP4", box(b"ftyp", 16) + box(b"mdat", 4000) + box(b"moov", 200))
+        capcut = self.clip("export.mp4", box(b"ftyp", 16) + box(b"moov", 200) + box(b"mdat", 4000))
+        self.assertIs(fa.video_whole(camera), True)
+        self.assertIs(fa.video_whole(capcut), True)
+
+    def test_a_video_cut_short_fails_either_way(self):
+        # The camera's index never arrived; CapCut's data runs past the end.
+        camera = self.clip(
+            "C0272.MP4", (box(b"ftyp", 16) + box(b"mdat", 4000) + box(b"moov", 200))[:3000]
+        )
+        capcut = self.clip(
+            "export.mp4", (box(b"ftyp", 16) + box(b"moov", 200) + box(b"mdat", 4000))[:3000]
+        )
+        no_index = self.clip("x.mov", box(b"ftyp", 16) + box(b"mdat", 4000))
+        for p in (camera, capcut, no_index):
+            self.assertIs(fa.video_whole(p), False, p)
+
+    def test_large_boxes_and_other_files(self):
+        big = struct.pack(">I4sQ", 1, b"mdat", 16 + 100) + b"\0" * 100
+        self.assertIs(
+            fa.video_whole(self.clip("a.mov", box(b"ftyp", 8) + big + box(b"moov", 8))), True
+        )
+        self.assertIsNone(fa.video_whole(self.clip("a.zip", b"PK" * 100)))
+
+    def test_the_finders_mark(self):
+        self.assertTrue(fa.finder_unfinished("x", read=lambda _p: BROK))
+        clean = BROK.replace(b"brokMACS", b"\0" * 8)
+        self.assertFalse(fa.finder_unfinished("x", read=lambda _p: clean))
+
+        def missing(_p):
+            raise OSError(61, "no attribute")
+
+        self.assertFalse(fa.finder_unfinished("x", read=missing))
+
+    def test_verdicts(self):
+        mb = 1024 * 1024
+        clip = self.clip("C0272.MP4", box(b"ftyp", 16) + box(b"mdat", 2 * mb) + box(b"moov", 200))
+        cut = self.clip("C0315.MP4", (box(b"ftyp", 16) + box(b"mdat", 2 * mb))[: mb + 10])
+        doc = self.clip("Grafiche.zip", b"x" * 100)
+        never = lambda _p: False  # noqa: E731
+        always = lambda _p: True  # noqa: E731
+        size = os.path.getsize
+        self.assertEqual(fa.verdict(clip, size(clip), False, always), ("incomplete", "finder"))
+        self.assertEqual(fa.verdict(cut, size(cut), False, never), ("incomplete", "video"))
+        # Small and whole: nothing to show. Gone: nothing either.
+        self.assertIsNone(fa.verdict(clip, size(clip), False, never))
+        self.assertIsNone(fa.verdict(str(self.d / "gone.mov"), 0, False, never))
+        # A large file: done, or to check when its write saw the line stop and it is no video.
+        self.assertEqual(fa.verdict(doc, 30 * mb, False, never), ("done", None))
+        self.assertEqual(fa.verdict(doc, 30 * mb, True, never), ("check", "outage"))
+
+    def test_the_write_buffer_from_stats(self):
+        mount = self.d / "Progetti"
+        mount.mkdir()
+        (mount / ".stats").write_text(
+            "juicefs_used_buffer_size_bytes 300000000\n"
+            "juicefs_used_read_buffer_size_bytes 100000000\n"
+            "juicefs_object_request_data_bytes_PUT 5000000\n"
+        )
+        self.assertEqual(fa.write_buffer(str(mount)), (200_000_000, 5_000_000, 0))
+        self.assertIsNone(fa.write_buffer(str(self.d / "gone")))
+
+    def test_a_meter_pauses_when_nothing_moves(self):
+        mb = 1024 * 1024
+        m = fa.Meter(moved=0.0)
+        self.assertEqual(m.update(0.0, 100 * mb, 0)["rate"], 0)
+        s = m.update(1.0, 90 * mb, 4_000_000)
+        self.assertEqual(s["rate"], 4_000_000)
+        self.assertFalse(s["paused"])
+        self.assertFalse(m.update(10.0, 90 * mb, 4_000_000)["paused"])
+        self.assertTrue(m.update(17.0, 90 * mb, 4_000_000)["paused"])
+        # Bytes move again: resumed.
+        self.assertFalse(m.update(18.0, 80 * mb, 5_000_000)["paused"])
+        # Nothing waiting: never paused, and the rate starts over.
+        idle = m.update(60.0, 0, 5_000_000)
+        self.assertEqual((idle["paused"], idle["rate"]), (False, 0))
+        # Requests that time out still count their bytes: with errors, nothing moved.
+        m2 = fa.Meter(moved=0.0)
+        m2.update(0.0, 100 * mb, 0, 0)
+        for t in range(1, 20):
+            s2 = m2.update(float(t), 100 * mb, t * 4_000_000, t * 3)
+        self.assertTrue(s2["paused"])
+        self.assertLess(s2["rate"], 1)
+        # The block buffer JuiceFS keeps after the last upload is not waiting data.
+        rest = m.update(90.0, 4_456_448, 5_000_000)
+        self.assertEqual((rest["waiting"], rest["paused"]), (0, False))
+
+    def test_closed_writes_are_checked_then_forgotten(self):
+        fa.DB = self.d / "activity.db"
+        root = self.d / "drive"
+        (root / "Progetti").mkdir(parents=True)
+        old_root, fa.ROOT = fa.ROOT, str(root)
+        self.addCleanup(setattr, fa, "ROOT", old_root)
+        clip = root / "Progetti" / "C0272.MP4"
+        clip.write_bytes(b"x")
+        team = {"Progetti": "progetti"}
+        db = fa.connect()
+        self.addCleanup(db.close)
+        up = fa.Uploads()
+        up.outage.add(str(clip))
+        done = [{"at": 1.0, "op": "added", "kind": "file", "path": str(clip), "done": 100.0}]
+        up.track(db, 100.0, done, {}, team)
+        row = db.execute("SELECT disk, path, state, outage FROM uploads").fetchone()
+        self.assertEqual(row, ("progetti", "C0272.MP4", "checking", 1))
+        # Not yet: the Finder may still clear its mark.
+        fa.check(db, 110.0, judge=lambda *_: ("incomplete", "finder"))
+        self.assertEqual(db.execute("SELECT state FROM uploads").fetchone()[0], "checking")
+        fa.check(db, 121.0, judge=lambda *_: ("incomplete", "finder"))
+        self.assertEqual(
+            db.execute("SELECT state, reason FROM uploads").fetchone(), ("incomplete", "finder")
+        )
+        # Copied again over it: a new write forgets the old outcome.
+        up.track(db, 130.0, [], {str(clip): fa.Pending(130.0, "replaced")}, team)
+        self.assertIsNone(db.execute("SELECT 1 FROM uploads").fetchone())
+
+    def test_finished_uploads_leave_after_a_while(self):
+        fa.DB = self.d / "activity.db"
+        with closing(fa.connect()) as db:
+            with db:
+                db.execute(
+                    "INSERT INTO uploads VALUES"
+                    " ('/a', 'progetti', 'a.mov', 50, 100.0, 0, 'checking', NULL, 0)"
+                )
+            self.assertEqual(fa.list_uploads()["files"][0]["state"], "checking")
+            fa.check(db, 130.0, judge=lambda *_: ("done", None))
+            self.assertEqual(fa.list_uploads()["files"][0]["state"], "done")
+            fa.check(db, 130.0 + fa.DONE_KEEP + 1, judge=lambda *_: ("done", None))
+            self.assertEqual(fa.list_uploads()["files"], [])
+
+    def test_only_an_incomplete_copy_can_be_removed(self):
+        fa.DB = self.d / "activity.db"
+        mount = self.d / "Progetti"
+        mount.mkdir()
+        (mount / "C0272.MP4").write_bytes(b"x")
+        (mount / "ok.mov").write_bytes(b"x")
+        m = fa.Mount("progetti", "Progetti", str(mount), True)
+        with closing(fa.connect()) as db, db:
+            for name, state in (("C0272.MP4", "incomplete"), ("ok.mov", "done")):
+                db.execute(
+                    "INSERT INTO uploads VALUES (?, 'progetti', ?, 1, 1.0, 0, ?, NULL, 1.0)",
+                    (str(mount / name), name, state),
+                )
+        self.assertEqual(fa.upload_remove(m, "ok.mov")["reason"], "not_incomplete")
+        self.assertTrue((mount / "ok.mov").exists())
+        self.assertTrue(fa.upload_remove(m, "C0272.MP4")["done"])
+        self.assertFalse((mount / "C0272.MP4").exists())
+        self.assertTrue(fa.upload_dismiss(m, "ok.mov")["done"])
+        self.assertEqual(fa.list_uploads()["files"], [])
+        with self.assertRaises(PermissionError):
+            fa.upload_remove(fa.Mount("progetti", "Progetti", str(mount), False), "x.mov")
 
 
 if __name__ == "__main__":

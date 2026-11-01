@@ -14,6 +14,14 @@ over a file. The app reads both through `floppy activity` and `floppy trash`.
                                                   is "-" for the single-user volume
   floppy-activity rename-back DISK                undoes a rename: {"path", "to"} of the
                                                   event on stdin, JSON out
+  floppy-activity upload-dismiss DISK             forgets an upload's outcome: {"path"} on stdin
+  floppy-activity upload-remove DISK              deletes an incomplete copy (to the disk's
+                                                  trash): {"path"} on stdin, JSON out
+
+The uploads: how much each disk still has to send to the bucket and how fast, whether it is
+paused (bytes waiting, none sent), and whether each file this Mac wrote arrived whole. A
+Finder copy that fails leaves the file at its full name with only part of the data and the
+Finder's "copy in progress" mark on it; a video cut short has boxes that run past its end.
 
 Samba logs one line per operation (smb.conf: full_audit, its own log file). A few things
 in those lines are not what they look like:
@@ -32,11 +40,12 @@ import json
 import os
 import re
 import sqlite3
+import struct
 import subprocess
 import sys
 import time
 from calendar import timegm
-from contextlib import closing
+from contextlib import closing, suppress
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -351,6 +360,10 @@ def connect() -> sqlite3.Connection:
         CREATE TABLE IF NOT EXISTS writing (
           abs TEXT PRIMARY KEY, disk TEXT, path TEXT NOT NULL, op TEXT NOT NULL,
           since REAL NOT NULL);
+        CREATE TABLE IF NOT EXISTS uploads (
+          abs TEXT PRIMARY KEY, disk TEXT, path TEXT NOT NULL, size INTEGER,
+          closed REAL NOT NULL, outage INTEGER NOT NULL, state TEXT NOT NULL, reason TEXT,
+          checked REAL NOT NULL);
         """
     )
     # Ids start at the time of creation in milliseconds and never go back: the app and
@@ -419,6 +432,7 @@ def run() -> None:
     follower = Follower(*(row or (None, 0)))
     tracker, last_at, last_trim = Tracker(), None, 0.0
     saved, saved_writing = follower.position(), []
+    uploads = Uploads()
     # Writes open before a restart are not tracked: none is in progress as far as we know.
     with db:
         db.execute("DELETE FROM writing")
@@ -432,8 +446,11 @@ def run() -> None:
         if opens is None:
             opens = tracker.pending  # Samba down: no write counts as done
         by_folder = folders()
-        rows = to_rows(tracker.tick(now, opens), by_folder, stat_size, TrashSizes(by_folder))
+        uploads.meter(now, by_folder, tracker.pending)
+        settled = tracker.tick(now, opens)
+        rows = to_rows(settled, by_folder, stat_size, TrashSizes(by_folder))
         writing = writing_rows(tracker.pending, by_folder)
+        uploads.track(db, now, settled, tracker.pending, by_folder)
         position, trim = follower.position(), now - last_trim > 3600
         if rows or position != saved or trim or writing != saved_writing:
             with db:
@@ -490,6 +507,302 @@ def list_open() -> list[dict]:
         if where is not None and not hidden(where[1]):
             out.append({"disk": where[0], "path": where[1]})
     return out
+
+
+# The uploads. JuiceFS holds what it was given in its write buffer until each block is in
+# the bucket (no --writeback: a close waits for them), so the buffer is what is left to send.
+UPLOAD_MIN = 20 * 1024 * 1024  # smaller writes, an app's autosave, are never shown
+VIDEO_MIN = 1024 * 1024
+VIDEO = (".mov", ".mp4", ".m4v")
+CHECK_AFTER = 20.0  # after the close: the Finder clears its mark on the file's last write
+RECHECK = 30.0  # an incomplete copy may be finished or replaced
+DONE_KEEP = 600.0  # a finished upload stays this long, then only the activity has it
+FORGET = 7 * 86400.0
+STALL = 15.0  # bytes waiting and none sent for this long: paused
+# JuiceFS keeps a block's buffer (4 MiB) after the last upload: below this, nothing waits.
+IDLE_BUFFER = 8 * 1024 * 1024
+UPLOADS_STATE = Path("/run/floppy-uploads.json")
+FINDER_INFO = "user.DosStream.AFP_AfpInfo:$DATA"  # Samba's AFP_AfpInfo stream (fruit)
+
+
+def afp_info(path: str) -> bytes:
+    """The file's AFP_AfpInfo stream as Samba stores it."""
+    return os.getxattr(path, FINDER_INFO)
+
+
+def finder_unfinished(path: str, read=afp_info) -> bool:
+    """Whether the Finder's copy of `path` never finished: its FinderInfo type is "brok"."""
+    try:
+        info = read(path)
+    except OSError:
+        return False
+    # "AFP\0", version, reserved, backup date: the FinderInfo starts at byte 16, type first.
+    return info[16:20] == b"brok"
+
+
+def video_whole(path: str) -> bool | None:
+    """
+    Whether an MP4 or QuickTime file's top-level boxes add up to its size and include the
+    index (moov); None for another kind of file or one that cannot be read. A camera puts
+    the index at the end and CapCut at the start: a file cut short fails either way.
+    """
+    if not path.lower().endswith(VIDEO):
+        return None
+    try:
+        size = os.path.getsize(path)
+        moov, pos = False, 0
+        with open(path, "rb") as f:
+            while pos < size:
+                f.seek(pos)
+                head = f.read(16)
+                if len(head) < 8:
+                    return False
+                n, kind = struct.unpack(">I4s", head[:8])
+                if n == 1:
+                    if len(head) < 16:
+                        return False
+                    n = struct.unpack(">Q", head[8:16])[0]
+                elif n == 0:
+                    n = size - pos  # to the end of the file
+                if n < 8 or pos + n > size:
+                    return False
+                moov |= kind == b"moov"
+                pos += n
+    except OSError:
+        return None
+    return moov
+
+
+def verdict(
+    path: str, size: int | None, outage: bool, unfinished=finder_unfinished
+) -> tuple[str, str | None] | None:
+    """
+    A closed write's outcome: ("done", None), ("incomplete", "finder" or "video"),
+    ("check", "outage") for a file Floppy cannot judge whose write saw the line stop, or
+    None for one not worth showing (gone, or small and whole).
+    """
+    if not os.path.lexists(path):
+        return None
+    if unfinished(path):
+        return "incomplete", "finder"
+    size = size or 0
+    whole = video_whole(path) if size >= VIDEO_MIN else None
+    if whole is False:
+        return "incomplete", "video"
+    if size < UPLOAD_MIN:
+        return None
+    if outage and whole is None:
+        return "check", "outage"
+    return "done", None
+
+
+def write_buffer(mount: str) -> tuple[int, int, int] | None:
+    """
+    (bytes waiting to be sent, bytes sent so far, failed requests so far) from the mount's
+    JuiceFS .stats. A PUT that times out counts its bytes as sent: only the errors tell.
+    """
+    try:
+        text = Path(mount, ".stats").read_text()
+    except OSError:
+        return None
+    v: dict[str, float] = {}
+    for line in text.splitlines():
+        key, _, value = line.partition(" ")
+        if key in (
+            "juicefs_used_buffer_size_bytes",
+            "juicefs_used_read_buffer_size_bytes",
+            "juicefs_object_request_data_bytes_PUT",
+            "juicefs_object_request_errors",
+        ):
+            with suppress(ValueError):
+                v[key] = float(value)
+    waiting = v.get("juicefs_used_buffer_size_bytes", 0.0) - v.get(
+        "juicefs_used_read_buffer_size_bytes", 0.0
+    )
+    return (
+        max(0, int(waiting)),
+        int(v.get("juicefs_object_request_data_bytes_PUT", 0.0)),
+        int(v.get("juicefs_object_request_errors", 0.0)),
+    )
+
+
+@dataclass
+class Meter:
+    """One disk's upload: bytes a second (an average) and since when nothing was sent."""
+
+    sent: int | None = None
+    errors: int = 0
+    at: float = 0.0
+    rate: float = 0.0
+    moved: float = 0.0
+
+    def update(self, now: float, waiting: int, sent: int, errors: int = 0) -> dict:
+        if waiting < IDLE_BUFFER:
+            waiting = 0
+        if self.sent is not None and now > self.at and sent >= self.sent:
+            # An interval with failed requests sent nothing that stayed.
+            clean = errors <= self.errors
+            step = (sent - self.sent) / (now - self.at) if clean else 0.0
+            self.rate = step if self.rate == 0 else self.rate * 0.8 + step * 0.2
+            if sent > self.sent and clean:
+                self.moved = now
+        self.sent, self.errors, self.at = sent, errors, now
+        if not waiting:
+            self.moved, self.rate = now, 0.0
+        return {
+            "waiting": waiting,
+            "rate": round(self.rate),
+            "paused": waiting > 0 and now - self.moved >= STALL,
+        }
+
+
+class Uploads:
+    """Meters each mounted disk, and records and checks what this Mac wrote."""
+
+    def __init__(self) -> None:
+        self.meters: dict[str | None, Meter] = {}
+        self.paused: set[str | None] = set()
+        self.outage: set[str] = set()  # writes open while their disk was paused
+        self.last_check = 0.0
+
+    def meter(self, now: float, by_folder: dict[str, str] | None, pending) -> None:
+        if by_folder is None:
+            found = [(None, ROOT)]
+        else:
+            found = [(disk, f"{ROOT}/{folder}") for folder, disk in by_folder.items()]
+        disks, self.paused = [], set()
+        for disk, mount in found:
+            buf = write_buffer(mount)
+            if buf is None:
+                continue
+            m = self.meters.setdefault(disk, Meter(moved=now))
+            d = {"disk": disk, **m.update(now, *buf)}
+            disks.append(d)
+            if d["paused"]:
+                self.paused.add(disk)
+        for path in pending:
+            where = place(path, by_folder)
+            if where is not None and where[0] in self.paused:
+                self.outage.add(path)
+        try:
+            tmp = UPLOADS_STATE.with_suffix(".tmp")
+            tmp.write_text(json.dumps({"at": now, "disks": disks}))
+            tmp.replace(UPLOADS_STATE)
+        except OSError:
+            pass
+
+    def track(self, db, now: float, settled: list[dict], pending, by_folder) -> None:
+        """Records the writes that closed, forgets those written again, checks the rest."""
+        closed = []
+        for e in settled:
+            if (
+                "done" not in e
+                or e["kind"] != "file"
+                or e["op"] not in ("added", "written", "replaced")
+            ):
+                continue
+            where = place(e["path"], by_folder)
+            if where is None or hidden(where[1]):
+                continue
+            outage = e["path"] in self.outage
+            self.outage.discard(e["path"])
+            closed.append(
+                (e["path"], where[0], where[1], stat_size(e["path"]), e["done"], int(outage))
+            )
+        known = self._known(db) if pending else set()
+        again = [p for p in pending if p in known]
+        if closed or again:
+            with db:
+                db.executemany(
+                    "INSERT OR REPLACE INTO uploads"
+                    " (abs, disk, path, size, closed, outage, state, reason, checked)"
+                    " VALUES (?, ?, ?, ?, ?, ?, 'checking', NULL, 0)",
+                    closed,
+                )
+                db.executemany("DELETE FROM uploads WHERE abs = ?", [(p,) for p in again])
+        if now - self.last_check >= 2:
+            self.last_check = now
+            check(db, now)
+
+    def _known(self, db) -> set[str]:
+        return {r[0] for r in db.execute("SELECT abs FROM uploads")}
+
+
+def check(db, now: float, judge=verdict) -> None:
+    """
+    Gives each closed write its outcome once the Finder is done with it, keeps checking the
+    incomplete ones (finished or replaced since) and drops the old ones.
+    """
+    rows = db.execute(
+        "SELECT abs, outage, state FROM uploads"
+        " WHERE (state = 'checking' AND closed <= ?)"
+        " OR (state IN ('incomplete', 'check') AND checked <= ?)",
+        (now - CHECK_AFTER, now - RECHECK),
+    ).fetchall()
+    with db:
+        for abs_path, outage, state in rows:
+            size = stat_size(abs_path)
+            out = judge(abs_path, size, bool(outage))
+            if out is None:
+                db.execute("DELETE FROM uploads WHERE abs = ?", (abs_path,))
+            elif state == "check" and out[0] == "check":
+                db.execute("UPDATE uploads SET checked = ? WHERE abs = ?", (now, abs_path))
+            else:
+                db.execute(
+                    "UPDATE uploads SET state = ?, reason = ?, size = ?, checked = ? WHERE abs = ?",
+                    (*out, size, now, abs_path),
+                )
+        db.execute(
+            "DELETE FROM uploads WHERE (state = 'done' AND checked < ?) OR closed < ?",
+            (now - DONE_KEEP, now - FORGET),
+        )
+
+
+def list_uploads() -> dict:
+    """
+    Each disk's upload and the outcome of each file this Mac wrote, for the panel: "checking"
+    for the first seconds after the close, then done, incomplete or check.
+    """
+    try:
+        meters = json.loads(UPLOADS_STATE.read_text())
+        disks = meters["disks"] if time.time() - meters["at"] < 30 else []
+    except (OSError, ValueError, KeyError, TypeError):
+        disks = []
+    with closing(connect()) as db:
+        rows = db.execute(
+            "SELECT disk, path, size, closed, state, reason FROM uploads"
+            " WHERE state != 'dismissed' ORDER BY closed"
+        ).fetchall()
+    keys = ("disk", "path", "size", "closed", "state", "reason")
+    return {"disks": disks, "files": [dict(zip(keys, r, strict=True)) for r in rows]}
+
+
+def upload_dismiss(m: Mount, path: str) -> dict:
+    """Stops showing an upload's outcome; the file is left as it is."""
+    with closing(connect()) as db, db:
+        n = db.execute(
+            "UPDATE uploads SET state = 'dismissed' WHERE disk IS ? AND path = ?", (m.disk, path)
+        ).rowcount
+    return {"disk": m.disk, "path": path, "done": n > 0}
+
+
+def upload_remove(m: Mount, path: str) -> dict:
+    """
+    Deletes a copy this Mac left incomplete: it goes to the disk's trash like any delete,
+    so it can be put back. Only a file recorded as incomplete, never anything else.
+    """
+    if not m.writable:
+        raise PermissionError(errno.EROFS, "the disk is read-only on this Mac", m.path)
+    abs_path = os.path.join(m.path, path)
+    with closing(connect()) as db:
+        row = db.execute("SELECT state FROM uploads WHERE abs = ?", (abs_path,)).fetchone()
+        if row is None or row[0] != "incomplete":
+            return {"disk": m.disk, "path": path, "done": False, "reason": "not_incomplete"}
+        with suppress(FileNotFoundError):
+            os.unlink(abs_path)
+        with db:
+            db.execute("DELETE FROM uploads WHERE abs = ?", (abs_path,))
+    return {"disk": m.disk, "path": path, "done": True, "reason": None}
 
 
 # The trash. JuiceFS moves a deleted or replaced entry to <mount>/.trash/<hour>/, the hour
@@ -817,7 +1130,11 @@ def main(argv: list[str]) -> int:
             print("usage: floppy-activity list [--after ID] [--limit N]", file=sys.stderr)
             return 2
         out = list_events(int(opts.get("--after", 0)), int(opts.get("--limit", 1000)))
-        print(json.dumps({**out, "writing": list_writing(), "open": list_open()}))
+        print(
+            json.dumps(
+                {**out, "writing": list_writing(), "open": list_open(), "uploads": list_uploads()}
+            )
+        )
     elif cmd == "trash" and not args:
         print(json.dumps({"disks": [list_trash(m, scan_trash(m.path)) for m in mounts()]}))
     elif cmd == "restore" and len(args) >= 2 and all(TRASH_ID.match(a) for a in args[1:]):
@@ -828,6 +1145,29 @@ def main(argv: list[str]) -> int:
             out = restore_many(m, args[1:], scan_trash(m.path))
             for r in out["restored"]:
                 notify("added", os.path.join(m.path, r["path"]))
+            print(json.dumps(out))
+        except OSError as e:
+            print(f"floppy-activity: {e.strerror}", file=sys.stderr)
+            return 1
+    elif cmd in ("upload-dismiss", "upload-remove") and len(args) == 1:
+        try:
+            body = json.loads(sys.stdin.read(65536))
+        except ValueError:
+            body = None
+        path = inside(body.get("path")) if isinstance(body, dict) else None
+        if path is None or hidden(path):
+            print(f'floppy-activity: {cmd} wants {{"path"}} in the disk', file=sys.stderr)
+            return 2
+        m = mounted(args[0])
+        if m is None:
+            return 1
+        try:
+            if cmd == "upload-dismiss":
+                out = upload_dismiss(m, path)
+            else:
+                out = upload_remove(m, path)
+                if out["done"]:
+                    notify("removed", os.path.join(m.path, path))
             print(json.dumps(out))
         except OSError as e:
             print(f"floppy-activity: {e.strerror}", file=sys.stderr)
@@ -858,7 +1198,7 @@ def main(argv: list[str]) -> int:
     else:
         print(
             "usage: floppy-activity run|list [--after ID] [--limit N]|trash"
-            "|restore DISK ID...|rename-back DISK",
+            "|restore DISK ID...|rename-back DISK|upload-dismiss DISK|upload-remove DISK",
             file=sys.stderr,
         )
         return 2
