@@ -60,6 +60,9 @@
        dei tre puntini come quelle dei dischi.
     c2 solo sulla riga: nessun avviso nello stato; il file incompleto compare da solo sotto il suo
        progetto, con il suo menu. Lo segnalano il faceplate rosso, la riga del disco e la notifica.
+  Giro 3: il titolo non cambia per una copia incompleta. Il titolo dice lo stato di Floppy e
+  cambia solo quando Floppy non funziona del tutto (oggi "1 disco con un problema"); un file da
+  ricopiare è un fatto del progetto, e lo dicono le sue righe. "Floppy è collegato" resta.
 
   Dati: nomi dei file sul modello di un disco vero (clip della Sony, export di CapCut,
   registrazioni dello schermo); dimensioni vere, velocità di una linea da 40 Mbit/s
@@ -426,9 +429,6 @@ function checkNotice(r) {
 // The status section's title and body, per variant.
 function statusCopy(v, sc, sub = v) {
   const c = counts(sc.rows);
-  if ((sub === 'c1' || sub === 'c2') && c.failed.length && !state.hidden) {
-    return { t: '1 copia non completata', b: sub === 'c1' ? 'Gli altri file sono su Floppy.' : `${c.failed[0].f.name} è arrivato a metà: lo trovi qui sotto, nel suo progetto.` };
-  }
   if (v === 'b') {
     if (c.failed.length) return { t: c.failed.length === 1 ? '1 copia non completata' : `${c.failed.length} copie non completate`, b: c.done ? `Gli altri ${c.done} file sono su Floppy. Questo va copiato di nuovo:` : 'Va copiata di nuovo:' };
     if (sc.paused) return { t: 'Caricamento in pausa', b: `Il Mac non raggiunge Floppy: riprendo da solo appena torna la connessione. Mancano ${gb(sc.pending)}; lascia il Mac acceso.` };
