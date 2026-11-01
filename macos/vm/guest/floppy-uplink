@@ -11,9 +11,13 @@ metadata's) before the many of the blocks, and not in the router.
 
 Nobody knows the line's speed, and it changes (Wi-Fi, a colleague's upload), so it is found as
 cake-autorate does: a host past the router is pinged five times a second; while the round trip
-stays near its minimum and the uploads fill the shaped rate, the rate grows, fast far below the
-last rate that queued and slowly near it; when the round trip grows, the router's queue is
+stays near its minimum and cake is holding the uploads back, the rate grows, fast far below the
+last rate that queued and slowly near it; when the round trip stays up, the router's queue is
 filling, and the rate drops to the line's speed estimated from how fast the queue grew.
+Two signals are deliberately not used. What goes through is not compared to the rate: with a
+real round trip cake carries 70-82% of it (35 of 50 Mbit/s, 165 of 200, to OVH), and growth
+gated on 80% never came. One tick's high round trip is not a queue: Wi-Fi adds 60-85 ms for
+half a second every ten or so, and cutting on it took a 664 Mbit/s line down to 4.
 "Grows" is 60 ms over the minimum (BLOAT_MS): a fast path's own delay reaches 30 ms at a few
 hundred Mbit/s, and a threshold there held a 500 Mbit/s line at half its speed, while 60 ms
 of queue is nothing to a metadata command with 5 s to answer.
@@ -230,6 +234,13 @@ class Shaper:
         run("ip", "link", "del", IFB, check=False)
         self.dev = None
 
+    def overlimits(self) -> int:
+        """How many times cake has held a packet back for the rate: the shaper is the limit."""
+        m = re.search(
+            r"overlimits (\d+)", run("tc", "-s", "qdisc", "show", "dev", IFB, check=False)
+        )
+        return int(m.group(1)) if m else 0
+
     def sent_bytes(self) -> int:
         try:
             return int(Path(f"/sys/class/net/{IFB}/statistics/tx_bytes").read_text())
@@ -296,23 +307,28 @@ class Rate:
         """A new reflector: its round trip and the line behind it are unknown."""
         self.ceiling = self.base = self.delta = self.prev_delta = 0.0
 
-    def step(self, rtts: list[float], sent_mbps: float, now: float) -> float:
-        if rtts:
-            # The lowest of the tick: a queue raises every sample, jitter only some. The base is
-            # learned on a quiet line, as at the VM's start; started under a standing queue it
-            # takes that queue for the line's own round trip until the queue drains once.
-            low = min(rtts)
-            self.base = (
-                low
-                if self.base == 0.0 or low < self.base
-                else self.base + (low - self.base) * 0.002
-            )
-            self.prev_delta, self.delta = self.delta, low - self.base
+    def step(self, rtts: list[float], sent_mbps: float, now: float, limited: bool = False) -> float:
+        """The next rate, from the tick's round trips, what went through (Mbit/s) and whether
+        cake held packets back during it."""
         self.sent = self.sent * 0.7 + sent_mbps * 0.3
         # Uploading at all is enough: the rate may be far above the line (learned on a faster
         # one), and then what gets through is a small part of it.
         busy = self.sent >= 1.0
-        if rtts and self.delta > self.bloat and busy and now - self.last_decrease >= REFRACTORY:
+        if rtts:
+            # The lowest of the tick: a queue raises every sample, jitter only some. The base is
+            # learned on a quiet line, as at the VM's start; started under a standing queue it
+            # takes that queue for the line's own round trip until the queue drains once. It
+            # rises (a longer route) only while nothing is uploaded: during a long copy it would
+            # creep up to the queue's round trip, and each queue would pass for the line's own.
+            low = min(rtts)
+            if self.base == 0.0 or low < self.base:
+                self.base = low
+            elif not busy:
+                self.base += (low - self.base) * 0.002
+            self.prev_delta, self.delta = self.delta, low - self.base
+        # A queue persists: two ticks in a row, or a spike of Wi-Fi's would cut the rate.
+        queued = self.delta > self.bloat and self.prev_delta > self.bloat
+        if rtts and queued and busy and now - self.last_decrease >= REFRACTORY:
             slope = (self.delta - self.prev_delta) / 1000 / TICK
             # The queue grows at (rate - line) / line seconds per second; with the router's
             # queue full, what gets through is the line.
@@ -320,11 +336,17 @@ class Rate:
             self.ceiling = min(self.rate, self.sent)
             self.rate = max(self.min, min(line * 0.9, self.sent * 0.9, self.rate * 0.95))
             self.last_decrease = now
-        elif rtts and self.delta < self.bloat / 2 and sent_mbps >= 0.8 * self.rate:
+        elif rtts and self.delta < self.bloat / 2 and limited:
             if self.ceiling and self.rate > 1.2 * self.ceiling:
                 self.ceiling = 0.0  # well past the last queue without one: the line is faster now
-            near = self.ceiling and self.rate >= 0.9 * self.ceiling
-            self.rate = min(self.max, self.rate * (1.02 if near else 1.25))
+            if self.ceiling and self.rate >= 0.9 * self.ceiling:
+                grown = self.rate * 1.02
+            else:
+                # Fast up to the last rate that queued, never past it in one step.
+                grown = self.rate * 1.25
+                if self.ceiling:
+                    grown = min(grown, self.ceiling)
+            self.rate = min(self.max, grown)
         return self.rate
 
     def state(self) -> dict[str, float]:
@@ -368,7 +390,8 @@ def serve() -> None:
     pinger: Pinger | None = None
     last_search = last_peers = 0.0
     last_saved, saved_at = rate.rate, time.monotonic()
-    sent = 0
+    sent = overlimits = 0
+    last_tick = 0.0
     stopping = False
 
     def stop(*_: object) -> None:
@@ -401,12 +424,13 @@ def serve() -> None:
                         pinger = Pinger(host)
                         rate.reset()
                         shaper.install(dev, rate.rate, local)
-                        sent = shaper.sent_bytes()
+                        sent, overlimits, last_tick = shaper.sent_bytes(), shaper.overlimits(), now
                         break
             if pinger is not None:
-                total = shaper.sent_bytes()
-                shaper.set(rate.step(pinger.samples(), max(total - sent, 0) * 8 / TICK / 1e6, now))
-                sent = total
+                total, held = shaper.sent_bytes(), shaper.overlimits()
+                mbps = max(total - sent, 0) * 8 / max(now - last_tick, TICK) / 1e6
+                shaper.set(rate.step(pinger.samples(), mbps, now, held > overlimits))
+                sent, overlimits, last_tick = total, held, now
                 write_json(STATE, {"device": shaper.dev, "reflector": pinger.host, **rate.state()})
                 if rate.rate != last_saved and now - saved_at >= 30:
                     save(rate.rate)
