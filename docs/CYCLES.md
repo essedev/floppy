@@ -2,6 +2,15 @@
 
 Log of the work done, most recent first. Plans are in [ROADMAP.md](ROADMAP.md), the reasons behind the choices in [ARCHITECTURE.md](ARCHITECTURE.md).
 
+## 15. Big copies on slow lines (31/10-01/11/2026)
+
+- **The failure reproduced**: a tester's big videos failed halfway with "write: Invalid argument". On the local stack, at 10 Mbps with a 2 s router queue, JuiceFS's 20 parallel uploads held the metadata's commands up to 12 s behind the blocks, past its 5 s write timeout, and the copy failed with "Operation timed out"; at 40 Mbps with 3 s they waited 3.5 s.
+- **The bench**: `deploy/local/upload-bench.py` copies to a team disk on the development VM under netem lines (10 to 500 Mbps, short and long router queues, a 60 s outage), or to a real bucket with `STACK=manual`, and checks the copy, the line's use, the metadata's wait, memory and whether the Mac slept; each run keeps a trace of the controller's state.
+- **Uploads shaped under the line** (DECISIONS #30): `floppy-uplink` in the VM, cake at a rate found from the round trip to a host JuiceFS talks to. The metadata's wait fell to 92-112 ms on the slow lines, the copy at 83-89% of the line; a fixed `--max-uploads 4` left 2.4 s at 10 Mbps and cut a real line to OVH from 664 to 178 Mbps. Its first version passed every simulated line and fell to 4 Mbps on the real one: Wi-Fi's one-tick delay spikes cut the rate, and a shaper carrying 70-82% of its rate never met the growth condition. Fixed, it gave 576 Mbps there; a simulated Wi-Fi line and a long copy are now in `macos/tests/uplink_test.py`.
+- **Memory**: at 500 Mbps the kernel killed Samba and the services, not JuiceFS, which sets its own OOM score to -1000. JuiceFS now runs under `GOMEMLIMIT`, a share of the VM's memory per mounted disk, with the write buffer at two thirds of it.
+- **The Mac awake**: idle sleep stopped the VM mid-upload, twice during the bench, and a copy across it failed with an I/O error. The app holds `caffeinate -i` while this Mac writes to a disk or makes something available, and two minutes after.
+- **Next**: release 0.2.7 with these and the Finder-forbidden characters fix, then the tester's logs after it (ROADMAP 2).
+
 ## 14. Claude on Floppy (22/10/2026)
 
 - **Two servers and one skill** (DECISIONS #29): the team's state is on the control plane and a Mac's copies are in its VM, which the control plane never reaches, so Claude gets `floppy` (the team) and `floppy-mac` (this Mac), and one skill (`server/src/floppy_server/mcp/SKILL.md`) that tells them apart.
