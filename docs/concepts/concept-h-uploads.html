@@ -1,0 +1,545 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Concept H - i caricamenti nel pannello</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<!--
+  Concept H: come il pannello dice a chi copia su Floppy cosa sta caricando, cosa aspetta e
+  cosa non è arrivato.
+  Tasti: x a b c per la variante, t tema, p nasconde la barra; gli scenari si scelgono coi
+  bottoni sopra il pannello.
+
+  Il problema, misurato il 01/11/2026 sul Mac di sviluppo:
+  - Le copie di questo Mac non si vedono: il pannello mostra solo i file in arrivo dai colleghi.
+  - La barra del Finder arriva in fondo prima del tempo: JuiceFS prende i dati in memoria e li
+    invia dopo, così una copia "finita" ha ancora centinaia di MB da mandare (500 MB passati al
+    disco in 15 s, inviati in 100 s a 40 Mbit/s).
+  - Senza linea il caricamento aspetta e riprende da solo (una copia da 500 MB con 60 s di
+    interruzione è arrivata intera, verificata col checksum). Lo stato "in pausa" esiste.
+  - Una copia del Finder che fallisce lascia il file troncato col nome giusto: 688 MB di 2 GB,
+    al suo posto nella cartella. Il Finder lo marca come copia in corso (tipo "brok", icona
+    grigia) e la marca resta; una copia riuscita la toglie. Chi monta in CapCut lo trova lì e
+    non sa che è rotto.
+  - Le clip della Sony (C0272.MP4, 8,8 GB) e le registrazioni dello schermo hanno l'indice
+    (moov) in fondo, gli export di CapCut in cima: in entrambi i casi un video troncato si
+    riconosce dalle dimensioni interne che non tornano con quella del file.
+
+  X  oggi: le copie di questo Mac non compaiono; un fallimento lo dice solo il dialogo del Finder.
+  A  lista: una sezione "In caricamento" sotto lo stato, una riga per file con il suo stato,
+     come i download di un browser.
+  B  una risposta: lo stato in cima risponde a "posso chiudere il Mac?" (cosa manca e quanto),
+     il faceplate riempie lo slot con l'invio; i file si aprono solo a richiesta.
+  C  sul progetto: niente sezione nuova, il caricamento sta sulla riga del progetto di
+     destinazione, come gli arrivi dei colleghi; i file si vedono aprendo il disco.
+
+  In tutte, per i casi gravi: una notifica di macOS a caricamento finito (solo se il pannello
+  è chiuso) e per una copia non completata, e un avviso nel pannello che resta finché il file
+  non viene ricopiato, eliminato o nascosto.
+
+  Mappatura sul codice di oggi (fattibilità, non piano):
+  - Poggia su: i file aperti in scrittura che floppy-activity già legge da Samba (la tabella
+    writing, oggi solo per i colleghi), la dimensione del file mentre cresce, le metriche di
+    JuiceFS per disco (juicefs_used_buffer_size_bytes: scritto e non ancora inviato;
+    juicefs_object_request_data_bytes_PUT: inviato, da cui la velocità), il modo del disco
+    (collegato, sola lettura, offline) per la pausa.
+  - Nuovo nella VM: alla chiusura di un file, la marca "brok" del Finder letta dallo xattr
+    user.DosStream.AFP_AfpInfo:$DATA (byte 16-19), e per .mov/.mp4/.m4v il controllo degli
+    atomi; un registro dei caricamenti recenti con il loro esito, servito da `floppy activity`.
+  - Nuovo nell'app: lo stato dei caricamenti nello snapshot dell'attività, la sezione o la riga,
+    le notifiche, "Elimina la copia incompleta" (finisce nel cestino di Floppy, recuperabile).
+  - Il tempo che manca è per disco, non per file: JuiceFS non dice quanto di un singolo file
+    è ancora in memoria. Per file si sa quanto è stato scritto e se è chiuso.
+
+  Dati: nomi dei file sul modello di un disco vero (clip della Sony, export di CapCut,
+  registrazioni dello schermo); dimensioni vere, velocità di una linea da 40 Mbit/s
+  come quella misurata. Lo scenario "Tanti file" (48 clip di una scheda) è inventato.
+-->
+<style>
+:root {
+  color-scheme: light;
+  --f-ui: "Schibsted Grotesk", -apple-system, sans-serif;
+  --f-ro: ui-monospace, "SF Mono", Menlo, monospace;
+  --page: #e6e3dc; --surface: #f4f2ed; --raised: #fbfaf7; --sunken: #ebe8e1; --line: #dcd8cf;
+  --ink: #1d1c1a; --ink-2: #625f58; --ink-3: #706c64;
+  --track: #e2ded6; --idle: #c9c5bb;
+  --led-ok: #2fbf57; --led-dl: #ff5b1f; --led-err: #ff3b24;
+  --bezel: #dcd8ce; --bezel-lift: rgba(255,255,255,.55);
+  --pop-shadow: 0 0 0 0.5px rgba(40,30,20,.18), inset 0 1px 0 rgba(255,255,255,.7), 0 34px 70px -24px rgba(50,35,20,.5);
+  --menu: #fbfaf7; --menu-shadow: 0 0 0 0.5px rgba(40,30,20,.22), 0 18px 40px -12px rgba(50,35,20,.45);
+  --nb-bg: rgba(246,245,242,.92); --nb-line: rgba(0,0,0,.1);
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #121211; --surface: #1d1c1a; --raised: #262522; --sunken: #161514; --line: #2f2d29;
+  --ink: #efece5; --ink-2: #a29e95; --ink-3: #8f8b83;
+  --track: #2a2926; --idle: #44423d;
+  --led-ok: #3fdc6c; --led-dl: #ff6a2e; --led-err: #ff4b33;
+  --bezel: #0f0f0e; --bezel-lift: rgba(255,255,255,.06);
+  --pop-shadow: 0 0 0 0.5px rgba(0,0,0,.8), inset 0 1px 0 rgba(255,255,255,.06), 0 34px 70px -24px rgba(0,0,0,.8);
+  --menu: #302e2b; --menu-shadow: 0 0 0 0.5px rgba(255,255,255,.08), 0 0 0 1px rgba(0,0,0,.6), 0 18px 40px -10px rgba(0,0,0,.85);
+  --nb-bg: rgba(44,43,40,.94); --nb-line: rgba(255,255,255,.1);
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { min-height: 100vh; background: var(--page); color: var(--ink); font: 14px/1.45 var(--f-ui); }
+[hidden] { display: none !important; }
+button { font: inherit; cursor: pointer; }
+
+/* Concept chrome: not part of the design. */
+.switch { position: sticky; top: 0; z-index: 100; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 8px 12px; background: #111; color: #aaa; font: 12px/1.4 var(--f-ro); }
+.switch button { border: 0; padding: 5px 9px; border-radius: 6px; background: #262626; color: #eee; }
+.switch button[aria-pressed='true'] { background: #eee; color: #111; }
+.switch p { margin: 0 0 0 8px; flex: 1 1 240px; min-width: 0; }
+body[data-chrome='off'] .switch, body[data-chrome='off'] .scen { display: none; }
+
+.stage { display: grid; grid-template-columns: 352px minmax(260px, 1fr); gap: 36px; padding: 28px 32px 80px; align-items: start; }
+.scen { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px; }
+.scen button { border: 0; padding: 6px 11px; border-radius: 8px; background: var(--sunken); color: var(--ink-2); font-size: 13px; font-weight: 500; }
+.scen button[aria-pressed='true'] { background: var(--ink); color: var(--surface); }
+.side { max-width: 62ch; color: var(--ink-2); font-size: 13.5px; }
+.side h2 { margin: 0 0 6px; color: var(--ink); font-size: 16px; }
+.side p { margin: 0 0 10px; }
+.side .finder { margin-top: 16px; padding: 12px 14px; border-radius: 12px; background: var(--sunken); }
+.side .finder b { color: var(--ink); }
+
+/* The panel, values from app/src (Panel.tsx, ui.tsx, tokens.css). */
+.panel { width: 352px; background: var(--surface); border-radius: 20px; box-shadow: var(--pop-shadow); overflow: hidden; position: relative; }
+.face { margin: 8px 8px 0; display: block; }
+.status { display: flex; flex-direction: column; gap: 16px; padding: 20px 20px 22px; }
+.status h1 { margin: 0; font-size: 20px; line-height: 1.2; font-weight: 700; letter-spacing: -.02em; }
+.status .body { margin: 4px 0 0; font-size: 13.5px; color: var(--ink-2); }
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; white-space: nowrap; border: 0; }
+.btn.primary { background: var(--ink); color: var(--surface); font-weight: 600; }
+.btn.soft { background: var(--sunken); color: var(--ink); font-weight: 600; }
+.btn.raised { background: var(--raised); color: var(--ink); font-weight: 600; box-shadow: 0 0 0 .5px rgba(0,0,0,.12); }
+.btn.ghost { background: transparent; color: var(--ink-2); font-weight: 500; }
+.btn.lg { height: 44px; padding: 0 16px; font-size: 14px; border-radius: 12px; flex: 1; }
+.btn.sm { height: 30px; padding: 0 11px; font-size: 12.5px; border-radius: 8px; }
+.btn.md { height: 36px; padding: 0 13px; font-size: 13px; border-radius: 10px; }
+.notice { display: flex; align-items: flex-start; gap: 10px; padding: 12px 14px; background: var(--sunken); border-radius: 10px; font-size: 13px; line-height: 1.45; }
+.notice b.t { display: block; font-weight: 700; }
+.notice .acts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.notice .mono { font: 11.5px var(--f-ro); color: var(--ink-2); }
+.confirm { border-radius: 12px; background: var(--raised); padding: 14px; box-shadow: 0 0 0 .5px rgba(0,0,0,.12), 0 12px 28px -12px rgba(40,30,20,.35); }
+.confirm b { display: block; font-size: 14px; margin-bottom: 4px; }
+.confirm p { margin: 0 0 12px; font-size: 13px; color: var(--ink-2); }
+.confirm .row2 { display: flex; gap: 8px; }
+.confirm .row2 .btn { flex: 1; }
+
+.led { display: inline-grid; place-items: center; flex: none; width: 14px; height: 14px; border-radius: 50%; background: var(--bezel); box-shadow: inset 0 1px 1.5px rgba(0,0,0,.35), 0 1px 0 var(--bezel-lift); }
+.led::after { content: ""; width: 7px; height: 7px; border-radius: 50%; background: rgba(138,134,125,.35); }
+.led[data-s="ok"]::after { background: var(--led-ok); }
+.led[data-s="dl"]::after { background: var(--led-dl); }
+.led[data-s="err"]::after { background: var(--led-err); }
+.led[data-s]::after { box-shadow: inset 0 1px 1px rgba(255,255,255,.55), inset 0 -1px 1px rgba(0,0,0,.25); }
+.led[data-blink]::after { animation: blink 1.1s steps(2, jump-none) infinite; }
+@keyframes blink { 50% { opacity: .15; } }
+.face-blink { animation: blink 1.1s steps(2, jump-none) infinite; }
+@media (prefers-reduced-motion: reduce) { .led[data-blink]::after, .face-blink { animation: none; } }
+.ro { font: 11px var(--f-ro); text-transform: uppercase; letter-spacing: .04em; color: var(--ink-2); white-space: nowrap; }
+.slot-mark { display: inline-block; flex: none; width: 12px; height: 4px; border-radius: 2px; background: var(--ink-3); box-shadow: inset 0 1px 1px rgba(0,0,0,.3); margin-right: 10px; }
+
+.space { padding: 0 20px 18px; }
+.space .h, .sec-h { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; font-size: 11px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3); margin-bottom: 12px; }
+.space .h b, .sec-h b { font: 12px var(--f-ro); font-weight: 400; letter-spacing: .02em; text-transform: none; color: var(--ink); }
+.legend { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.legend li { display: flex; align-items: center; font-size: 12.5px; }
+.legend li span:nth-child(2) { flex: 1; color: var(--ink-2); }
+.legend li span:last-child { font: 12px var(--f-ro); }
+
+.list { margin: 0 8px; background: var(--sunken); border-radius: 14px; padding: 14px 4px 6px; }
+.list .sec-h { padding: 0 12px; margin-bottom: 4px; color: var(--ink-2); }
+.drow { position: relative; display: flex; align-items: center; min-height: 48px; padding: 0 4px 0 12px; border-radius: 10px; }
+.drow .b { flex: 1; min-width: 0; padding: 6px 0; }
+.drow .n { font-size: 13px; font-weight: 500; display: flex; align-items: center; gap: 4px; }
+.drow .l { display: block; margin-top: 1px; font-size: 12px; line-height: 1.35; color: var(--ink-2); }
+.drow .led { margin-right: 9px; margin-left: -1px; }
+.drow .ro { margin: 0 4px 0 12px; }
+.dots { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 8px; color: var(--ink-2); flex: none; }
+.tree { margin: 0 0 4px 18px; padding-left: 8px; border-left: 1px solid var(--line); }
+.frow { display: flex; align-items: center; min-height: 36px; padding: 0 4px 0 10px; border-radius: 10px; }
+.frow .b { flex: 1; min-width: 0; padding: 4px 0; }
+.frow .n { display: block; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.frow .l { display: block; font-size: 12px; line-height: 1.35; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.frow .led { margin-right: 9px; margin-left: -1px; }
+.frow .ro { margin: 0 4px 0 8px; }
+svg.i { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+.ficon { color: var(--ink-3); margin-right: 8px; }
+
+/* Upload rows (A, and the list B opens, and C's files). */
+.up { padding: 0 8px; }
+.urow { display: flex; align-items: flex-start; gap: 9px; padding: 8px 6px 8px 8px; border-radius: 10px; }
+.urow .led { margin-top: 2px; }
+.urow .b { flex: 1; min-width: 0; }
+.urow .n { display: block; font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.urow .l { display: block; font-size: 12px; line-height: 1.35; color: var(--ink-2); }
+.urow .ro { margin-top: 1px; }
+.bar { position: relative; height: 4px; margin-top: 6px; border-radius: 2px; background: var(--track); overflow: hidden; }
+.bar i { position: absolute; inset: 0 auto 0 0; border-radius: 2px; background: var(--ink-3); }
+.more { display: block; width: 100%; border: 0; background: transparent; text-align: left; padding: 6px 8px 8px 31px; font-size: 12.5px; font-weight: 600; color: var(--ink); text-decoration: underline; text-underline-offset: 2px; }
+.uphead { display: flex; gap: 8px; white-space: nowrap; align-items: baseline; justify-content: space-between; padding: 0 20px; margin-bottom: 6px; font-size: 11px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3); }
+.uphead b { font: 12px var(--f-ro); font-weight: 400; letter-spacing: .02em; text-transform: none; color: var(--ink); }
+.upwrap { padding-bottom: 14px; }
+.toggle { border: 0; background: transparent; padding: 0; font-size: 13px; font-weight: 600; color: var(--ink); text-decoration: underline; text-underline-offset: 2px; align-self: flex-start; }
+
+footer.f { display: flex; align-items: center; gap: 6px; padding: 10px 10px 10px 20px; font-size: 12px; color: var(--ink-3); }
+footer.f .v { margin-right: auto; font: 12px var(--f-ro); }
+
+/* A macOS notification, for the cases that send one. */
+.nb { position: fixed; top: 54px; right: 18px; z-index: 50; width: 344px; display: grid; grid-template-columns: 38px 1fr auto; gap: 10px; align-items: start; padding: 11px 13px; border-radius: 16px; background: var(--nb-bg); backdrop-filter: blur(24px) saturate(1.6); -webkit-backdrop-filter: blur(24px) saturate(1.6); box-shadow: 0 0 0 .5px var(--nb-line), 0 12px 32px -8px rgba(0,0,0,.35); font: 13px/1.35 -apple-system, "SF Pro Text", sans-serif; color: var(--ink); }
+.nb .ic { width: 38px; height: 38px; border-radius: 9px; background: linear-gradient(#3a3835, #1c1b19); display: grid; place-items: center; }
+.nb .ic::after { content: ""; width: 10px; height: 10px; border-radius: 50%; background: var(--nb-led, #3fdc6c); }
+.nb b { display: block; font-weight: 600; }
+.nb small { color: var(--ink-2); font-size: 12px; }
+</style>
+</head>
+<body data-v="x">
+<div class="switch">
+  <span data-buttons></span>
+  <p data-desc></p>
+  <button data-theme-toggle>t tema</button>
+</div>
+
+<main class="stage">
+  <div class="scen" data-scen></div>
+  <div data-panel></div>
+  <aside class="side" data-side></aside>
+</main>
+<div data-notif></div>
+
+<script>
+const DESC = {
+  x: 'oggi: le copie di questo Mac non si vedono, un fallimento lo dice solo il Finder',
+  a: 'lista: una sezione "In caricamento" con una riga per file e il suo stato, come i download di un browser',
+  b: 'una risposta: lo stato in cima dice se si può chiudere il Mac e quanto manca; i file a richiesta',
+  c: 'sul progetto: il caricamento sta sulla riga del progetto di destinazione, come gli arrivi dei colleghi',
+};
+
+// Scenarios: one copy session seen at different moments. Sizes in MB.
+const LINE = 40; // Mbit/s
+const files = {
+  sony: { name: 'C0272.MP4', size: 8792 },
+  sony2: { name: 'C0315.MP4', size: 1007 },
+  pill: { name: 'Montaggio finale.mp4', size: 139 },
+  rec: { name: 'Registrazione schermo 2026-10-26 alle 13.16.21.mov', size: 412 },
+  zip: { name: 'Grafiche Spot Natale.zip', size: 236 },
+};
+const PROJECT = 'Marketing / growth';
+const SCEN = {
+  up: {
+    label: 'In caricamento',
+    // st: sending (written, being uploaded), writing (the Mac is still writing), done, failed, check
+    rows: [
+      { f: files.sony, st: 'sending', written: 8792 },
+      { f: files.sony2, st: 'writing', written: 420 },
+      { f: files.pill, st: 'done' },
+    ],
+    pending: 1520, paused: false,
+    side: ['Tre clip copiate dal Finder nel progetto. Per la prima il Finder ha già finito: la sua barra è arrivata in fondo, ma 1,1 GB sono ancora nella VM da inviare. La seconda la sta ancora copiando.', 'Il Finder: la prima copia sembra finita, la seconda è a metà. Nessuno dice che il Mac deve restare acceso.'],
+  },
+  pause: {
+    label: 'In pausa',
+    rows: [
+      { f: files.sony, st: 'sending', written: 8792 },
+      { f: files.sony2, st: 'writing', written: 610 },
+      { f: files.pill, st: 'done' },
+    ],
+    pending: 1330, paused: true,
+    side: ['La connessione è caduta da 40 secondi. JuiceFS tiene i dati e riprende da solo quando torna; il Finder resta fermo sulla copia ancora aperta.', 'Il Finder: la seconda copia si ferma. Se la connessione non torna entro qualche minuto, il Finder la dà per fallita e lascia il file a metà.'],
+  },
+  done: {
+    label: 'Caricato',
+    rows: [
+      { f: files.sony, st: 'done' },
+      { f: files.sony2, st: 'done' },
+      { f: files.pill, st: 'done' },
+    ],
+    pending: 0, paused: false, notif: 'done',
+    side: ['Tutto inviato. Per i video Floppy ha anche controllato che il file sia intero (la struttura del video torna con la sua dimensione). Le righe restano 10 minuti, poi passano nell\'Attività.', 'Una notifica di macOS arriva solo se il pannello è chiuso: chi ha lasciato il Mac a caricare sa che può chiuderlo.'],
+  },
+  failed: {
+    label: 'Non completato',
+    rows: [
+      { f: files.sony, st: 'failed', written: 2148 },
+      { f: files.sony2, st: 'done' },
+      { f: files.pill, st: 'done' },
+    ],
+    pending: 0, paused: false, notif: 'failed',
+    side: ['La connessione è mancata per troppo tempo e il Finder ha rinunciato a C0272.MP4: sul disco c\'è un file con quel nome che contiene solo 2,1 GB di 8,8. Il Finder lo mostra con l\'icona grigia; CapCut lo apre e si ferma a metà.', 'Floppy lo riconosce dalla marca che il Finder lascia sui file non finiti, o per i video dalla struttura che non torna. L\'avviso resta finché il file non viene ricopiato, eliminato o nascosto. "Elimina la copia incompleta" lo manda nel cestino di Floppy: si può rimettere.'],
+  },
+  check: {
+    label: 'Da controllare',
+    rows: [
+      { f: files.zip, st: 'check' },
+      { f: files.pill, st: 'done' },
+    ],
+    pending: 0, paused: false,
+    side: ['Un file salvato da un\'app, non copiato dal Finder, e non un video: Floppy non ha modo di sapere se è intero, sa solo che la connessione è caduta mentre veniva scritto.', 'È il caso raro: un export di CapCut è un video, e una copia del Finder porta la sua marca. Qui il pannello chiede di aprirlo per controllare, senza dire che è rotto.'],
+  },
+  many: {
+    label: 'Tanti file',
+    rows: Array.from({ length: 48 }, (_, i) => ({ f: { name: `C${String(400 + i).padStart(4, '0')}.MP4`, size: 1200 }, st: i < 9 ? 'done' : i < 12 ? 'sending' : 'queued', written: i < 12 ? 1200 : 0 })),
+    pending: 41000, paused: false,
+    side: ['Una scheda intera: 48 clip, 56 GB. Il Finder le copia una dopo l\'altra; a 40 Mbit/s servono ore.', 'La lista non può crescere col numero di file: si vedono le righe che contano e un riassunto del resto.'],
+  },
+};
+
+const gb = (mb) => (mb >= 1000 ? `${(mb / 1000).toFixed(1).replace('.', ',')} GB` : `${Math.round(mb)} MB`);
+const eta = (mb) => {
+  const s = (mb * 8) / LINE;
+  if (s < 90) return 'meno di un minuto';
+  const m = Math.round(s / 60);
+  if (m < 60) return `circa ${m} minuti`;
+  const h = Math.floor(m / 60), r = Math.round((m % 60) / 10) * 10;
+  return `circa ${h} ${h === 1 ? 'ora' : 'ore'}${r ? ` e ${r} minuti` : ''}`;
+};
+// The time left in a header: "5 min", "2 h 20 min".
+const short = (mb) => {
+  const m = Math.max(1, Math.round((mb * 8) / LINE / 60));
+  return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h${m % 60 >= 10 ? ` ${Math.round((m % 60) / 10) * 10} min` : ''}`;
+};
+const I = {
+  folder: '<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>',
+  dots: '<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',
+  chev: '<path d="m9 6 6 6-6 6"/>',
+  ext: '<path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>',
+  info: '<circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>',
+  gear: '<path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/>',
+  globe: '<circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/>',
+  power: '<path d="M12 2v10"/><path d="M18.4 6.6a9 9 0 1 1-12.77.04"/>',
+};
+const svg = (n, cls = 'i') => `<svg class="${cls}" viewBox="0 0 24 24">${I[n]}</svg>`;
+const led = (s, blink) => `<span class="led"${s ? ` data-s="${s}"` : ''}${blink ? ' data-blink' : ''}></span>`;
+
+// The faceplate, geometry from app/src/components/Faceplate.tsx.
+const LEDC = { ok: '#3fdc6c', dl: '#ff6a2e', err: '#ff4b33', off: '#3a3834' };
+function face({ ledc, blink, readout, fill, right, activity }) {
+  const w = fill > 0 ? Math.max(6, Math.min(1, fill) * 206) : 0;
+  return `<svg viewBox="0 0 336 112" class="face" role="img" aria-label="${readout}">
+    <defs><linearGradient id="fg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3a3835"/><stop offset="1" stop-color="#1c1b19"/></linearGradient></defs>
+    <rect x=".5" y=".5" width="335" height="111" rx="12" fill="url(#fg)" stroke="#0f0f0e"/>
+    <rect x="1.5" y="1.5" width="333" height="109" rx="11" fill="none" stroke="#fff" stroke-opacity=".08"/>
+    <rect x="24" y="34" width="212" height="12" rx="6" fill="#0b0b0a"/>
+    ${w > 0 ? `<rect x="27" y="37" width="${w}" height="6" rx="3" fill="#d9d4c8"/>` : ''}
+    ${activity && w > 14 ? `<rect x="${27 + w - 14}" y="37" width="14" height="6" rx="3" fill="#d9d4c8" class="face-blink"/>` : ''}
+    <text x="24" y="76" font-family="Schibsted Grotesk" font-weight="800" font-size="15" letter-spacing="-.4" fill="#8f8b83">floppy</text>
+    <text x="236" y="76" text-anchor="end" font-family="ui-monospace, Menlo, monospace" font-size="11" fill="#b3aea5">${right}</text>
+    <circle cx="290" cy="40" r="10" fill="#0b0b0a"/>
+    <g class="${blink ? 'face-blink' : ''}"><circle cx="290" cy="40" r="5.5" fill="${LEDC[ledc]}"/><ellipse cx="290" cy="37.6" rx="2.6" ry="1.4" fill="#fff" opacity=".5"/></g>
+    <text x="290" y="76" text-anchor="middle" font-family="ui-monospace, Menlo, monospace" font-size="10" letter-spacing=".5" fill="#b3aea5">${readout}</text>
+  </svg>`;
+}
+
+// What one upload row says, shared by the variants.
+function rowLook(r, paused) {
+  switch (r.st) {
+    case 'writing': return { led: 'dl', blink: !paused, ro: paused ? 'In pausa' : 'In copia', line: `${gb(r.written)} di ${gb(r.f.size)} copiati`, prog: r.written / r.f.size };
+    case 'sending': return { led: 'dl', blink: !paused, ro: paused ? 'In pausa' : 'In invio', line: paused ? 'Copiato, in attesa della connessione' : 'Copiato, si sta inviando a Floppy', prog: null };
+    case 'queued': return { led: null, ro: 'In coda', line: 'Il Finder lo copia dopo', prog: null };
+    case 'done': return { led: 'ok', ro: 'Caricato', line: `${gb(r.f.size)} · su Floppy, video intero`, prog: null };
+    case 'failed': return { led: 'err', ro: 'Incompleto', line: `Arrivati ${gb(r.written)} di ${gb(r.f.size)}`, prog: null };
+    case 'check': return { led: 'dl', ro: 'Da controllare', line: 'La connessione è caduta mentre si salvava', prog: null };
+  }
+}
+function urow(r, paused) {
+  const k = rowLook(r, paused);
+  return `<div class="urow">${led(k.led, k.blink)}<span class="b"><span class="n" title="${r.f.name}">${r.f.name}</span><span class="l">${k.line}</span>${k.prog != null ? `<span class="bar"><i style="width:${(k.prog * 100).toFixed(1)}%"></i></span>` : ''}</span><span class="ro">${k.ro}</span></div>`;
+}
+// The rows worth showing: problems first, then what moves, then the last done; the rest summed up.
+function visibleRows(rows, max = 4) {
+  const order = { failed: 0, check: 1, writing: 2, sending: 3, done: 4, queued: 5 };
+  const sorted = [...rows].sort((a, b) => order[a.st] - order[b.st]);
+  return { shown: sorted.slice(0, max), rest: sorted.slice(max) };
+}
+function restLine(rest) {
+  if (!rest.length) return '';
+  const q = rest.filter((r) => r.st === 'queued').length, d = rest.filter((r) => r.st === 'done').length, s = rest.length - q - d;
+  const parts = [s && `${s} in invio`, q && `${q} in coda`, d && `${d} caricati`].filter(Boolean);
+  return `<button class="more" type="button">Altri ${rest.length} file: ${parts.join(', ')}</button>`;
+}
+
+const counts = (rows) => ({
+  moving: rows.filter((r) => r.st === 'writing' || r.st === 'sending' || r.st === 'queued').length,
+  done: rows.filter((r) => r.st === 'done').length,
+  failed: rows.filter((r) => r.st === 'failed'),
+  check: rows.filter((r) => r.st === 'check'),
+});
+
+function failedNotice(r, state) {
+  if (state.confirm === r.f.name) {
+    return `<div class="confirm" role="alertdialog"><b>Eliminare la copia incompleta?</b><p>${r.f.name} su Floppy ha solo ${gb(r.written)} di ${gb(r.f.size)}. Va nel cestino di Floppy; l'originale sul tuo Mac non si tocca. Poi copialo di nuovo.</p><div class="row2"><button class="btn primary md" data-act="del">Elimina</button><button class="btn soft md" data-act="cancel">Annulla</button></div></div>`;
+  }
+  return `<div class="notice">${led('err')}<div><b class="t">Copia non completata: ${r.f.name}</b>Su Floppy ne sono arrivati ${gb(r.written)} di ${gb(r.f.size)}: il file c'è ma è a metà, e nel Finder ha l'icona grigia. Copialo di nuovo dal tuo Mac.<div class="acts"><button class="btn raised sm">Mostra nel Finder</button><button class="btn raised sm" data-act="ask" data-file="${r.f.name}">Elimina la copia incompleta</button><button class="btn ghost sm" data-act="hide">Nascondi</button></div></div></div>`;
+}
+function checkNotice(r) {
+  return `<div class="notice">${led('dl')}<div><b class="t">Da controllare: ${r.f.name}</b>La connessione è caduta mentre veniva salvato. Aprilo per vedere se è completo; se non lo è, salvalo di nuovo.<div class="acts"><button class="btn raised sm">Mostra nel Finder</button><button class="btn ghost sm" data-act="hide">Va bene così</button></div></div></div>`;
+}
+
+// The status section's title and body, per variant.
+function statusCopy(v, sc) {
+  const c = counts(sc.rows);
+  if (v === 'b') {
+    if (c.failed.length) return { t: c.failed.length === 1 ? '1 copia non completata' : `${c.failed.length} copie non completate`, b: c.done ? `Gli altri ${c.done} file sono su Floppy. Questo va copiato di nuovo:` : 'Va copiata di nuovo:' };
+    if (sc.paused) return { t: 'Caricamento in pausa', b: `Il Mac non raggiunge Floppy: riprendo da solo appena torna la connessione. Mancano ${gb(sc.pending)}; lascia il Mac acceso.` };
+    if (c.moving) return { t: `Sto caricando ${c.moving} ${c.moving === 1 ? 'file' : 'file'} su Floppy`, b: `Mancano ${gb(sc.pending)}, ${eta(sc.pending)}. Lascia il Mac acceso: lo tengo sveglio io.` };
+    if (c.check.length) return { t: '1 file da controllare', b: 'La connessione è caduta mentre veniva salvato:' };
+    return { t: 'Tutto caricato', b: `${c.done} file sono su Floppy, i video controllati. Puoi chiudere il Mac.` };
+  }
+  return { t: 'Floppy è collegato', b: 'I dischi del team sono nel Finder, dentro Floppy.' };
+}
+
+function faceFor(v, sc) {
+  const c = counts(sc.rows);
+  const cache = { fill: 13.9 / 30, right: '13,9 / 30 GB' };
+  if (v === 'x') return { ledc: 'ok', readout: 'COLLEGATO', ...cache };
+  if (c.failed.length) return { ledc: 'err', readout: 'INCOMPLETO', ...cache };
+  if (sc.paused) return { ledc: 'dl', readout: 'IN PAUSA', ...(v === 'b' ? sendFill(sc) : cache) };
+  if (c.moving) return { ledc: 'dl', blink: true, readout: 'INVIO', activity: true, ...(v === 'b' ? sendFill(sc) : cache) };
+  return { ledc: 'ok', readout: 'COLLEGATO', ...cache };
+}
+function sendFill(sc) {
+  const total = sc.rows.reduce((s, r) => s + r.f.size, 0);
+  const sent = Math.max(0, total - sc.pending - sc.rows.filter((r) => r.st === 'writing').reduce((s, r) => s + (r.f.size - r.written), 0) - sc.rows.filter((r) => r.st === 'queued').reduce((s, r) => s + r.f.size, 0));
+  return { fill: sent / total, right: `${gb(sent).replace(' GB', '')} / ${gb(total)}` };
+}
+
+function spaceSection() {
+  return `<section class="space"><div class="h"><span>Spazio su questo Mac ${svg('info')}</span><b>13,9 di 30 GB</b></div>
+    <ul class="legend"><li><span class="slot-mark" style="background:var(--ink)"></span><span>Scaricato su questo Mac</span><span>13,9 GB</span></li>
+    <li><span class="slot-mark" style="background:var(--track)"></span><span>Ancora libero per le copie</span><span>16,1 GB</span></li>
+    <li><span class="slot-mark" style="background:var(--idle)"></span><span>Libero sul Mac</span><span>118 GB</span></li></ul></section>`;
+}
+
+function diskList(v, sc, state) {
+  const c = counts(sc.rows);
+  let dLed = led('ok'), dLine = 'Pronto', dRo = 'Collegato', projLed = null, projLine = '', projRo = '';
+  if (v === 'c') {
+    if (c.failed.length) { dLed = led('err'); dLine = `1 copia non completata · Pronto`; projLed = led('err'); projLine = `${c.failed[0].f.name} è a metà`; projRo = 'Incompleto'; }
+    else if (sc.paused) { dLed = led('dl'); dLine = 'Caricamento in pausa: manca la connessione'; projLed = led('dl'); projLine = `${c.moving} file in pausa · mancano ${gb(sc.pending)}`; projRo = 'In pausa'; }
+    else if (c.moving) { dLed = led('dl', true); dLine = `${c.moving} file in invio · ${eta(sc.pending)}`; projLed = led('dl', true); projLine = `${c.moving} file · mancano ${gb(sc.pending)}`; projRo = 'In invio'; }
+    else if (c.check.length) { projLed = led('dl'); projLine = `${c.check[0].f.name} da controllare`; projRo = 'Controlla'; }
+    else if (sc.notif === 'done') { projLed = led('ok'); projLine = `${c.done} file caricati, i video controllati`; projRo = 'Caricato'; }
+  }
+  const open = v === 'c' && state.open;
+  const proj = `<div class="frow">${projLed ? `${projLed}` : svg('folder', 'i ficon')}<span class="b"><span class="n">${PROJECT}</span>${projLine ? `<span class="l">${projLine}</span>` : ''}</span>${projRo ? `<span class="ro">${projRo}</span>` : ''}<span class="dots">${svg('dots')}</span></div>`;
+  const files = open ? (() => { const { shown, rest } = visibleRows(sc.rows); return `<div class="tree" style="margin-left:18px">${shown.map((r) => urow(r, sc.paused)).join('')}${restLine(rest)}</div>`; })() : '';
+  const tree = v === 'c' ? `<div class="tree">${proj}${v === 'c' && projLed ? `<button class="more" data-act="open" type="button" style="padding-left:10px">${open ? 'Nascondi i file' : 'Mostra i file'}</button>` : ''}${files}<div class="frow">${svg('folder', 'i ficon')}<span class="b"><span class="n">Spot Natale</span></span><span class="dots">${svg('dots')}</span></div></div>` : '';
+  return `<section class="list"><div class="sec-h"><span>Dischi del team</span><b>1</b></div>
+    <div class="drow">${dLed}<span class="b"><span class="n">Progetti ${svg('chev')}</span><span class="l">${dLine}</span></span><span class="ro">${dRo}</span><span class="dots">${svg('dots')}</span></div>${tree}</section>`;
+}
+
+function uploadsA(sc, state) {
+  const c = counts(sc.rows);
+  if (!sc.rows.length) return '';
+  const { shown, rest } = visibleRows(sc.rows);
+  const head = c.moving ? (sc.paused ? `<b>${gb(sc.pending)} in pausa</b>` : `<b>${gb(sc.pending)} · ${short(sc.pending)}</b>`) : `<b>${c.done} ${c.done === 1 ? 'caricato' : 'caricati'}</b>`;
+  const notices = c.failed.filter((r) => !state.hidden).map((r) => failedNotice(r, state)).join('') + c.check.filter(() => !state.hidden).map(checkNotice).join('');
+  return `<div class="upwrap">${notices ? `<div style="padding:0 16px 12px;display:grid;gap:8px">${notices}</div>` : ''}<div class="uphead"><span>In caricamento</span>${head}</div>
+    ${sc.paused ? `<div style="padding:0 16px 8px"><div class="notice">${led('dl')}<div><b class="t">In pausa: manca la connessione</b>Riprendo da solo appena torna. Lascia il Mac acceso e il Finder aperto.</div></div></div>` : ''}
+    <div class="up">${shown.map((r) => urow(r, sc.paused)).join('')}${restLine(rest)}</div></div>`;
+}
+
+function render() {
+  const v = document.body.dataset.v;
+  const sc = SCEN[state.scen];
+  const s = statusCopy(v, sc);
+  const c = counts(sc.rows);
+  let extra = '';
+  if (v === 'b') {
+    const notices = c.failed.filter(() => !state.hidden).map((r) => failedNotice(r, state)).join('') + c.check.filter(() => !state.hidden).map(checkNotice).join('');
+    extra += notices;
+    if (state.list || c.failed.length || c.check.length) {
+      if (state.list) { const { shown, rest } = visibleRows(sc.rows); extra += `<div style="margin:0 -12px">${shown.map((r) => urow(r, sc.paused)).join('')}${restLine(rest)}</div>`; }
+    }
+    if (sc.rows.length) extra += `<button class="toggle" data-act="list" type="button">${state.list ? 'Nascondi i file' : `Mostra i file (${sc.rows.length})`}</button>`;
+  }
+  if (v === 'c') {
+    extra += c.failed.filter(() => !state.hidden).map((r) => failedNotice(r, state)).join('');
+  }
+  const showFinder = v !== 'b' || (!c.moving || c.failed.length) ;
+  const panel = `<div class="panel">
+    ${face(faceFor(v, sc))}
+    <section class="status"><div><h1>${s.t}</h1><p class="body">${s.b}</p></div>${extra}
+      <div style="display:flex;gap:8px"><button class="btn primary lg">${svg('ext')} Apri il Finder</button></div></section>
+    ${v === 'a' ? uploadsA(sc, state) : ''}
+    ${spaceSection()}
+    ${diskList(v, sc, state)}
+    <footer class="f"><span class="v">Floppy 0.2.7</span><span class="dots">${svg('globe')}</span><span class="dots">${svg('gear')}</span><button class="btn ghost sm">${svg('power')} Spegni</button></footer>
+  </div>`;
+  document.querySelector('[data-panel]').innerHTML = panel;
+  const side = v === 'x' ? xSide(sc) : sc.side;
+  document.querySelector('[data-side]').innerHTML = `<h2>${sc.label}</h2><p>${side[0]}</p><div class="finder">${side[1]}</div>`;
+  const n = sc.notif && v !== 'x' ? (sc.notif === 'done'
+    ? { led: '#3fdc6c', t: 'Caricato su Floppy', b: `${c.done} file in ${PROJECT}, i video controllati. Puoi chiudere il Mac.` }
+    : { led: '#ff4b33', t: 'Copia non completata', b: `${c.failed[0].f.name} è arrivato a metà su Floppy. Copialo di nuovo.` }) : null;
+  document.querySelector('[data-notif]').innerHTML = n ? `<div class="nb" style="--nb-led:${n.led}"><span class="ic"></span><span><b>${n.t}</b>${n.b}</span><small>ora</small></div>` : '';
+}
+function xSide(sc) {
+  const t = {
+    up: 'Il pannello non mostra niente: i caricamenti di questo Mac non ci sono, ci sono solo gli arrivi dai colleghi. La barra del Finder è l\'unica cosa che si vede, ed è già in fondo per la prima clip.',
+    pause: 'Il pannello dice ancora "collegato": la pausa non si vede. Il disco passa in sola lettura dopo 10 secondi, e solo la riga del disco lo dice.',
+    done: 'Niente dice che i file sono arrivati; la barra del Finder era in fondo già prima.',
+    failed: 'Il pannello dice "collegato" e non sa niente della copia fallita. Resta il dialogo del Finder, se qualcuno lo guarda, e il file a metà col nome giusto.',
+    check: 'Niente: il file c\'è e sembra a posto.',
+    many: 'Niente: solo la finestra di copia del Finder, con le ore che mancano calcolate sulla sua velocità, non su quella dell\'invio.',
+  }[state.scen];
+  return [t, 'Oggi l\'unica traccia è nel Finder, e per i caricamenti il Finder sbaglia: misura quanto è passato alla VM, non quanto è arrivato a Floppy.'];
+}
+
+const state = { scen: 'up', list: false, open: false, hidden: false, confirm: null };
+document.querySelector('[data-scen]').innerHTML = Object.entries(SCEN).map(([k, s]) => `<button data-scen-k="${k}">${s.label}</button>`).join('');
+const setScen = (k) => {
+  Object.assign(state, { scen: k, hidden: false, confirm: null });
+  document.querySelectorAll('[data-scen-k]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.scenK === k)));
+  render();
+};
+document.querySelector('[data-scen]').addEventListener('click', (e) => { const b = e.target.closest('[data-scen-k]'); if (b) setScen(b.dataset.scenK); });
+document.querySelector('[data-panel]').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-act]');
+  if (!b) return;
+  const a = b.dataset.act;
+  if (a === 'list') state.list = !state.list;
+  if (a === 'open') state.open = !state.open;
+  if (a === 'hide') state.hidden = true;
+  if (a === 'ask') state.confirm = b.dataset.file;
+  if (a === 'cancel') state.confirm = null;
+  if (a === 'del') { state.confirm = null; state.hidden = true; }
+  render();
+});
+
+// Template mechanics: variant buttons, keys, hash, theme.
+const KEY = `concept:${location.pathname}`;
+const root = document.documentElement, body = document.body;
+const load = () => { try { return JSON.parse(localStorage.getItem(KEY) || '{}'); } catch { return {}; } };
+const save = (s) => { try { localStorage.setItem(KEY, JSON.stringify(s)); } catch {} };
+const name = (v) => DESC[v].split(':')[0];
+document.querySelector('[data-buttons]').innerHTML = Object.keys(DESC).map((v) => `<button data-v="${v}">${v.toUpperCase()} ${name(v)}</button>`).join(' ');
+const pick = (v) => {
+  if (!DESC[v]) return;
+  body.dataset.v = v;
+  document.querySelectorAll('.switch [data-v]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.v === v)));
+  document.querySelector('[data-desc]').textContent = DESC[v];
+  history.replaceState(null, '', `${location.search}#${v}`);
+  state.list = false; state.open = false;
+  render();
+};
+const setTheme = (t) => { root.dataset.theme = t; save({ ...load(), theme: t }); };
+document.querySelector('.switch').addEventListener('click', (e) => { const b = e.target.closest('[data-v]'); if (b) pick(b.dataset.v); });
+document.querySelector('[data-theme-toggle]').addEventListener('click', () => setTheme(root.dataset.theme === 'dark' ? 'light' : 'dark'));
+addEventListener('keydown', (e) => {
+  if (e.metaKey || e.ctrlKey || e.altKey || e.target.closest('input, textarea, select, [contenteditable]')) return;
+  const k = e.key.toLowerCase();
+  if (k === 't') setTheme(root.dataset.theme === 'dark' ? 'light' : 'dark');
+  else if (k === 'p') body.dataset.chrome = body.dataset.chrome === 'off' ? 'on' : 'off';
+  else pick(k);
+});
+root.dataset.theme = load().theme || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+setScen(SCEN[new URLSearchParams(location.search).get('s')] ? new URLSearchParams(location.search).get('s') : 'up');
+pick(DESC[location.hash.slice(1)] ? location.hash.slice(1) : 'x');
+</script>
+</body>
+</html>
