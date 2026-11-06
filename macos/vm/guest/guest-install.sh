@@ -80,6 +80,23 @@ install -m 644 floppy-notify.service /etc/systemd/system/floppy-notify.service
 install -m 755 floppy-uplink /usr/local/sbin/floppy-uplink
 install -m 644 floppy-uplink.service /etc/systemd/system/floppy-uplink.service
 install -d /etc/systemd/system/smbd.service.d
+# When the VM runs out of memory the kernel kills the process with the highest
+# score, and JuiceFS takes itself out (-1000): Samba holds the share, so it goes
+# last of the rest (DECISIONS #32). Running ones get it now, without a restart
+# that would break the Mac's open files.
+printf '[Service]\nOOMScoreAdjust=-900\n' > /etc/systemd/system/smbd.service.d/oom.conf
+for pid in $(pgrep -x smbd || true); do echo -900 > "/proc/$pid/oom_score_adj" 2>/dev/null || true; done
+for pid in $(pgrep -x valkey-server || true); do echo -500 > "/proc/$pid/oom_score_adj" 2>/dev/null || true; done
+# Swap, a net under a copy that outgrows the memory: used only then (swappiness
+# 10), on the VM's disk, which counts it in the space it takes on the Mac.
+if [ ! -f /var/swap/floppy ]; then
+  install -d -m 700 /var/swap
+  fallocate -l 1G /var/swap/floppy && chmod 600 /var/swap/floppy && mkswap -q /var/swap/floppy
+fi
+grep -q '^/var/swap/floppy ' /etc/fstab || echo '/var/swap/floppy none swap sw 0 0' >> /etc/fstab
+swapon --show=NAME --noheadings | grep -qx /var/swap/floppy || swapon /var/swap/floppy || true
+printf 'vm.swappiness = 10\n' > /etc/sysctl.d/90-floppy.conf
+sysctl -q -p /etc/sysctl.d/90-floppy.conf || true
 id drive >/dev/null 2>&1 || useradd -M -s /usr/sbin/nologin drive
 systemctl disable --now nmbd 2>/dev/null || true
 

@@ -241,9 +241,35 @@ write_disk() {
   printf '%s' "$changed"
 }
 
+# Bumped when the way a disk is mounted changes (options, environment): an
+# engine update then remounts each disk once nobody uses it, through apply.
+MOUNT_VERSION=2
+
+# JuiceFS's memory: its Go heap under a share of the VM (384 MiB at most per
+# disk) and its write buffer two thirds of that, 256 MB at most. JuiceFS gives
+# itself oom_score_adj -1000, so when the VM runs out the kernel kills Samba
+# and the services instead; without the limit a long copy took 650-730 MB
+# (CYCLES 15). Prints "<heap MiB> <buffer MB>". The same sizing is in floppy-mount.
+mount_memory() {
+  local mem_mib n limit buffer
+  mem_mib=$(awk '/^MemTotal:/ { print int($2 / 1024) }' /proc/meminfo)
+  n=$(configured_ids | wc -l)
+  [ "$n" -ge 1 ] || n=1
+  limit=$(( (mem_mib - 512) / n ))
+  [ "$limit" -le 384 ] || limit=384
+  [ "$limit" -ge 160 ] || limit=160
+  buffer=$(( limit * 2 / 3 ))
+  [ "$buffer" -le 256 ] || buffer=256
+  echo "$limit $buffer"
+}
+
 # What the running mount was started with, to tell whether it needs a remount.
 mounted_record() { cat "$RUN/$1.mounted" 2>/dev/null || true; }
-wanted_record() { cat "$CONF/$1/mount.env"; printf 'SECRET=%s\n' "$(sha256sum < "$CONF/$1/secret.env" | cut -c1-16)"; }
+wanted_record() {
+  cat "$CONF/$1/mount.env"
+  printf 'SECRET=%s\n' "$(sha256sum < "$CONF/$1/secret.env" | cut -c1-16)"
+  printf 'MOUNT=%s %s\n' "$MOUNT_VERSION" "$(mount_memory)"
+}
 rec() { printf '%s\n' "$1" | sed -n "s/^$2=//p" | head -1; }
 
 # A remount is needed when anything but the cache size changed, or when the
@@ -545,20 +571,8 @@ cmd_mount() {
   install -d -m 700 "$RUN"
   wanted_record "$id" > "$RUN/$id.mounted"
   cp "$CONF/$id/folder" "$RUN/$id.folder"
-  # JuiceFS gives itself oom_score_adj -1000: when the VM runs out of memory the
-  # kernel kills Samba and the services instead, and the share goes. Its Go heap
-  # is held under a share of the VM's memory (1 GiB holds one disk at 384 MiB),
-  # and the buffer within it; without the limit a long copy took 650-730 MB
-  # and left 10 MB (CYCLES 15). The same sizing is in floppy-mount.
-  local mem_mib n limit buffer
-  mem_mib=$(awk '/^MemTotal:/ { print int($2 / 1024) }' /proc/meminfo)
-  n=$(configured_ids | wc -l)
-  [ "$n" -ge 1 ] || n=1
-  limit=$(( (mem_mib - 512) / n ))
-  [ "$limit" -le 384 ] || limit=384
-  [ "$limit" -ge 160 ] || limit=160
-  buffer=$(( limit * 2 / 3 ))
-  [ "$buffer" -le 256 ] || buffer=256
+  local limit buffer
+  read -r limit buffer <<< "$(mount_memory)"
   export GOMEMLIMIT="${limit}MiB"
   local extra=()
   [ -n "$BUCKET_URL" ] && extra+=(--bucket "$BUCKET_URL")

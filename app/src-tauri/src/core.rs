@@ -817,6 +817,10 @@ impl Core {
             if ok {
                 inner.setup.step = 4;
                 inner.setup.done = true;
+                // A new engine may mount with other settings: the next apply
+                // remounts each disk once nobody uses it (`floppy-disks`).
+                inner.team.dirty = true;
+                inner.team.last_failed = false;
             } else {
                 inner.setup.error = Some(SetupError {
                     kind: if message.contains("not enough free space") {
@@ -1624,7 +1628,7 @@ case "$1 ${{2:-}}" in
     if [ -f "$D/apply.fail" ]; then echo "floppy: $(cat "$D/apply.fail")" >&2; exit 1; fi
     echo '{apply_answer}' ;;
   "disks clear") rm -f "$D/home/disks.json"; echo '{{"version":1,"cleared":true}}' ;;
-  "stop "*|"start "*) ;;
+  "stop "*|"start "*|"setup "*) ;;
   *) exit 2 ;;
 esac"#
             ),
@@ -1709,6 +1713,23 @@ esac"#
         );
         assert_eq!(team.disks[0].state, Some(RunState::Mounted));
         assert_eq!(team.error, None);
+    }
+
+    #[test]
+    fn an_engine_update_applies_the_disks_again() {
+        // The new engine may mount with other settings: apply compares them
+        // and remounts each disk once it is free.
+        let r = team_rig();
+        let (config, creds) = plan(&[("0192-a", "Archivio 2025", ApiAccess::Read)], false);
+        r.core.refresh();
+        r.core.configure(&config, &creds);
+        r.sync_and_wait();
+        assert_eq!(r.applies().len(), 1);
+        r.status(&team_status(&[DISK_A], ""));
+        r.core.run_job(JobKind::Setup, None).unwrap();
+        wait_idle(&r.core);
+        r.sync_and_wait();
+        assert_eq!(r.applies().len(), 2);
     }
 
     #[test]

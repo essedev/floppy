@@ -10,6 +10,8 @@ RuntimeDirectory=floppy-replica/%i
 ExecStart=/usr/bin/valkey-server /etc/floppy-replica/%i.conf
 Restart=always
 RestartSec=3
+# After Samba, before the services: without it JuiceFS reads the master, slower.
+OOMScoreAdjust=-500
 
 [Install]
 WantedBy=multi-user.target

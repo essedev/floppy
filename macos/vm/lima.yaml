@@ -8,10 +8,11 @@ vmType: vz
 cpus: 2
 # The VM holds on to every page the guest has touched (Lima sets no balloon
 # target), and Linux fills spare RAM with page cache: the host pays the whole
-# `memory`. 1 GiB measured: same speeds as 2 GiB, with JuiceFS's heap held at
-# 384 MiB (GOMEMLIMIT, floppy-mount and floppy-disks); without it a long copy
-# reached 650-730 MB and the OOM killer took Samba.
-memory: 1GiB
+# `memory`. 2 GiB: 1 GiB gave the same speeds, but JuiceFS reached 570-730 MB
+# copying (above its 384 MiB GOMEMLIMIT, a soft limit) and the OOM killer took
+# Samba on a tester's Mac (DECISIONS #32). The team version sizes it per disk
+# and per Mac (`vm_memory_mib` in bin/floppy).
+memory: 2GiB
 # Sparse: the file grows with the JuiceFS cache, capped by CACHE_SIZE_MB.
 disk: 200GiB
 

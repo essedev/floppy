@@ -290,15 +290,17 @@ cache_per_disk_mb() {
   echo "$per"
 }
 
-# The VM's memory in the team version: 1 GiB holds one disk (JuiceFS stays near
-# 430 MB copying, its heap held by GOMEMLIMIT in floppy-disks, which shares the
-# VM among the disks), and each more disk adds about 50 MB at rest (a replica
-# of 12-15 MB, a mount of 34-39 MB). Rounded to quarter GiB, at most 4 GiB.
+# The VM's memory in the team version: 2 GiB for one disk, 1.5 on a Mac under
+# 16 GB, and 512 MiB for each more disk, at most 4 GiB. 1 GiB was not enough on
+# a tester's Mac: JuiceFS took 620-730 MB copying and the kernel killed Samba
+# eight times in a week; held by GOMEMLIMIT it still reached 570 MB on the
+# bench (floppy-disks), and each disk is a JuiceFS of its own (DECISIONS #32).
 vm_memory_mib() {
-  local n="$1" m
+  local n="$1" m mac_mib
   [ "$n" -gt 1 ] || n=1
-  m=$(( 1024 + 64 * (n - 1) ))
-  m=$(( (m + 255) / 256 * 256 ))
+  mac_mib=$(( $(/usr/sbin/sysctl -n hw.memsize 2>/dev/null || echo 0) / 1048576 ))
+  if [ "$mac_mib" -ge 16384 ]; then m=2048; else m=1536; fi
+  m=$(( m + 512 * (n - 1) ))
   [ "$m" -le 4096 ] || m=4096
   echo "$m"
 }
