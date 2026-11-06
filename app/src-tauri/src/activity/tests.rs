@@ -791,11 +791,13 @@ fn uploads_show_large_writes_and_the_disks_with_bytes_waiting() {
 #[test]
 fn an_incomplete_copy_notifies_once_and_never_for_one_found_at_start() {
     let rig = Rig::new(&writable(), true);
+    // One time for the old copy: the VM reports the same close every time.
+    let old = now() - 3600.0;
     rig.engine_uploads(
         "[]",
         &format!(
             r#"{{"disks": [], "files": [{}]}}"#,
-            outcome("Spot/old.MP4", "incomplete", now() - 3600.0)
+            outcome("Spot/old.MP4", "incomplete", old)
         ),
     );
     rig.activity.tick();
@@ -803,7 +805,7 @@ fn an_incomplete_copy_notifies_once_and_never_for_one_found_at_start() {
     assert_eq!(rig.activity.snapshot().uploads.files.len(), 1);
     let files = format!(
         r#"{{"disks": [], "files": [{}, {}]}}"#,
-        outcome("Spot/old.MP4", "incomplete", now() - 3600.0),
+        outcome("Spot/old.MP4", "incomplete", old),
         outcome("Spot/C0272.MP4", "incomplete", now() - 30.0)
     );
     rig.engine_uploads("[]", &files);
