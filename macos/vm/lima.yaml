@@ -30,6 +30,11 @@ portForwards:
   - guestPortRange: [1, 65535]
     proto: any
     ignore: true
+  # A wildcard bind (Samba's 0.0.0.0:445) is not covered by the rule above.
+  - guestIP: 0.0.0.0
+    guestPortRange: [1, 65535]
+    proto: any
+    ignore: true
 
 containerd:
   system: false

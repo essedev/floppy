@@ -337,13 +337,27 @@ size_stopped_vm() {
   fi
 }
 
+# Lima forwarded Samba's 0.0.0.0:445 to the Mac, where macOS holds the port:
+# every start and Samba restart logged a failed listen (63,000 lines on a
+# tester's Mac). The ignore rule on the default 127.0.0.1 did not cover a
+# wildcard bind; one on 0.0.0.0 does. VMs made before it get it while stopped.
+quiet_port_forwards() {
+  local yaml="$LIMA_HOME/$VM/lima.yaml"
+  [ -f "$yaml" ] || return 0
+  grep -q 'guestIP: 0.0.0.0' "$yaml" && return 0
+  lima edit --tty=false --set \
+    '.portForwards += [{"guestIP": "0.0.0.0", "guestPortRange": [1, 65535], "proto": "any", "ignore": true}]' \
+    "$VM" >>"$LIMA_LOG" 2>&1 || true
+}
+
 # With "keep" the VM starts with the memory it has (a revoked device being
 # cleared needs no resize).
 start_vm() {
   case "$(vm_status)" in
     Running) ;;
     "") die "VM not set up, run: floppy setup" ;;
-    *) [ "${1:-}" = keep ] || size_stopped_vm
+    *) quiet_port_forwards
+       [ "${1:-}" = keep ] || size_stopped_vm
        log "Starting the VM..."
        # A start that cannot finish (a download that never resolves) gives up
        # instead of hanging the install.
