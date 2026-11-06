@@ -8,7 +8,7 @@
 
 import { type FormEvent, type ReactNode, useEffect, useId, useState } from "react";
 import { Mail } from "lucide-react";
-import { Button, CodeInput, Led, Notice, Readout, TextInput } from "@/components/ui";
+import { Button, CodeInput, Confirm, Led, Notice, Readout, TextInput } from "@/components/ui";
 import { useAuthStep } from "@/features/account/hooks";
 import { countdown, errorDetail, errorText, lostAccess, secondsUntil, serverEditable } from "@/features/account/view";
 import { it } from "@/i18n/it";
@@ -125,6 +125,9 @@ function EmailStep({
   };
 
   const lost = lostAccess(view.notice);
+  if (view.offered_server && view.offered_display) {
+    return <ServerOffer host={view.offered_display} />;
+  }
   return (
     <form className="flex flex-col gap-3.5" onSubmit={(e) => void submit(e)} noValidate>
       {lost && (
@@ -337,6 +340,27 @@ function RegisteringStep({ view, size }: { view: Extract<AuthView, { phase: "reg
           </Button>
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * The server a floppy://connect link offered (the web's start page has one): asked, never
+ * taken, since a link can come from anyone and the sign-in would send a stranger the address.
+ */
+function ServerOffer({ host }: { host: string }) {
+  const answer = useAuthStep<boolean>(backend.authAnswerOffer);
+  return (
+    <div className="flex flex-col gap-3.5">
+      <Confirm
+        title={t.offer.title(host)}
+        body={t.offer.body}
+        confirm={t.offer.accept}
+        cancel={t.offer.decline}
+        onConfirm={() => answer.mutate(true)}
+        onCancel={() => answer.mutate(false)}
+      />
+      <RefusedNotice error={answer.error} />
     </div>
   );
 }

@@ -439,6 +439,15 @@ pub async fn auth_sign_out(
     account_step(account, move |a| a.sign_out(local_only)).await
 }
 
+/// The person's answer to the server a `floppy://connect` link offered.
+#[tauri::command]
+pub async fn auth_answer_offer(
+    account: AccountState<'_>,
+    accept: bool,
+) -> Result<AuthView, CommandError> {
+    account_step(account, move |a| a.answer_offer(accept)).await
+}
+
 #[tauri::command]
 pub async fn auth_set_server(
     account: AccountState<'_>,

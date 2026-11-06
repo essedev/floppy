@@ -8,7 +8,7 @@ const base = {
   default_server: "https://x.it",
   busy: null,
   error: null,
-  reachable: true,
+  reachable: true, offered_server: null, offered_display: null,
 } as const;
 const out: AuthView = { ...base, phase: "signed_out", notice: null };
 const waiting: AuthView = {

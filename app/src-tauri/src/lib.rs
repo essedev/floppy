@@ -168,6 +168,8 @@ pub fn run() {
                 .build(),
         )
         .plugin(tauri_plugin_notification::init())
+        // `floppy://connect?server=...` from the web's start page (DECISIONS #34).
+        .plugin(tauri_plugin_deep_link::init())
         .invoke_handler(tauri::generate_handler![
             commands::get_status,
             commands::refresh_status,
@@ -194,6 +196,7 @@ pub fn run() {
             commands::dismiss_notice,
             commands::upload_action,
             commands::get_cached,
+            commands::auth_answer_offer,
             commands::get_setup,
             commands::run_setup,
             commands::install_engine,
@@ -296,6 +299,22 @@ pub fn run() {
             );
             activity.start_worker();
             app.manage(activity);
+            // A link opens the sign-in with the team's server offered: at
+            // launch (it started the app) and while it runs.
+            {
+                use tauri_plugin_deep_link::DeepLinkExt;
+                let links_account = Arc::clone(&account);
+                let links_app = app.handle().clone();
+                let on_links = move |urls: Vec<tauri::Url>| {
+                    if urls.iter().any(|u| links_account.offer_link(u.as_str())) {
+                        windows::show(&links_app, windows::SETTINGS);
+                    }
+                };
+                if let Ok(Some(urls)) = app.deep_link().get_current() {
+                    on_links(urls);
+                }
+                app.deep_link().on_open_url(move |event| on_links(event.urls()));
+            }
             app.manage(account);
 
             if let Some(panel) = app.get_webview_window(windows::PANEL) {

@@ -273,6 +273,11 @@ pub struct AuthView {
     pub error: Option<AuthError>,
     /// The last heartbeat got an answer.
     pub reachable: bool,
+    /// A server a link offered, shown for the person to accept: a link can
+    /// come from anyone, and signing in to a stranger's server would send
+    /// them the person's address.
+    pub offered_server: Option<String>,
+    pub offered_display: Option<String>,
 }
 
 /// What the account tells the app shell.
@@ -326,6 +331,8 @@ struct Inner {
     /// The team disks are still to be cleared (also in the preferences).
     clear_owed: bool,
     last_clear: Option<Instant>,
+    /// A server a `floppy://connect` link offered, waiting for the person's yes.
+    offered_server: Option<String>,
 }
 
 type Emit = Box<dyn Fn(AccountEvent) + Send + Sync>;
@@ -459,6 +466,7 @@ impl Account {
                 reissued: false,
                 clear_owed,
                 last_clear: None,
+                offered_server: None,
             }),
             api,
             secrets,
@@ -490,6 +498,39 @@ impl Account {
             busy: inner.busy,
             error: inner.error.clone(),
             reachable: inner.reachable,
+            offered_display: inner.offered_server.as_deref().map(server::display),
+            offered_server: inner.offered_server.clone(),
+        }
+    }
+
+    /// A `floppy://connect` link: its server is offered while this Mac is
+    /// signed out; true when the sign-in should come forward.
+    pub fn offer_link(&self, link: &str) -> bool {
+        let Some(offered) = server::from_link(link) else {
+            return false;
+        };
+        let mut inner = self.lock();
+        let signed_out = inner.record.is_none()
+            && matches!(inner.phase, Phase::SignedOut { .. } | Phase::Ended { .. });
+        if !signed_out {
+            return false;
+        }
+        inner.offered_server = (offered != inner.configured_server).then_some(offered);
+        self.publish(&inner);
+        true
+    }
+
+    /// The person's answer to an offered server: yes sets it, no forgets it.
+    pub fn answer_offer(&self, accept: bool) -> Result<AuthView, Refused> {
+        let offered = {
+            let mut inner = self.lock();
+            let offered = inner.offered_server.take();
+            self.publish(&inner);
+            offered
+        };
+        match offered {
+            Some(server) if accept => self.set_server(Some(&server)),
+            _ => Ok(self.view()),
         }
     }
 

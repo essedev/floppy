@@ -653,6 +653,54 @@ fn the_server_setting_is_checked_kept_and_locked_while_signed_in() {
     assert_eq!(signed.account.set_server(None), Err(Refused::State));
 }
 
+#[test]
+fn a_connect_link_offers_its_server_until_the_person_answers() {
+    let r = rig();
+    assert!(
+        r.account
+            .offer_link("floppy://connect?server=https://floppy.studio.test")
+    );
+    let view = r.account.view();
+    assert_eq!(
+        view.offered_server.as_deref(),
+        Some("https://floppy.studio.test")
+    );
+    assert_eq!(view.offered_display.as_deref(), Some("floppy.studio.test"));
+    assert_eq!(
+        view.server,
+        server::DEFAULT_SERVER,
+        "nothing changes before the yes"
+    );
+    // No: forgotten, the server stays.
+    let view = r.account.answer_offer(false).unwrap();
+    assert_eq!(
+        (view.offered_server, view.server.as_str()),
+        (None, server::DEFAULT_SERVER)
+    );
+    // Yes: the server is set and kept.
+    r.account
+        .offer_link("floppy://connect?server=https://floppy.studio.test");
+    let view = r.account.answer_offer(true).unwrap();
+    assert_eq!(view.server, "https://floppy.studio.test");
+    assert_eq!(view.offered_server, None);
+    assert_eq!(
+        r.account.prefs.load().server_url.as_deref(),
+        Some("https://floppy.studio.test")
+    );
+    // Not a connect link, or a Mac already signed in: nothing offered.
+    assert!(
+        !r.account
+            .offer_link("floppy://connect?server=http://floppy.studio.test")
+    );
+    let signed = signed_in_rig();
+    assert!(
+        !signed
+            .account
+            .offer_link("floppy://connect?server=https://other.test")
+    );
+    assert_eq!(signed.account.view().offered_server, None);
+}
+
 // The team disks: what the account hands the engine side and when.
 
 fn signed_in_rig() -> Rig {

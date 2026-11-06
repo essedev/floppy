@@ -78,6 +78,20 @@ pub fn endpoint(server: &str, path: &str) -> String {
 }
 
 /// The host and port alone, for the UI.
+/// The server a `floppy://connect?server=<address>` link offers, normalized;
+/// None for any other link. The web's start page and the invitation lead to
+/// one, so nobody types the address (DECISIONS #34).
+pub fn from_link(link: &str) -> Option<String> {
+    let url = Url::parse(link).ok()?;
+    if url.scheme() != "floppy" || url.host_str() != Some("connect") {
+        return None;
+    }
+    let server = url
+        .query_pairs()
+        .find_map(|(k, v)| (k == "server").then(|| v.into_owned()))?;
+    normalize(&server).ok()
+}
+
 pub fn display(server: &str) -> String {
     Url::parse(server)
         .ok()
@@ -128,6 +142,23 @@ mod tests {
         assert_eq!(normalize("ftp://x.it"), Err(ServerError::NotAnAddress));
         assert_eq!(normalize("https://user:pw@x.it"), Err(ServerError::Extra));
         assert_eq!(normalize("https://x.it/?a=1"), Err(ServerError::Extra));
+    }
+
+    #[test]
+    fn a_connect_link_offers_its_server() {
+        assert_eq!(
+            from_link("floppy://connect?server=https%3A%2F%2Ffloppy.example.com").as_deref(),
+            Some("https://floppy.example.com")
+        );
+        assert_eq!(
+            from_link("floppy://connect?server=https://floppy.example.com/").as_deref(),
+            Some("https://floppy.example.com")
+        );
+        // Another action, another scheme, no server, a remote address in clear text.
+        assert_eq!(from_link("floppy://open?server=https://a.example.com"), None);
+        assert_eq!(from_link("https://connect?server=https://a.example.com"), None);
+        assert_eq!(from_link("floppy://connect"), None);
+        assert_eq!(from_link("floppy://connect?server=http://a.example.com"), None);
     }
 
     #[test]

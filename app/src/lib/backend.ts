@@ -111,6 +111,8 @@ export interface Backend {
   authSignOut(localOnly: boolean): Promise<AuthView>;
   /** null goes back to the build's default server. */
   authSetServer(url: string | null): Promise<AuthView>;
+  /** Yes or no to the server a floppy://connect link offered. */
+  authAnswerOffer(accept: boolean): Promise<AuthView>;
   onAuth(cb: (v: AuthView) => void): Unlisten;
 }
 
@@ -188,6 +190,7 @@ const tauriBackend: Backend = {
   authRetryRegister: () => invoke("auth_retry_register"),
   authSignOut: (localOnly) => invoke("auth_sign_out", { localOnly }),
   authSetServer: (url) => invoke("auth_set_server", { url }),
+  authAnswerOffer: (accept) => invoke("auth_answer_offer", { accept }),
   onAuth: (cb) => subscribe("auth", cb),
 };
 

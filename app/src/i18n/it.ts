@@ -288,6 +288,12 @@ export const it = {
       clearing: "TOLGO I DISCHI",
       error: "ERRORE",
     },
+    offer: {
+      title: (host: string) => `Collegare Floppy al team su ${host}?`,
+      body: "L'indirizzo arriva dal link che hai aperto. Collega solo se è quello del tuo team, che trovi nell'invito.",
+      accept: "Collega",
+      decline: "No",
+    },
     form: {
       title: "Accedi al tuo team",
       body: "Ti mandiamo un link e un codice via email: niente password da ricordare.",

@@ -263,6 +263,8 @@ const authBase = {
   busy: null,
   error: null,
   reachable: true,
+  offered_server: null,
+  offered_display: null,
 } as const;
 const codeSent: AuthView = {
   ...authBase,
@@ -284,6 +286,8 @@ const signedOut: AuthView = { ...authBase, phase: "signed_out", notice: null };
 
 const AUTH: Record<string, AuthView> = {
   auth_signed_out: signedOut,
+  // A floppy://connect link from the web's start page offered a team's server.
+  auth_offer: { ...signedOut, offered_server: "https://floppy.studio-esempio.it", offered_display: "floppy.studio-esempio.it" },
   auth_code_sent: codeSent,
   auth_wrong_code: { ...codeSent, error: { code: "invalid_code", attempts_left: 3 } },
   auth_checking: { ...codeSent, busy: "checking" },
@@ -786,6 +790,10 @@ export const mockBackend: Backend = {
     }
     const server = url ? (url.includes("://") ? url : `https://${url}`) : SERVER;
     return publishAuth({ ...auth, server, server_display: server.replace(/^https?:\/\//, ""), error: null });
+  },
+  authAnswerOffer: async (accept) => {
+    const next = accept && auth.offered_server ? { ...auth, server: auth.offered_server, server_display: auth.offered_display ?? "" } : auth;
+    return publishAuth({ ...next, offered_server: null, offered_display: null });
   },
   onAuth: (cb) => listen(authListeners, cb),
 };

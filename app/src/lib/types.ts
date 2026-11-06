@@ -197,6 +197,9 @@ export type AuthView = AuthPhase & {
   error: AuthError | null;
   /** The last heartbeat got an answer. */
   reachable: boolean;
+  /** A server a floppy://connect link offered, waiting for the person's yes. */
+  offered_server: string | null;
+  offered_display: string | null;
 };
 
 /** A notification raised by the native side. */

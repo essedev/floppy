@@ -84,7 +84,7 @@ const team: TeamView = {
   refused_single: false,
   failing: 0,
 };
-const base = { server: "s", server_display: "s", default_server: "s", busy: null, error: null, reachable: true } as const;
+const base = { server: "s", server_display: "s", default_server: "s", busy: null, error: null, reachable: true, offered_server: null, offered_display: null } as const;
 const signedIn: AuthView = {
   ...base,
   phase: "signed_in",

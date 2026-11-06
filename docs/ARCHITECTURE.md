@@ -209,7 +209,7 @@ The problems each feature answers, to verify in the pilot:
 | The disk does not show up after sleep or a network change | Mount at login, the state on the faceplate's LED, automatic reconnection |
 | This clip stutters | How much of each project is on this Mac on its row (`floppy cached`, JuiceFS's `warmup --check`), "Make available" with progress, offered when a video is opened from a folder mostly not on the Mac (DECISIONS #33) |
 | The Mac is full | Space used by the cache, freeing per project, the least recently used blocks freed when the cache is full |
-| Credentials on every Mac | Sign-in in the browser, one revocable user per Mac |
+| Credentials on every Mac | Sign-in in the browser, one revocable user per Mac; the team's server comes from a `floppy://connect` link on the web's start page, confirmed in the app (DECISIONS #34) |
 | The network drops | Read-only browsing from the local replica, stated in the panel |
 | A copy looks done and is not, or arrived cut short | The panel says what this Mac is uploading, how much is left and how long, when it is paused for the line and when a file arrived cut short, with that file under its disk (DECISIONS #31) |
 | A copy stops halfway when the Mac sleeps | The app keeps the Mac awake (`caffeinate -i`, `app/src-tauri/src/awake.rs`) while this Mac writes to a disk or makes one available, and two minutes more; a closed lid still sleeps |
