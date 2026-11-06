@@ -1,0 +1,16 @@
+#!/bin/sh
+# Samba's `dfree command` (smb.conf): the size and free space, in KB, of the disk a folder is
+# on. The share's top is the VM's own filesystem, whose size is the copies' cache and no limit
+# for what goes to the buckets, so the Finder's "Floppy" read as a 29 GB disk nearly full; there
+# the first mounted team disk answers instead (JuiceFS reports its volume's size). Samba passes
+# the folder relative to the share, usually ".".
+dir=${1:-.}
+if [ "$(stat -f -c %T "$dir" 2>/dev/null)" != fuse ]; then
+  for m in /mnt/drive/*/; do
+    if mountpoint -q "$m" && [ "$(stat -f -c %T "$m" 2>/dev/null)" = fuse ]; then
+      dir=$m
+      break
+    fi
+  done
+fi
+df -Pk -- "$dir" | awk 'NR == 2 { print $2, $4 }'

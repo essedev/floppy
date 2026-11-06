@@ -29,6 +29,7 @@ INSTALLED_MARK="$FLOPPY_HOME/installed"
 IMAGE="$FLOPPY_HOME/vm/debian.qcow2"
 STOPPED_FLAG="$FLOPPY_HOME/stopped"
 RESTART_STAMP="$FLOPPY_HOME/last-vm-restart"
+LOW_SPACE_FLAG="$FLOPPY_HOME/low-space"
 # The team version's input, written by the app (no secrets in it).
 DISKS_FILE="$FLOPPY_HOME/disks.json"
 # The password between this Mac and its own VM, made by setup.
@@ -72,6 +73,8 @@ vm_status() { lima list --format '{{.Status}}' "$VM" 2>/dev/null || true; }
 in_vm() { lima shell --workdir / "$VM" "$@"; }
 config() { grep "^$1=" "$FLOPPY_HOME/config.env" | cut -d= -f2- || true; }
 notify() {
+  # The tests read the notifications from a file instead of showing them.
+  if [ -n "${FLOPPY_NOTIFY_LOG:-}" ]; then printf '%s\n' "$1" >> "$FLOPPY_NOTIFY_LOG"; return 0; fi
   /usr/bin/osascript -e "display notification \"$1\" with title \"Floppy\"" >/dev/null 2>&1 || true
 }
 
@@ -643,12 +646,23 @@ cmd_tick() {
     log "$(date '+%F %T') drive services down, restarting them"
     in_vm sudo systemctl restart floppy-mount smbd >>"$LIMA_LOG" 2>&1 || true
   fi
-  local free
+  local free used
   free=$(mac_free_mb)
   if [ "$free" -lt $(( $(reserve_mb) / 2 )) ]; then
-    log "$(date '+%F %T') Mac free space ${free} MB: freeing the whole cache"
-    notify "Spazio quasi finito sul Mac: ho liberato le copie locali del disco. I file restano online."
-    evict_all
+    # Told once per stretch of low space; after that the cache is freed again,
+    # quietly, only if it grew back. Each tick used to free an empty cache with
+    # a line and a notification: 36 in a week on a tester's Mac.
+    if [ ! -f "$LOW_SPACE_FLAG" ]; then
+      log "$(date '+%F %T') Mac free space ${free} MB: freeing the whole cache"
+      notify "Spazio quasi finito sul Mac: ho liberato le copie locali del disco. I file restano online."
+      evict_all
+      touch "$LOW_SPACE_FLAG"
+    elif used=$(cache_used_mb) && [ "${used:-0}" -ge 1024 ]; then
+      log "$(date '+%F %T') Mac free space ${free} MB: freeing the cache again"
+      evict_all
+    fi
+  elif [ "$free" -ge "$(reserve_mb)" ]; then
+    rm -f "$LOW_SPACE_FLAG"
   fi
   want_share && mount_share keep
   return 0

@@ -72,6 +72,7 @@ systemctl mask valkey-server >/dev/null 2>&1 || true
 
 install -d -m 700 /etc/floppy /var/lib/floppy /var/cache/floppy
 install -m 755 floppy-disks /usr/local/sbin/floppy-disks
+install -m 755 floppy-dfree /usr/local/sbin/floppy-dfree
 install -m 644 smb.conf /etc/samba/smb.conf
 install -m 755 floppy-activity /usr/local/sbin/floppy-activity
 install -m 644 floppy-activity.service /etc/systemd/system/floppy-activity.service

@@ -40,7 +40,9 @@ case "$1" in
     esac ;;
   start) log start; echo Running > "$FAKE/status" ;;
   stop) log stop; echo Stopped > "$FAKE/status" ;;
-  shell) shift 4; log shell "$*"; [ -f "$FAKE/broken" ] && exit 1; exit 0 ;;
+  shell) shift 4; log shell "$*"; [ -f "$FAKE/broken" ] && exit 1
+    case "$*" in *"du -sm"*) [ -f "$FAKE/cache" ] && printf '%s\t/var/cache/floppy\n' "$(cat "$FAKE/cache")" ;; esac
+    exit 0 ;;
   *) log "$*" ;;
 esac
 EOF
@@ -91,6 +93,28 @@ CONTENDER=t "$FLOPPY" tick 2>/dev/null; rc=$?
 s=$(( $(date +%s) - t ))
 wait
 ! grep -q '^t ' "$FAKE/calls" && [ "$rc" = 0 ] && [ "$s" -le 1 ]; check $? "tick skips a busy round at once" "rc $rc, ${s} s"
+
+# Low space on the Mac: the cache is freed and the person told once per stretch, not at every
+# tick (36 times in a week on a tester's Mac); freed again, quietly, only when it grew back;
+# told again once the space came back and ran low anew.
+reset Running
+export FLOPPY_NOTIFY_LOG="$tmp/notified"
+: > "$FLOPPY_NOTIFY_LOG"
+echo 5000 > "$FAKE/free"
+for _ in 1 2 3; do "$FLOPPY" tick 2>/dev/null; done
+n=$(wc -l < "$FLOPPY_NOTIFY_LOG" | tr -d ' '); e=$(grep -c 'evict-all' "$FAKE/calls")
+if [ "$n" = 1 ] && [ "$e" = 1 ]; then rc=0; else rc=1; fi; check "$rc" "low space: told and freed once in three ticks" "told $n, freed $e"
+echo 2048 > "$FAKE/cache"
+"$FLOPPY" tick 2>/dev/null
+n=$(wc -l < "$FLOPPY_NOTIFY_LOG" | tr -d ' '); e=$(grep -c 'evict-all' "$FAKE/calls")
+if [ "$n" = 1 ] && [ "$e" = 2 ]; then rc=0; else rc=1; fi; check "$rc" "low space: a cache grown back is freed again, without telling" "told $n, freed $e"
+rm -f "$FAKE/cache"
+echo 30000 > "$FAKE/free"; "$FLOPPY" tick 2>/dev/null
+echo 5000 > "$FAKE/free"; "$FLOPPY" tick 2>/dev/null
+n=$(wc -l < "$FLOPPY_NOTIFY_LOG" | tr -d ' ')
+if [ "$n" = 2 ]; then rc=0; else rc=1; fi; check "$rc" "low space: told again after the space came back" "told $n"
+rm -f "$FAKE/free"
+unset FLOPPY_NOTIFY_LOG
 
 # disks clear.
 disks='{"version":1,"meta_user":"u","disks":[]}'
