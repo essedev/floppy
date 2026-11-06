@@ -14,6 +14,7 @@ export const keys = {
   setup: ["setup"] as const,
   info: ["app-info"] as const,
   folders: ["folders"] as const,
+  cached: ["cached"] as const,
   login: ["login"] as const,
   update: ["app-update"] as const,
 };
@@ -51,6 +52,18 @@ export function useFolders(enabled: boolean, path?: string) {
     enabled,
     retry: false,
     staleTime: 10_000,
+  });
+}
+
+/** How much of each folder is on this Mac, by its path; checked again every minute. */
+export function useCached(paths: string[], enabled: boolean) {
+  return useQuery({
+    queryKey: [...keys.cached, ...paths],
+    queryFn: async () => new Map((await backend.getCached(paths)).map((c) => [c.key, c])),
+    enabled: enabled && paths.length > 0,
+    retry: false,
+    staleTime: 60_000,
+    refetchInterval: 60_000,
   });
 }
 

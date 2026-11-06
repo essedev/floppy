@@ -7,7 +7,7 @@
 
 import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
-import { RotateCcw } from "lucide-react";
+import { Download, RotateCcw } from "lucide-react";
 import { Button, Confirm, Notice } from "@/components/ui";
 import { nameOf, parentOf, who } from "@/features/activity/activity";
 import { useActivitySnapshot } from "@/features/activity/hooks";
@@ -31,6 +31,8 @@ export function alertText(a: Alert): { title: string; body: string } {
       return it.alerts.arriving(a.by, a.file, a.folder, a.size != null ? bytes(a.size) : null);
     case "arrived":
       return it.alerts.arrived(a.by, a.folder);
+    case "suggest_warmup":
+      return it.alerts.suggestWarmup(finderName(a.folder), a.percent);
     case "uploads_done":
       return it.alerts.uploadsDone(a.files);
     case "upload_incomplete":
@@ -156,6 +158,27 @@ function Item({ notice: x }: { notice: ActivityNotice }) {
       body = n.renamedBack.body(nameOf(x.to), nameOf(x.path));
       actions = close(n.renamed.ok);
       break;
+    case "warmup": {
+      const name = nameOf(x.path);
+      if (x.state === "done") {
+        title = n.warmup.done(name);
+        body = n.warmup.doneBody;
+        actions = close(n.close);
+      } else {
+        title = n.warmup.title(name);
+        body = n.warmup.body(bytes(x.cached), bytes(x.size));
+        actions = (
+          <>
+            <Button size="sm" className={SOFT} disabled={working} onClick={() => undo.mutate()}>
+              <Download size={14} strokeWidth={1.7} aria-hidden="true" />
+              {working ? n.working : n.warmup.action}
+            </Button>
+            {close(n.fine)}
+          </>
+        );
+      }
+      break;
+    }
   }
 
   if (confirming && x.kind === "renamed") {

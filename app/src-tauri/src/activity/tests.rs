@@ -100,6 +100,8 @@ impl Rig {
   "status --json") echo '{status}' ;;
   "activity --after") cat "{d}/activity.json" ;;
   "activity rename-back") cat > "{d}/rename-back.in"; cat "{d}/rename-back.json" ;;
+  "cached "*) cat "{d}/cached.json" ;;
+  "warmup "*) echo "$*" > "{d}/warmup.args" ;;
   "activity upload-dismiss"|"activity upload-remove") cat > "{d}/upload.in"; echo "$*" > "{d}/upload.args"; echo '{{"done": true, "reason": null}}' ;;
   "trash ") cat "{d}/trash.json" ;;
   "trash restore") echo "$*" > "{d}/restore.args"; cat "{d}/restore.json" ;;
@@ -932,4 +934,86 @@ fn an_outcome_says_where_the_file_is_in_the_finder() {
     let files = rig.activity.snapshot().uploads.files;
     let finder = files[0].finder_path.as_deref().unwrap();
     assert!(finder.ends_with("/Spot/C0272.MP4"), "{finder}");
+}
+
+fn cached_answer(rig: &Rig, cached: u64, size: u64) {
+    let body =
+        format!(r#"{{"paths": [{{"key": "x", "files": 3, "cached": {cached}, "size": {size}}}]}}"#);
+    std::fs::write(rig.path("cached.json"), body).unwrap();
+}
+
+const GB: u64 = 1 << 30;
+
+#[test]
+fn a_video_opened_in_a_folder_mostly_not_here_suggests_making_it_available() {
+    let rig = Rig::new(&writable(), true);
+    cached_answer(&rig, GB, 10 * GB);
+    let open = r#"[{"disk": "0192-a", "path": "Spot/Girato/C0272.MP4"}, {"disk": "0192-a", "path": "Spot/Girato/note.txt"}]"#;
+    rig.engine_with(&[], 0, "[]", open);
+    rig.activity.tick();
+    let notices = rig.notices();
+    assert_eq!(notices.len(), 1);
+    let NoticeKind::Warmup {
+        path,
+        finder,
+        cached,
+        size,
+        ..
+    } = &notices[0].kind
+    else {
+        panic!("{:?}", notices[0].kind);
+    };
+    assert_eq!(
+        (path.as_str(), *cached, *size),
+        ("Spot/Girato", GB, 10 * GB)
+    );
+    assert!(finder.ends_with("/Spot/Girato"), "{finder}");
+    assert!(notices[0].can_undo);
+    assert!(
+        rig.alerts().iter().any(
+            |a| matches!(a, Alert::SuggestWarmup { folder, percent: 10 } if folder == "Girato")
+        )
+    );
+    // Once a day per folder.
+    rig.activity.tick();
+    assert_eq!(rig.notices().len(), 1);
+    // The undo makes it available.
+    rig.activity.undo(notices[0].id).unwrap();
+    // The warmup runs as a job, on its own thread.
+    let mut args = String::new();
+    for _ in 0..50 {
+        if let Ok(a) = std::fs::read_to_string(rig.path("warmup.args")) {
+            args = a;
+            break;
+        }
+        thread::sleep(Duration::from_millis(100));
+    }
+    assert!(args.trim().ends_with("/Spot/Girato"), "{args}");
+}
+
+#[test]
+fn no_suggestion_for_a_folder_mostly_here_too_big_or_being_copied() {
+    let open = r#"[{"disk": "0192-a", "path": "Spot/Girato/C0272.MP4"}]"#;
+    // Mostly on the Mac already.
+    let rig = Rig::new(&writable(), true);
+    cached_answer(&rig, 8 * GB, 10 * GB);
+    rig.engine_with(&[], 0, "[]", open);
+    rig.activity.tick();
+    assert!(rig.notices().is_empty());
+    // More than the space for copies (30 GB in the fake status).
+    let rig = Rig::new(&writable(), true);
+    cached_answer(&rig, 0, 400 * GB);
+    rig.engine_with(&[], 0, "[]", open);
+    rig.activity.tick();
+    assert!(rig.notices().is_empty());
+    // A file this Mac is copying in.
+    let rig = Rig::new(&writable(), true);
+    cached_answer(&rig, 0, 10 * GB);
+    let writing = format!(
+        r#"[{{"disk": "0192-a", "path": "Spot/Girato/C0272.MP4", "op": "added", "since": {}, "size": 1000}}]"#,
+        now() - 5.0
+    );
+    rig.engine_with(&[], 0, &writing, open);
+    rig.activity.tick();
+    assert!(rig.notices().is_empty());
 }

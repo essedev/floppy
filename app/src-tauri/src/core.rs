@@ -596,6 +596,17 @@ impl Core {
         list_folders(Path::new(&dir), LIST_TIMEOUT)
     }
 
+    /// How much of each path on the disk is on this Mac (its cache).
+    pub fn cached(&self, paths: &[String]) -> Result<Vec<engine::Cached>, CoreError> {
+        self.vm_free()?;
+        let dirs: Vec<String> = paths
+            .iter()
+            .map(|p| self.disk_path(p))
+            .collect::<Result<_, _>>()?;
+        let refs: Vec<&str> = dirs.iter().map(String::as_str).collect();
+        Ok(engine::cached(&self.engine, &refs)?)
+    }
+
     /// The engine can answer `floppy activity`: a disk is mounted and no job
     /// is changing the VM.
     pub fn activity_ready(&self) -> bool {

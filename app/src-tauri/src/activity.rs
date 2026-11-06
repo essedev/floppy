@@ -60,6 +60,12 @@ pub const UPLOAD_SHOWN: u64 = 20 * 1024 * 1024;
 pub const COPY_STILL_S: f64 = 10.0;
 /// An upload this long tells when it is done; a short one does not.
 pub const UPLOAD_NOTIFY_S: f64 = 60.0;
+/// A folder is suggested for "Make available" at most once a day...
+pub const SUGGEST_EVERY: Duration = Duration::from_secs(86_400);
+/// ...when it holds this much at least and less than half of it is on the Mac.
+pub const SUGGEST_MIN_BYTES: u64 = 1 << 30;
+/// What an editor opens to cut: the files worth making available.
+const VIDEO: [&str; 5] = ["mov", "mp4", "m4v", "mxf", "avi"];
 
 /// Where and as whom this Mac calls the control plane.
 #[derive(Clone, PartialEq, Eq)]
@@ -169,6 +175,16 @@ pub enum NoticeKind {
         to: String,
         by: PersonRef,
     },
+    /// This Mac opened a video in a folder mostly not on it: every jump in the
+    /// timeline waits for the network. The undo is "Make available".
+    Warmup {
+        disk: Option<String>,
+        path: String,
+        /// Where it is in the Finder, which `floppy warmup` takes.
+        finder: String,
+        cached: u64,
+        size: u64,
+    },
 }
 
 /// Where a notice's undo is.
@@ -229,6 +245,8 @@ pub enum Alert {
     },
     /// The colleague finished copying into that folder.
     Arrived { by: String, folder: String },
+    /// A video opened from a folder mostly not on this Mac.
+    SuggestWarmup { folder: String, percent: u64 },
     /// This Mac's uploads, after at least a minute, are all in the buckets.
     UploadsDone { files: u64 },
     /// A file this Mac wrote is on the disk cut short.
@@ -335,6 +353,8 @@ struct State {
     upload_since: Option<f64>,
     /// Incomplete copies already notified (or there before the first read).
     told_incomplete: HashSet<(Option<String>, String, u64)>,
+    /// Folders looked at for "Make available", and when.
+    suggested: HashMap<(Option<String>, String), Instant>,
 }
 
 type Emit = Box<dyn Fn(ActivityEvent) + Send + Sync>;
@@ -656,6 +676,7 @@ impl Activity {
         }
         changed |= self.arrivals();
         changed |= self.upload_alerts(now_s());
+        changed |= self.suggest_warmup();
         changed |= self.settle_bursts(Instant::now());
         self.save();
         if changed {
@@ -801,10 +822,13 @@ impl Activity {
         let disk = match &kind {
             NoticeKind::MassDelete { disk, .. }
             | NoticeKind::Renamed { disk, .. }
-            | NoticeKind::RenamedBack { disk, .. } => disk.clone(),
+            | NoticeKind::RenamedBack { disk, .. }
+            | NoticeKind::Warmup { disk, .. } => disk.clone(),
         };
-        let can_undo = !matches!(kind, NoticeKind::RenamedBack { .. })
-            && self.core.disk_access(disk.as_deref()) == Some(Access::Write);
+        // Making available only reads: any access will do.
+        let can_undo = matches!(kind, NoticeKind::Warmup { .. })
+            || (!matches!(kind, NoticeKind::RenamedBack { .. })
+                && self.core.disk_access(disk.as_deref()) == Some(Access::Write));
         state.next_notice += 1;
         state.notices.push(ActivityNotice {
             id: state.next_notice,
@@ -1180,6 +1204,90 @@ impl Activity {
         any
     }
 
+    /// This Mac opened a video in a folder of at least 1 GB of which less than
+    /// half is on the Mac, and the rest fits in the space for copies: once a
+    /// day per folder, a notice offers "Make available" for that folder (the
+    /// project around it can be hundreds of GB) and macOS tells of it.
+    fn suggest_warmup(&self) -> bool {
+        let candidate = {
+            let mut state = self.lock();
+            let now = Instant::now();
+            state
+                .suggested
+                .retain(|_, at| now.saturating_duration_since(*at) < SUGGEST_EVERY);
+            let found = state.open.iter().find_map(|o| {
+                let ext = o.path.rsplit_once('.')?.1.to_ascii_lowercase();
+                let folder = parent(&o.path);
+                // A file being copied in is cached as it is written.
+                let writing = state
+                    .writing
+                    .iter()
+                    .any(|w| w.disk == o.disk && w.path == o.path);
+                let key = (o.disk.clone(), folder.to_string());
+                (VIDEO.contains(&ext.as_str())
+                    && !folder.is_empty()
+                    && !writing
+                    && !state.suggested.contains_key(&key))
+                .then_some(key)
+            });
+            if let Some(key) = &found {
+                state.suggested.insert(key.clone(), now);
+            }
+            found
+        };
+        let Some((disk, folder)) = candidate else {
+            return false;
+        };
+        let status = self.core.status();
+        if status.job.is_some() {
+            return false;
+        }
+        let Some(finder) = self.core.finder_path(disk.as_deref(), &folder) else {
+            return false;
+        };
+        let Some(c) = self
+            .core
+            .cached(std::slice::from_ref(&finder))
+            .ok()
+            .and_then(|v| v.into_iter().next())
+        else {
+            return false;
+        };
+        let (Some(cached), Some(size)) = (c.cached, c.size) else {
+            return false;
+        };
+        let room = status.space.and_then(|s| {
+            Some(s.cache_limit_mb?.saturating_sub(s.cache_used_mb?) << 20)
+        });
+        if size < SUGGEST_MIN_BYTES
+            || cached.saturating_mul(2) >= size
+            || room.is_none_or(|r| size - cached > r)
+        {
+            return false;
+        }
+        let name = base(&folder).to_string();
+        {
+            let mut state = self.lock();
+            let disk_folder = disk.as_deref().and_then(|d| self.core.disk_folder(Some(d)));
+            self.add_notice(
+                &mut state,
+                NoticeKind::Warmup {
+                    disk,
+                    path: folder,
+                    finder,
+                    cached,
+                    size,
+                },
+                disk_folder,
+            );
+        }
+        (self.emit)(ActivityEvent::Alert(Alert::SuggestWarmup {
+            folder: name,
+            percent: cached * 100 / size,
+        }));
+        true
+    }
+
     /// Stops showing an upload's outcome, or deletes an incomplete copy (to
     /// the disk's trash); then reads the engine again.
     pub fn upload_action(
@@ -1450,6 +1558,11 @@ impl Activity {
                 }
             }
             NoticeKind::RenamedBack { .. } => Ok(None),
+            NoticeKind::Warmup { finder, .. } => self
+                .core
+                .run_job(engine::JobKind::Warmup, Some(finder.clone()))
+                .map(|()| None)
+                .map_err(|e| e.to_string()),
         };
         let mut state = self.lock();
         if let Some(n) = state.notices.iter_mut().find(|n| n.id == id) {

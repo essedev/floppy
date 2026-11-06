@@ -11,11 +11,12 @@ import * as autostart from "@tauri-apps/plugin-autostart";
 import * as notification from "@tauri-apps/plugin-notification";
 import { mockBackend } from "@/lib/mock";
 import type {
-  AppUpdate,
   ActivitySnapshot,
   Alert,
   AppInfo,
+  AppUpdate,
   AuthView,
+  Cached,
   DeletedItem,
   DiskStatus,
   DiskWindowTarget,
@@ -44,6 +45,8 @@ export interface Backend {
   dismissError(): Promise<void>;
   /** The folders at the top of the disk, or of `path` on it (a team disk's projects). */
   listFolders(path?: string): Promise<Folder[]>;
+  /** How much of each path on the disk is on this Mac. */
+  getCached(paths: string[]): Promise<Cached[]>;
   /** Turns a team disk on or off on this Mac. */
   setDiskEnabled(id: string, enabled: boolean): Promise<void>;
   /** The space for copies of files on this Mac, in MB, in steps of 5 GB. */
@@ -135,6 +138,7 @@ const tauriBackend: Backend = {
   cancel: () => invoke("cancel_job"),
   dismissError: () => invoke("dismiss_error"),
   listFolders: (path) => invoke("list_folders", { path: path ?? null }),
+  getCached: (paths) => invoke("get_cached", { paths }),
   setDiskEnabled: (id, enabled) => invoke("set_disk_enabled", { id, enabled }),
   setCacheSize: (mb) => invoke("set_cache_size", { mb }),
   restart: () => invoke("restart_disk"),

@@ -470,6 +470,17 @@ let notices: ActivityNotice[] =
         },
         {
           ...noticeBase,
+          id: 4,
+          kind: "warmup",
+          folder: "Pastificio Moretti - Spot Natale",
+          disk: "pastificio-moretti-spot-natale",
+          path: "Girato/Giorno 2",
+          finder: "/Volumes/Floppy/Pastificio Moretti - Spot Natale/Girato/Giorno 2",
+          cached: 1.2 * 1024 * MB,
+          size: 14.8 * 1024 * MB,
+        },
+        {
+          ...noticeBase,
           id: 3,
           kind: "renamed_back",
           can_undo: false,
@@ -585,6 +596,8 @@ export const mockBackend: Backend = {
   },
   cancel: async () => publish({ job: null }),
   dismissError: async () => publish({ last_error: null }),
+  getCached: async (paths) =>
+    paths.map((key, i) => ({ key, files: 12, cached: [0, 4.2, 38.1][i % 3]! * GB * MB, size: [12.6, 31.4, 38.1][i % 3]! * GB * MB, error: null })),
   listFolders: async (path) =>
     scenario === "empty"
       ? []

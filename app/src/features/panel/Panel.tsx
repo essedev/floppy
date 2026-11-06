@@ -18,13 +18,13 @@ import { ActivityNotices, alertText } from "@/features/activity/notices";
 import { type UploadRow, type UploadSummary, uploadDiskLine, uploadRows, uploadSummary, uploadTitle } from "@/features/activity/uploads";
 import { lostAccess } from "@/features/account/view";
 import { faceFor, isBusy } from "@/features/disk/face";
-import { keys, useAppInfo, useAppUpdate, useCountdown, useDiskAction, useFolders, useStatus } from "@/features/disk/hooks";
+import { keys, useAppInfo, useAppUpdate, useCached, useCountdown, useDiskAction, useFolders, useStatus } from "@/features/disk/hooks";
 import { diskLook, noDisksCase, teamOf } from "@/features/disk/team";
 import { it } from "@/i18n/it";
 import { backend } from "@/lib/backend";
-import { finderName, gb, gbUnit } from "@/lib/format";
+import { bytes, finderName, gb, gbUnit } from "@/lib/format";
 import { MenuHeading, MenuItem, MenuProvider, MenuSeparator, RowMenu, useMenu } from "./Menu";
-import type { CommandError, DiskStatus, DiskView, Folder, LiveFile, TeamView, UploadsView } from "@/lib/types";
+import type { Cached, CommandError, DiskStatus, DiskView, Folder, LiveFile, TeamView, UploadsView } from "@/lib/types";
 
 const WITH_SPACE = new Set(["connected", "unreachable", "starting", "stopping"]);
 const WITH_DISKS = new Set(["connected", "unreachable", "starting", "no_disks"]);
@@ -516,6 +516,12 @@ function FolderList({ status, path, disk, uploads }: { status: DiskStatus; path?
   const nearlyFull = !!s && s.cache_used_mb != null && s.cache_limit_mb != null && s.cache_used_mb >= s.cache_limit_mb * 0.9;
 
   const list = folders.data ?? [];
+  // How much of each project is on this Mac: Stella could not tell what was
+  // downloaded before cutting (DECISIONS #33).
+  const onMac = useCached(
+    list.map((f) => f.path),
+    status.state === "connected" && !busy,
+  ).data;
   let content: ReactNode;
   if (folders.isPending) {
     content = <p className="m-0 px-3 py-2 text-[13px] text-ink-2">{it.folders.loading}</p>;
@@ -536,6 +542,7 @@ function FolderList({ status, path, disk, uploads }: { status: DiskStatus; path?
         key={f.path}
         folder={f}
         live={disk ? projectLive(live, disk, f.name) : null}
+        onMac={onMacLine(onMac?.get(f.path))}
         working={status.job?.path === f.path}
         confirming={confirm === f.path}
         busy={busy}
@@ -912,8 +919,19 @@ function UploadFileRow({ row }: { row: UploadRow }) {
   );
 }
 
+/** A project's line about the copies on this Mac; null while unknown or empty. */
+function onMacLine(c: Cached | undefined): string | null {
+  if (!c || c.error || !c.size) return null;
+  const t = it.folders.onMac;
+  if ((c.cached ?? 0) >= c.size * 0.99) return t.all;
+  if (!c.cached) return t.none(bytes(c.size));
+  return t.part(bytes(c.cached), bytes(c.size));
+}
+
 interface FolderRowProps {
   folder: Folder;
+  /** How much of it is on this Mac. */
+  onMac: string | null;
   /** A colleague copying into it or writing in it. */
   live: { kind: "arriving" | "in_use"; line: string } | null;
   working: boolean;
@@ -949,6 +967,7 @@ function FolderRow(p: FolderRowProps) {
         <span className="min-w-0 flex-1 py-1">
           <span className="block truncate text-[13px]">{name}</span>
           {p.live && !p.working && <span className="block truncate text-[12px] leading-[1.35] text-ink-2">{p.live.line}</span>}
+          {!p.live && p.onMac && <span className="block truncate text-[12px] leading-[1.35] text-ink-2">{p.onMac}</span>}
         </span>
         {p.working ? (
           <Readout className="mr-1 text-[11px]">{it.folders.working}</Readout>

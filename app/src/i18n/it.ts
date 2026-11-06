@@ -251,6 +251,11 @@ export const it = {
 
   folders: {
     heading: "Progetti",
+    onMac: {
+      all: "Tutto su questo Mac",
+      none: (size: string) => `Non ancora su questo Mac · ${size}`,
+      part: (cached: string, size: string) => `${cached} di ${size} su questo Mac`,
+    },
     loading: "Leggo le cartelle del disco…",
     empty: "Il disco è vuoto. Le cartelle che crei nel Finder compaiono qui.",
     timeout: "Il disco non ha risposto in tempo.",
@@ -753,6 +758,14 @@ export const it = {
       title: (by: string) => `${by} ha rimesso il nome di prima`,
       body: (from: string, to: string) => `${from} è tornata ${to}: i progetti CapCut la ritrovano come prima.`,
     },
+    warmup: {
+      title: (name: string) => `Stai lavorando in ${name}`,
+      body: (cached: string, size: string) =>
+        `Su questo Mac ce n'è ${cached} di ${size}: ogni salto nel video aspetta la rete. Rendila disponibile per montare senza attese.`,
+      action: "Rendi disponibile",
+      done: (name: string) => `Sto rendendo disponibile ${name}`,
+      doneBody: "Lo vedi in cima al pannello, con l'avanzamento.",
+    },
     working: "Un momento…",
     fine: "Va bene",
     close: "Chiudi",
@@ -785,6 +798,10 @@ export const it = {
     arrived: (by: string, folder: string) => ({
       title: `${by} ha finito di copiare in ${folder}`,
       body: "I file sono completi: se ne avevi importato uno a metà in CapCut, importalo di nuovo.",
+    }),
+    suggestWarmup: (folder: string, percent: number) => ({
+      title: `${folder} è su questo Mac solo al ${percent}%`,
+      body: "Ogni salto nel video aspetta la rete. Apri Floppy per renderla disponibile e montare senza attese.",
     }),
     uploadsDone: (files: number) => ({
       title: "Caricato su Floppy",

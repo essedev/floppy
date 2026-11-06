@@ -145,6 +145,16 @@ export interface Folder {
   path: string;
 }
 
+/** How much of a file or folder is on this Mac (engine.rs, `Cached`), in bytes. */
+export interface Cached {
+  /** The path asked, on the Mac. */
+  key: string;
+  files: number | null;
+  cached: number | null;
+  size: number | null;
+  error: string | null;
+}
+
 /** Facts about this app and this Mac. */
 export interface AppInfo {
   version: string;
@@ -337,6 +347,7 @@ export type ActivityNotice = {
   | { kind: "mass_delete"; disk: string | null; items: DeletedItem[]; name: string | null; files: number; bytes: number; at: number }
   | { kind: "renamed"; disk: string | null; path: string; to: string; by: PersonRef; at: number }
   | { kind: "renamed_back"; disk: string | null; path: string; to: string; by: PersonRef }
+  | { kind: "warmup"; disk: string | null; path: string; finder: string; cached: number; size: number }
 );
 
 /** A file this Mac is sending to a disk now (activity.rs, `Sending`). */
@@ -396,6 +407,7 @@ export type Alert =
   | { kind: "arriving"; by: string; file: string; folder: string; size: number | null }
   | { kind: "arrived"; by: string; folder: string }
   | { kind: "uploads_done"; files: number }
+  | { kind: "suggest_warmup"; folder: string; percent: number }
   | { kind: "upload_incomplete"; file: string };
 
 /** Why a rename could not be undone (engine.rs, `RenameBackRefusal`). */

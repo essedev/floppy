@@ -193,6 +193,7 @@ pub fn run() {
             commands::undo_notice,
             commands::dismiss_notice,
             commands::upload_action,
+            commands::get_cached,
             commands::get_setup,
             commands::run_setup,
             commands::install_engine,

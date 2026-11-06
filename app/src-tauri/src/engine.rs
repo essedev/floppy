@@ -778,6 +778,44 @@ pub fn rename_back(
     parse_json(&done.stdout)
 }
 
+/// How much of a file or folder is on this Mac, from `floppy cached`.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+pub struct Cached {
+    /// The path as it was asked, on the Mac.
+    pub key: String,
+    #[serde(default)]
+    pub files: Option<u64>,
+    /// Bytes in the cache.
+    #[serde(default)]
+    pub cached: Option<u64>,
+    /// Bytes in all.
+    #[serde(default)]
+    pub size: Option<u64>,
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+/// JuiceFS checks thousands of blocks in about a second; a big project takes
+/// longer.
+pub const CACHED_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// What `floppy cached` prints.
+#[derive(Debug, Deserialize)]
+struct CachedReport {
+    paths: Vec<Cached>,
+}
+
+/// How much of each path on the disk is on this Mac.
+pub fn cached(bin: &Path, paths: &[&str]) -> Result<Vec<Cached>, EngineError> {
+    let mut args = vec!["cached"];
+    args.extend_from_slice(paths);
+    let done = run(bin, &args, CACHED_TIMEOUT)?;
+    if !done.status.success() {
+        return Err(failed(&done));
+    }
+    parse_json::<CachedReport>(&done.stdout).map(|r| r.paths)
+}
+
 /// What the panel can do with an upload's outcome.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UploadAction {

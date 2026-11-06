@@ -140,6 +140,19 @@ pub async fn list_folders(
         .map_err(CommandError::from)
 }
 
+/// How much of each project or folder is on this Mac.
+#[tauri::command]
+pub async fn get_cached(
+    core: CoreState<'_>,
+    paths: Vec<String>,
+) -> Result<Vec<crate::engine::Cached>, CommandError> {
+    let core = Arc::clone(&core);
+    tauri::async_runtime::spawn_blocking(move || core.cached(&paths))
+        .await
+        .map_err(io_error)?
+        .map_err(CommandError::from)
+}
+
 type ActivityState<'a> = State<'a, Arc<Activity>>;
 
 /// Every mounted disk's trash, with who deleted what when the control plane knows.
