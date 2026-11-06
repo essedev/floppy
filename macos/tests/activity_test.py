@@ -619,5 +619,44 @@ class Uploads(unittest.TestCase):
             fa.upload_remove(fa.Mount("progetti", "Progetti", str(mount), False), "x.mov")
 
 
+class Cached(unittest.TestCase):
+    def test_reads_juicefs_check_line(self):
+        out = (
+            "2026/11/06 18:16:59.559144 juicefs[1125] <INFO>: check cache: 12 files checked,"
+            " 1.5 GiB of 4.4 GiB (34.1%) cached [warmup@warmup.go:332]\n"
+        )
+        self.assertEqual(
+            fa.parse_check(out),
+            {"files": 12, "cached": int(1.5 * (1 << 30)), "size": int(4.4 * (1 << 30))},
+        )
+        self.assertIsNone(fa.parse_check("juicefs: no such file"))
+
+    def test_only_paths_on_the_share_are_checked(self):
+        calls = []
+
+        class Done:
+            stdout = ""
+            stderr = "check cache: 1 files checked, 0 B of 500 MiB (0.0%) cached"
+
+        def run(args, **_kw):
+            calls.append(args[-1])
+            return Done()
+
+        out = fa.cached(
+            [
+                {"key": "/Volumes/Floppy/Progetti/Spot", "path": "/mnt/drive/Progetti/Spot"},
+                {"key": "x", "path": "/etc/passwd"},
+                {"key": "y", "path": "/mnt/drive/../etc"},
+            ],
+            run=run,
+        )
+        self.assertEqual(calls, ["/mnt/drive/Progetti/Spot"])
+        self.assertEqual(
+            out[0],
+            {"key": "/Volumes/Floppy/Progetti/Spot", "files": 1, "cached": 0, "size": 500 << 20},
+        )
+        self.assertEqual([o.get("error") for o in out[1:]], ["not on the disk", "not on the disk"])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)

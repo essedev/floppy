@@ -15,6 +15,8 @@ over a file. The app reads both through `floppy activity` and `floppy trash`.
   floppy-activity rename-back DISK                undoes a rename: {"path", "to"} of the
                                                   event on stdin, JSON out
   floppy-activity upload-dismiss DISK             forgets an upload's outcome: {"path"} on stdin
+  floppy-activity cached                          how much of each path is in this VM's cache:
+                                                  [{"key", "path"}] on stdin, {"paths"} out
   floppy-activity upload-remove DISK              deletes an incomplete copy (to the disk's
                                                   trash): {"path"} on stdin, JSON out
 
@@ -805,6 +807,51 @@ def upload_remove(m: Mount, path: str) -> dict:
     return {"disk": m.disk, "path": path, "done": True, "reason": None}
 
 
+# How much of a folder is on this Mac: JuiceFS's `warmup --check` counts the blocks in the
+# cache, locally, in about a second for thousands of blocks, and says it in one log line.
+CHECK_LINE = re.compile(
+    r"check cache: (\d+) files checked, ([\d.]+) (B|KiB|MiB|GiB|TiB|PiB) of ([\d.]+) "
+    r"(B|KiB|MiB|GiB|TiB|PiB) \("
+)
+UNITS = {"B": 1, "KiB": 1 << 10, "MiB": 1 << 20, "GiB": 1 << 30, "TiB": 1 << 40, "PiB": 1 << 50}
+
+
+def parse_check(text: str) -> dict | None:
+    """{"files", "cached", "size"} in bytes from `juicefs warmup --check`'s output, or None."""
+    found = None
+    for m in CHECK_LINE.finditer(text):
+        found = m
+    if found is None:
+        return None
+    files, cached, cu, size, su = found.groups()
+    return {
+        "files": int(files),
+        "cached": int(float(cached) * UNITS[cu]),
+        "size": int(float(size) * UNITS[su]),
+    }
+
+
+def cached(items: list[dict], run=subprocess.run) -> list[dict]:
+    """Each {"key", "path"} with what `parse_check` finds, or an error; a path outside the
+    share is refused."""
+    out = []
+    for item in items:
+        path = item.get("path") if isinstance(item, dict) else None
+        key = item.get("key") if isinstance(item, dict) else None
+        if not isinstance(path, str) or not path.startswith(ROOT + "/") or "/../" in path + "/":
+            out.append({"key": key, "error": "not on the disk"})
+            continue
+        done = run(
+            ["/usr/local/bin/juicefs", "warmup", "--check", path],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        found = parse_check(done.stdout + done.stderr)
+        out.append({"key": key, **found} if found else {"key": key, "error": "no answer"})
+    return out
+
+
 # The trash. JuiceFS moves a deleted or replaced entry to <mount>/.trash/<hour>/, the hour
 # of the delete in UTC, named "<parent inode>-<inode>-<name>", and drops whole hours once
 # they are older than the volume's trash days. A folder deleted with its files is one entry
@@ -1149,6 +1196,15 @@ def main(argv: list[str]) -> int:
         except OSError as e:
             print(f"floppy-activity: {e.strerror}", file=sys.stderr)
             return 1
+    elif cmd == "cached" and not args:
+        try:
+            items = json.loads(sys.stdin.read(1 << 20))
+        except ValueError:
+            items = None
+        if not isinstance(items, list):
+            print('floppy-activity: cached wants [{"key", "path"}] on stdin', file=sys.stderr)
+            return 2
+        print(json.dumps({"paths": cached(items)}))
     elif cmd in ("upload-dismiss", "upload-remove") and len(args) == 1:
         try:
             body = json.loads(sys.stdin.read(65536))
@@ -1198,7 +1254,7 @@ def main(argv: list[str]) -> int:
     else:
         print(
             "usage: floppy-activity run|list [--after ID] [--limit N]|trash"
-            "|restore DISK ID...|rename-back DISK|upload-dismiss DISK|upload-remove DISK",
+            "|restore DISK ID...|rename-back DISK|upload-dismiss DISK|upload-remove DISK|cached",
             file=sys.stderr,
         )
         return 2

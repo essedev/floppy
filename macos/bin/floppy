@@ -879,6 +879,18 @@ cmd_warmup() {
   for p in "$@"; do in_vm sudo juicefs warmup "$(vm_path "$p")"; done
 }
 
+# How much of each file or folder on the disk is on this Mac (the VM's cache),
+# JSON out: {"paths": [{"key": <the path given>, "files", "cached", "size"}]},
+# in bytes, or {"key", "error"} for a path. The paths travel on stdin to the VM, never as arguments.
+cmd_cached() {
+  [ $# -ge 1 ] || die "usage: floppy cached <file or folder on the disk>..."
+  local p items=
+  for p in "$@"; do
+    items="${items:+$items,}{\"key\":$(json_str "$p"),\"path\":$(json_str "$(vm_path "$p")")}"
+  done
+  printf '[%s]' "$items" | in_vm sudo /usr/local/sbin/floppy-activity cached
+}
+
 cmd_free() {
   [ $# -ge 1 ] || die "usage: floppy free <file or folder on the disk>"
   for p in "$@"; do in_vm sudo juicefs warmup --evict "$(vm_path "$p")"; done
@@ -961,8 +973,8 @@ cmd_uninstall() {
 }
 
 case "${1:-}" in
-  status|warmup|free|activity|trash) cmd="$1"; shift; "cmd_$cmd" "$@" ;;
+  status|warmup|free|cached|activity|trash) cmd="$1"; shift; "cmd_$cmd" "$@" ;;
   tick) shift; take_lock try || exit 0; cmd_tick "$@" ;;
   setup|start|stop|uninstall|disks) cmd="$1"; shift; take_lock wait; "cmd_$cmd" "$@" ;;
-  *) log "usage: floppy setup|start|stop|status [--json]|warmup <path>|free <path>|activity [--after ID]|trash [restore <disk> <id>]|disks apply|disks clear|uninstall"; exit 2 ;;
+  *) log "usage: floppy setup|start|stop|status [--json]|warmup <path>|free <path>|cached <path>...|activity [--after ID]|trash [restore <disk> <id>]|disks apply|disks clear|uninstall"; exit 2 ;;
 esac

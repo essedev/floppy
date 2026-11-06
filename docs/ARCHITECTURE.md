@@ -207,7 +207,7 @@ The problems each feature answers, to verify in the pilot:
 | Problem | Feature |
 |---|---|
 | The disk does not show up after sleep or a network change | Mount at login, the state on the faceplate's LED, automatic reconnection |
-| This clip stutters | How much of a project is already on the Mac, "Make available" with progress |
+| This clip stutters | How much of each project is on this Mac on its row (`floppy cached`, JuiceFS's `warmup --check`), "Make available" with progress, offered when a video is opened from a folder mostly not on the Mac (DECISIONS #33) |
 | The Mac is full | Space used by the cache, freeing per project, the least recently used blocks freed when the cache is full |
 | Credentials on every Mac | Sign-in in the browser, one revocable user per Mac |
 | The network drops | Read-only browsing from the local replica, stated in the panel |
