@@ -2,6 +2,16 @@
 
 Log of the work done, most recent first. Plans are in [ROADMAP.md](ROADMAP.md), the reasons behind the choices in [ARCHITECTURE.md](ARCHITECTURE.md).
 
+## 16. Two weeks of use, read from two Macs (06/11/2026)
+
+- **The feedback**: two people of the pilot team wrote down two weeks of use (about 660 GB of video from one Mac, daily work with Claude on the other), with their logs. Kept outside the repository: they name people and clients.
+- **The disk leaving the Finder**: the 1 GiB VM ran out eight times in a week, seven in fifty minutes, and the kernel killed Samba, since JuiceFS shields itself; 0.2.7's heap limit never reached that Mac, because an engine update does not remount a mounted disk. The VM now has 2 GiB (1.5 under 16 GB) and 512 MiB more per disk, Samba and the replica go last, a 1 GiB swap file catches a peak, and the first apply after an update remounts each disk once nobody uses it (DECISIONS #32). Measured at 2 GiB: three 2 GB copies with the bucket read in parallel, JuiceFS at 431 MB at most, never under 1,085 MB available.
+- **Copies broken by an update**: "Update now" restarted the VM in the middle of a 16 GB copy; it and "Restart" now stay off while this Mac uploads.
+- **Floppy read as a 29 GB disk nearly full**: the share's top reported the VM's own filesystem. Samba now answers a disk's size (`floppy-dfree`); the Finder asked the disk folder already, so copies were never refused, measured with 1.2 GB shown free and a 2 GB copy.
+- **Low space on the Mac**: below half the reserve the agent freed an empty cache with a line and a notification every two minutes, 36 times in a week; now once per stretch, then quietly only for a cache grown back.
+- **Already answered by 0.2.7**: the big copies failing with "write: Invalid argument" (the line, DECISIONS #30), a copy cut short told in the panel (DECISIONS #31). Who uploaded what is in the app's Activity tab, not in `floppy activity`, which is this Mac's own.
+- **Next**: release 0.2.8 and the testers' update with a restart; a link that opens the app with the team's server filled in; why `cp` reports "Attribute not found" on an extended attribute.
+
 ## 15. Big copies on slow lines (31/10-01/11/2026)
 
 - **The failure reproduced**: a tester's big videos failed halfway with "write: Invalid argument". On the local stack, at 10 Mbps with a 2 s router queue, JuiceFS's 20 parallel uploads held the metadata's commands up to 12 s behind the blocks, past its 5 s write timeout, and the copy failed with "Operation timed out"; at 40 Mbps with 3 s they waited 3.5 s.
