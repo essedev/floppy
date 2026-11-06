@@ -161,7 +161,8 @@ export const en: Dict = {
     steps: {
       brew: 'If the Mac does not have Homebrew yet, install it following {link}. It is done once, and it is the only step that asks for the Mac’s password.',
       install: 'Open Terminal, paste this command and press Return:',
-      server: 'Open Floppy from the Applications folder and choose “Accedi” (the app speaks Italian). Below the email, next to “Server”, choose “Modifica” and type this address:',
+      server: 'Open Floppy with the team’s address already in: the Mac asks to confirm it.',
+      serverManual: 'If it does not open (a Floppy older than 0.2.8), open Floppy from the Applications folder and choose “Accedi” (the app speaks Italian); below the email, next to “Server”, choose “Modifica” and type this address:',
       signIn: 'Type your email, {email}, and choose “Mandami il codice”. Open the link in the mail on the same Mac, or type the code in the app.',
       disk: 'Choose “Installa Floppy”: in about a minute and a half the disk shows up in the Finder as Floppy, under Locations.',
     },
@@ -171,6 +172,7 @@ export const en: Dict = {
     copyFailed: 'I cannot copy it from here: select it and copy it by hand.',
     whatCommand: 'the command',
     whatServer: 'the server address',
+    openApp: 'Open in Floppy',
     installedState: 'Installed',
     installedOn: 'Floppy is connected from {devices}.',
     seeDevices: 'Your devices',

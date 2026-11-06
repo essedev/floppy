@@ -1,10 +1,12 @@
 /*
   How to put Floppy on a Mac, from this page alone: Homebrew, the cask, this server's address
   in the app's sign-in, the person's email, the disk in the Finder. The invitation mail only
-  brings people here (server/src/floppy_server/mailtext.py), so nothing else tells them.
+  brings people here (server/src/floppy_server/mailtext.py), so nothing else tells them. The
+  address goes in through a floppy://connect link the app asks to confirm (DECISIONS #34),
+  or typed, for an app older than 0.2.8.
 */
 
-import { Check, Copy } from 'lucide-react'
+import { Check, Copy, ExternalLink } from 'lucide-react'
 import { useState } from 'react'
 import { brand } from '@/brand'
 import { Button } from '@/components/Button'
@@ -73,6 +75,16 @@ export function InstallSteps() {
           <span className={num}>3</span>
           <div className="min-w-0">
             {s.server}
+            <div className="mt-2">
+              <a
+                href={`floppy://connect?server=${encodeURIComponent(serverAddress())}`}
+                className="inline-flex h-10 items-center justify-center gap-2 rounded-[11px] bg-ink px-4 text-sm font-semibold whitespace-nowrap text-surface hover:opacity-90"
+              >
+                <ExternalLink size={15} aria-hidden />
+                {t.start.openApp}
+              </a>
+            </div>
+            <p className="mt-3 text-[13.5px] text-ink-2">{s.serverManual}</p>
             <CopyLine value={serverAddress()} what={t.start.whatServer} />
           </div>
         </li>

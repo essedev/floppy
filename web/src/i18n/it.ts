@@ -168,7 +168,8 @@ export const it = {
     steps: {
       brew: 'Se sul Mac non c’è Homebrew, installalo seguendo {link}. Si fa una volta sola, ed è l’unico passo che chiede la password del Mac.',
       install: 'Apri il Terminale, incolla questo comando e premi Invio:',
-      server: 'Apri Floppy dalla cartella Applicazioni e scegli Accedi. Sotto l’email, accanto a «Server», scegli Modifica e scrivi questo indirizzo:',
+      server: 'Apri Floppy con l’indirizzo del team già scritto: il Mac chiede di confermarlo.',
+      serverManual: 'Se non si apre (una versione di Floppy più vecchia della 0.2.8), apri Floppy dalla cartella Applicazioni e scegli Accedi; sotto l’email, accanto a «Server», scegli Modifica e scrivi questo indirizzo:',
       signIn: 'Scrivi la tua email, {email}, e scegli Mandami il codice. Apri il link della mail sullo stesso Mac, oppure scrivi il codice nell’app.',
       disk: 'Scegli Installa Floppy: in circa un minuto e mezzo il disco compare nel Finder come Floppy, sotto Posizioni.',
     },
@@ -178,6 +179,7 @@ export const it = {
     copyFailed: 'Non riesco a copiarlo da qui: selezionalo e copialo a mano.',
     whatCommand: 'il comando',
     whatServer: 'l’indirizzo del server',
+    openApp: 'Apri in Floppy',
     installedState: 'Installato',
     installedOn: 'Floppy è collegato da {devices}.',
     seeDevices: 'I tuoi dispositivi',
