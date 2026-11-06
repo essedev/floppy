@@ -157,6 +157,11 @@ export const it = {
     action: "Aggiorna",
     installingTitle: "Aggiorno Floppy…",
     installingBody: "Si chiude e si riapre da solo. Non serve fare niente.",
+    preparing: "Preparo l'aggiornamento…",
+    downloading: (done: string, total: string | null) =>
+      total ? `Scarico l'aggiornamento: ${done} di ${total}.` : `Scarico l'aggiornamento: ${done}.`,
+    installing: "Lo installo: Floppy si chiude e si riapre da solo.",
+    keepWorking: "Intanto puoi continuare a lavorare: i dischi restano nel Finder.",
     failedTitle: "Non sono riuscito ad aggiornare Floppy",
     failedBody: "Aggiornalo dal Terminale con questo comando:",
     command: "brew upgrade --cask essedev/floppy/floppy",

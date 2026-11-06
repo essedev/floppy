@@ -435,4 +435,9 @@ export interface AppUpdate {
   state: "available" | "installing" | "failed";
   /** The last line Homebrew printed when it failed. */
   error: string | null;
+  /** The DMG's size in bytes, from the release. */
+  total: number | null;
+  /** While installing: what Homebrew does, and the bytes downloaded so far. */
+  step: "preparing" | "downloading" | "installing" | null;
+  downloaded: number | null;
 }

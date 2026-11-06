@@ -40,10 +40,20 @@ const params = new URLSearchParams(globalThis.location?.search ?? "");
 const view = params.get("view") ?? "panel";
 // ?update=available|failed: a newer release of the app, as the daily check finds it.
 const updateParam = params.get("update");
+const DMG = 428 * 1024 * 1024;
 let appUpdate: AppUpdate | null =
   updateParam === "available" || updateParam === "failed"
-    ? { version: "0.2.2", state: updateParam, error: updateParam === "failed" ? "Error: Cask 'floppy' is not installed." : null }
-    : null;
+    ? {
+        version: "0.2.2",
+        state: updateParam,
+        error: updateParam === "failed" ? "Error: Cask 'floppy' is not installed." : null,
+        total: DMG,
+        step: null,
+        downloaded: null,
+      }
+    : updateParam === "installing"
+      ? { version: "0.2.2", state: "installing", error: null, total: DMG, step: "downloading", downloaded: 150 * 1024 * 1024 }
+      : null;
 const updateListeners = new Set<(u: AppUpdate | null) => void>();
 function publishUpdate(u: AppUpdate | null) {
   appUpdate = u;
@@ -737,9 +747,14 @@ export const mockBackend: Backend = {
   getAppUpdate: async () => appUpdate,
   installAppUpdate: async () => {
     if (!appUpdate) return;
-    publishUpdate({ ...appUpdate, state: "installing", error: null });
-    later(2500, () =>
-      publishUpdate({ ...appUpdate!, state: "failed", error: "Error: Cask 'floppy' is not installed." }),
+    // Preparing, a download in steps, the install, then the mock's failure.
+    publishUpdate({ ...appUpdate, state: "installing", error: null, step: "preparing", downloaded: null });
+    for (let i = 1; i <= 8; i++) {
+      later(800 + i * 500, () => publishUpdate({ ...appUpdate!, step: "downloading", downloaded: (DMG * i) / 8 }));
+    }
+    later(5600, () => publishUpdate({ ...appUpdate!, step: "installing" }));
+    later(8000, () =>
+      publishUpdate({ ...appUpdate!, state: "failed", step: null, error: "Error: Cask 'floppy' is not installed." }),
     );
   },
   onAppUpdate: (cb) => listen(updateListeners, cb),

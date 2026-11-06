@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 /// The app's latest published release (drafts and prereleases excluded).
 pub const RELEASES: &str = "https://api.github.com/repos/essedev/floppy/releases/latest";
@@ -36,6 +36,58 @@ pub struct AppUpdate {
     pub state: UpdateState,
     /// The last line Homebrew printed when it failed.
     pub error: Option<String>,
+    /// The DMG's size, from the release; None when GitHub did not say.
+    pub total: Option<u64>,
+    /// While installing: what Homebrew does, and the bytes it has downloaded.
+    pub step: Option<InstallStep>,
+    pub downloaded: Option<u64>,
+}
+
+/// What an installation is doing: the DMG is about 430 MB (the whole engine
+/// travels in it), so the download is minutes and the panel shows it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InstallStep {
+    /// `brew update`, before the download.
+    Preparing,
+    Downloading,
+    /// Downloaded: Homebrew replaces the app, which then closes and reopens.
+    Installing,
+}
+
+/// Where Homebrew downloads: `HOMEBREW_CACHE`, else its default.
+fn brew_downloads() -> Option<PathBuf> {
+    let cache = std::env::var_os("HOMEBREW_CACHE")
+        .map(PathBuf::from)
+        .or_else(|| {
+            std::env::var_os("HOME").map(|h| Path::new(&h).join("Library/Caches/Homebrew"))
+        })?;
+    Some(cache.join("downloads"))
+}
+
+/// The step and the bytes so far, from Homebrew's download of this version's
+/// DMG (`<hash>--Floppy_<version>_aarch64.dmg`, `.incomplete` while it comes),
+/// counting only a file touched since the installation started.
+pub fn progress(downloads: &Path, version: &str, since: SystemTime) -> (InstallStep, Option<u64>) {
+    let name = format!("--Floppy_{version}_aarch64.dmg");
+    let partial = format!("{name}.incomplete");
+    let mut found = (InstallStep::Preparing, None);
+    let Ok(entries) = std::fs::read_dir(downloads) else {
+        return found;
+    };
+    for e in entries.flatten() {
+        let file = e.file_name().to_string_lossy().into_owned();
+        let Ok(meta) = e.metadata() else { continue };
+        if meta.modified().is_ok_and(|m| m < since) {
+            continue;
+        }
+        if file.ends_with(&partial) {
+            found = (InstallStep::Downloading, Some(meta.len()));
+        } else if file.ends_with(&name) {
+            return (InstallStep::Installing, Some(meta.len()));
+        }
+    }
+    found
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -137,7 +189,7 @@ impl Updates {
             thread::sleep(FIRST_CHECK);
             loop {
                 match latest_tag(&agent) {
-                    Ok(tag) => me.found(&tag),
+                    Ok((tag, total)) => me.found_sized(&tag, total),
                     // Offline or rate limited: the next day tries again.
                     Err(e) => eprintln!("floppy: could not read the latest release: {e}"),
                 }
@@ -147,14 +199,35 @@ impl Updates {
     }
 
     /// Records the latest release's tag, unless an installation is under way.
+    #[cfg(test)]
     pub fn found(&self, tag: &str) {
-        if self.lock().as_ref().is_some_and(|u| u.state == UpdateState::Installing) {
+        if self
+            .lock()
+            .as_ref()
+            .is_some_and(|u| u.state == UpdateState::Installing)
+        {
+            return;
+        }
+        self.found_sized(tag, None);
+    }
+
+    /// Records the latest release's tag and its DMG's size, unless an
+    /// installation is under way.
+    pub fn found_sized(&self, tag: &str, total: Option<u64>) {
+        if self
+            .lock()
+            .as_ref()
+            .is_some_and(|u| u.state == UpdateState::Installing)
+        {
             return;
         }
         self.set(newer(tag, &self.current).map(|version| AppUpdate {
             version,
             state: UpdateState::Available,
             error: None,
+            total,
+            step: None,
+            downloaded: None,
         }));
     }
 
@@ -182,7 +255,10 @@ impl Updates {
             .args(["-c", script(), "sh", brew, CASK])
             .arg(&bundle)
             .arg(std::process::id().to_string())
-            .env("PATH", "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin")
+            .env(
+                "PATH",
+                "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+            )
             .env("HOMEBREW_NO_ENV_HINTS", "1")
             .stdin(Stdio::null())
             .stdout(out)
@@ -191,11 +267,35 @@ impl Updates {
             .process_group(0)
             .spawn()
             .map_err(|e| e.to_string())?;
+        let started = SystemTime::now();
         self.set(Some(AppUpdate {
             state: UpdateState::Installing,
             error: None,
+            step: Some(InstallStep::Preparing),
+            downloaded: None,
             ..update.clone()
         }));
+        // The download's progress, every second, while the installation runs.
+        let watcher = Arc::clone(self);
+        let version = update.version.clone();
+        thread::spawn(move || {
+            let Some(dir) = brew_downloads() else { return };
+            loop {
+                thread::sleep(Duration::from_secs(1));
+                let mut cur = watcher.lock();
+                let Some(u) = cur.as_mut().filter(|u| u.state == UpdateState::Installing) else {
+                    return;
+                };
+                let (step, downloaded) = progress(&dir, &version, started);
+                if u.step != Some(step) || u.downloaded != downloaded {
+                    u.step = Some(step);
+                    u.downloaded = downloaded;
+                    let next = cur.clone();
+                    drop(cur);
+                    (watcher.emit)(next);
+                }
+            }
+        });
         let me = Arc::clone(self);
         thread::spawn(move || {
             // On success the shell ends this app before it ends itself: still
@@ -209,6 +309,8 @@ impl Updates {
             me.set(Some(AppUpdate {
                 state: UpdateState::Failed,
                 error: Some(error),
+                step: None,
+                downloaded: None,
                 ..update
             }));
         });
@@ -216,10 +318,18 @@ impl Updates {
     }
 }
 
-fn latest_tag(agent: &ureq::Agent) -> Result<String, String> {
+/// The latest release's tag and the size of its DMG.
+fn latest_tag(agent: &ureq::Agent) -> Result<(String, Option<u64>), String> {
+    #[derive(serde::Deserialize)]
+    struct Asset {
+        name: String,
+        size: u64,
+    }
     #[derive(serde::Deserialize)]
     struct Release {
         tag_name: String,
+        #[serde(default)]
+        assets: Vec<Asset>,
     }
     let release: Release = agent
         .get(RELEASES)
@@ -227,9 +337,14 @@ fn latest_tag(agent: &ureq::Agent) -> Result<String, String> {
         .call()
         .map_err(|e| e.to_string())?
         .body_mut()
-        .read_json()
+        .read_json::<Release>()
         .map_err(|e| e.to_string())?;
-    Ok(release.tag_name)
+    let total = release
+        .assets
+        .iter()
+        .find(|a| a.name.ends_with(".dmg"))
+        .map(|a| a.size);
+    Ok((release.tag_name, total))
 }
 
 fn last_line(path: &Path) -> Option<String> {
@@ -245,6 +360,35 @@ fn last_line(path: &Path) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_download_is_read_from_homebrews_cache() {
+        let dir = tempfile::tempdir().unwrap();
+        let since = SystemTime::now() - Duration::from_secs(5);
+        assert_eq!(
+            progress(dir.path(), "0.2.8", since),
+            (InstallStep::Preparing, None)
+        );
+        // Another version's DMG, finished long ago, does not count.
+        std::fs::write(dir.path().join("aa--Floppy_0.2.6_aarch64.dmg"), b"old").unwrap();
+        let partial = dir.path().join("bb--Floppy_0.2.8_aarch64.dmg.incomplete");
+        std::fs::write(&partial, vec![0u8; 1500]).unwrap();
+        assert_eq!(
+            progress(dir.path(), "0.2.8", since),
+            (InstallStep::Downloading, Some(1500))
+        );
+        std::fs::rename(&partial, dir.path().join("bb--Floppy_0.2.8_aarch64.dmg")).unwrap();
+        assert_eq!(
+            progress(dir.path(), "0.2.8", since),
+            (InstallStep::Installing, Some(1500))
+        );
+        // A file from before this installation is not its download.
+        let later = SystemTime::now() + Duration::from_secs(60);
+        assert_eq!(
+            progress(dir.path(), "0.2.8", later),
+            (InstallStep::Preparing, None)
+        );
+    }
 
     #[test]
     fn versions_are_plain_triples() {
@@ -267,7 +411,10 @@ mod tests {
     #[test]
     fn the_bundle_is_three_levels_up() {
         let exe = Path::new("/Applications/Floppy.app/Contents/MacOS/floppy-app");
-        assert_eq!(bundle_of(exe), Some(PathBuf::from("/Applications/Floppy.app")));
+        assert_eq!(
+            bundle_of(exe),
+            Some(PathBuf::from("/Applications/Floppy.app"))
+        );
         assert_eq!(bundle_of(Path::new("/usr/local/bin/floppy-app")), None);
     }
 
@@ -298,6 +445,9 @@ mod tests {
             version: "0.2.2".into(),
             state: UpdateState::Installing,
             error: None,
+            total: None,
+            step: None,
+            downloaded: None,
         });
         u.found("v0.2.3");
         assert_eq!(u.get().unwrap().state, UpdateState::Installing);
@@ -321,7 +471,8 @@ mod tests {
             ),
         )
         .unwrap();
-        std::fs::set_permissions(&brew, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+        std::fs::set_permissions(&brew, std::os::unix::fs::PermissionsExt::from_mode(0o755))
+            .unwrap();
         // A process standing in for the old app: the shell must end it. `open`
         // of a path that does not exist fails: the exit status tells whether
         // the shell got that far.
@@ -334,7 +485,13 @@ mod tests {
                 .unwrap();
             String::from_utf8(out.stdout).unwrap().trim().to_string()
         };
-        let alive = |pid: &str| Command::new("/bin/kill").args(["-0", pid]).status().unwrap().success();
+        let alive = |pid: &str| {
+            Command::new("/bin/kill")
+                .args(["-0", pid])
+                .status()
+                .unwrap()
+                .success()
+        };
         let run = |pid: &str| {
             Command::new("/bin/sh")
                 .args(["-c", script(), "sh"])

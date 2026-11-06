@@ -24,7 +24,7 @@ import { it } from "@/i18n/it";
 import { backend } from "@/lib/backend";
 import { bytes, finderName, gb, gbUnit } from "@/lib/format";
 import { MenuHeading, MenuItem, MenuProvider, MenuSeparator, RowMenu, useMenu } from "./Menu";
-import type { Cached, CommandError, DiskStatus, DiskView, Folder, LiveFile, TeamView, UploadsView } from "@/lib/types";
+import type { AppUpdate, Cached, CommandError, DiskStatus, DiskView, Folder, LiveFile, TeamView, UploadsView } from "@/lib/types";
 
 const WITH_SPACE = new Set(["connected", "unreachable", "starting", "stopping"]);
 const WITH_DISKS = new Set(["connected", "unreachable", "starting", "no_disks"]);
@@ -129,8 +129,10 @@ function AppUpdateNotice() {
               </span>
             )}
           </>
+        ) : installing ? (
+          <InstallProgress update={update} />
         ) : (
-          <span className="block">{installing ? t.installingBody : t.body}</span>
+          <span className="block">{t.body}</span>
         )}
         {!installing && (
           <Button
@@ -144,6 +146,39 @@ function AppUpdateNotice() {
         )}
       </Notice>
     </div>
+  );
+}
+
+/** Where an app update stands: the DMG is about 430 MB, so its download shows. */
+function InstallProgress({ update }: { update: AppUpdate }) {
+  const t = it.appUpdate;
+  const share = update.step === "downloading" && update.total && update.downloaded != null ? Math.min(1, update.downloaded / update.total) : null;
+  const line =
+    update.step === "downloading" && update.downloaded != null
+      ? t.downloading(bytes(update.downloaded), update.total ? bytes(update.total) : null)
+      : update.step === "installing"
+        ? t.installing
+        : update.step === "preparing"
+          ? t.preparing
+          : t.installingBody;
+  return (
+    <>
+      <span className="block">{line}</span>
+      <span
+        className="mt-2 block h-1 overflow-hidden rounded-sm bg-track"
+        role="progressbar"
+        aria-label={t.installingTitle}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={share != null ? Math.round(share * 100) : undefined}
+      >
+        <span
+          className={`block h-full rounded-sm bg-ink-3 ${share == null ? "w-1/3 animate-pulse" : "transition-[width] duration-700"}`}
+          style={share != null ? { width: `${(share * 100).toFixed(1)}%` } : undefined}
+        />
+      </span>
+      <span className="mt-2 block text-ink-2">{t.keepWorking}</span>
+    </>
   );
 }
 
