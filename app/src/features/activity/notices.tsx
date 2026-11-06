@@ -8,7 +8,7 @@
 import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { Download, RotateCcw } from "lucide-react";
-import { Button, Confirm, Notice } from "@/components/ui";
+import { Button, Confirm, Led, Notice } from "@/components/ui";
 import { nameOf, parentOf, who } from "@/features/activity/activity";
 import { useActivitySnapshot } from "@/features/activity/hooks";
 import { it } from "@/i18n/it";
@@ -89,7 +89,7 @@ function Item({ notice: x }: { notice: ActivityNotice }) {
     x.can_undo &&
     x.state !== "done" && (
       <Button size="sm" className={SOFT} disabled={working} onClick={() => (ask ? setConfirming(true) : undo.mutate())}>
-        <RotateCcw size={14} strokeWidth={1.7} aria-hidden="true" />
+        {working ? <Led state="dl" blink /> : <RotateCcw size={14} strokeWidth={1.7} aria-hidden="true" />}
         {working ? n.working : label}
       </Button>
     );
@@ -170,7 +170,7 @@ function Item({ notice: x }: { notice: ActivityNotice }) {
         actions = (
           <>
             <Button size="sm" className={SOFT} disabled={working} onClick={() => undo.mutate()}>
-              <Download size={14} strokeWidth={1.7} aria-hidden="true" />
+              {working ? <Led state="dl" blink /> : <Download size={14} strokeWidth={1.7} aria-hidden="true" />}
               {working ? n.working : n.warmup.action}
             </Button>
             {close(n.fine)}

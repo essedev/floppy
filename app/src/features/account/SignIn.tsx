@@ -8,7 +8,7 @@
 
 import { type FormEvent, type ReactNode, useEffect, useId, useState } from "react";
 import { Mail } from "lucide-react";
-import { Button, CodeInput, Confirm, Led, Notice, Readout, TextInput } from "@/components/ui";
+import { Button, CodeInput, Confirm, Led, Notice, Readout, TextInput, Working } from "@/components/ui";
 import { useAuthStep } from "@/features/account/hooks";
 import { countdown, errorDetail, errorText, lostAccess, secondsUntil, serverEditable } from "@/features/account/view";
 import { it } from "@/i18n/it";
@@ -212,7 +212,7 @@ function EmailStep({
 
       <div className="flex gap-2">
         <Button type="submit" variant="primary" size={size} className="flex-1" disabled={sending}>
-          <Mail size={16} strokeWidth={1.7} aria-hidden="true" />
+          {sending ? <Led state="dl" blink /> : <Mail size={16} strokeWidth={1.7} aria-hidden="true" />}
           {sending ? t.form.sending : t.form.send}
         </Button>
         {onLater && (
@@ -275,8 +275,8 @@ function CodeStep({ view, size }: { view: Extract<AuthView, { phase: "code_sent"
           labelledBy={labelId}
           digitLabel={t.code.digit}
         />
-        {busy === "checking" && <span className="text-[13px] text-ink-2">{t.code.checking}</span>}
-        {busy === "linking" && <span className="text-[13px] text-ink-2">{t.code.linking}</span>}
+        {busy === "checking" && <Working className="text-[13px] text-ink-2">{t.code.checking}</Working>}
+        {busy === "linking" && <Working className="text-[13px] text-ink-2">{t.code.linking}</Working>}
         {wrong && view.error && !busy && (
           <span className="flex items-center gap-2 text-[13px]" role="alert">
             <Led state="err" />
@@ -310,7 +310,7 @@ function EndedStep({ view, size }: { view: Extract<AuthView, { phase: "ended" }>
       <RefusedNotice error={again.error ?? back.error} />
       <div className="flex flex-wrap gap-2">
         <Button variant="primary" size={size} className="flex-1" disabled={sending} onClick={() => again.mutate()}>
-          <Mail size={16} strokeWidth={1.7} aria-hidden="true" />
+          {sending ? <Led state="dl" blink /> : <Mail size={16} strokeWidth={1.7} aria-hidden="true" />}
           {sending ? t.form.sending : t.ended.again}
         </Button>
         <Button variant="ghost" size={size} disabled={sending} onClick={() => back.mutate()}>

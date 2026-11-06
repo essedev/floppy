@@ -8,7 +8,7 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { File, Film, Folder, RefreshCw, RotateCcw, Search } from "lucide-react";
-import { Button, Led, Notice, SlotMark } from "@/components/ui";
+import { Button, Led, Notice, SlotMark, Working } from "@/components/ui";
 import { it } from "@/i18n/it";
 import { backend } from "@/lib/backend";
 import { bytes, finderName } from "@/lib/format";
@@ -30,7 +30,12 @@ export const trashKey = ["trash"] as const;
 /** One disk's trash; `search` starts the search box filled (from the Activity tab). */
 export function TrashTab({ disk, search }: { disk: string | null; search?: string }) {
   const trash = useQuery({ queryKey: trashKey, queryFn: backend.getTrash, refetchOnWindowFocus: true, retry: false });
-  if (trash.isPending) return <p className="m-0 p-6 text-[13px] text-ink-2">{it.trash.loading}</p>;
+  if (trash.isPending)
+    return (
+      <p className="m-0 p-6 text-[13px] text-ink-2">
+        <Working>{it.trash.loading}</Working>
+      </p>
+    );
   if (trash.isError) {
     return (
       <div className="flex flex-col items-start gap-3 p-6">
@@ -232,7 +237,7 @@ function Row({ entry, disk, done, onDone }: RowProps) {
             {disk.writable && (
               <span className="flex w-[196px] shrink-0 justify-end">
                 <Button size="sm" disabled={restore.isPending} onClick={() => restore.mutate()}>
-                  <RotateCcw size={14} strokeWidth={1.7} aria-hidden="true" />
+                  {restore.isPending ? <Led state="dl" blink /> : <RotateCcw size={14} strokeWidth={1.7} aria-hidden="true" />}
                   {restore.isPending ? it.trash.restoring : restoreLabel(entry)}
                 </Button>
               </span>

@@ -10,7 +10,7 @@ import { type ReactNode, useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { ChevronRight, CircleCheck, Download, Ellipsis, Eraser, ExternalLink, Folder as FolderIcon, Globe, History, Info, Power, RefreshCw, Settings, Trash2 } from "lucide-react";
 import { Faceplate } from "@/components/Faceplate";
-import { Button, Confirm, Led, Notice, Readout, SlotMark } from "@/components/ui";
+import { Button, Confirm, Led, Notice, Readout, SlotMark, Working } from "@/components/ui";
 import { useAuth } from "@/features/account/hooks";
 import { diskArrivals, projectLive } from "@/features/activity/activity";
 import { useActivitySnapshot } from "@/features/activity/hooks";
@@ -99,7 +99,9 @@ export function Panel() {
             <div className="mx-2 mt-2">
               <Faceplate led="off" readout={it.face.starting} fill={0} />
             </div>
-            <p className="px-5 py-5 text-ink-2">{it.panel.checking}</p>
+            <p className="px-5 py-5 text-ink-2">
+              <Working>{it.panel.checking}</Working>
+            </p>
           </>
         )}
       </MenuProvider>
@@ -559,7 +561,11 @@ function FolderList({ status, path, disk, uploads }: { status: DiskStatus; path?
   ).data;
   let content: ReactNode;
   if (folders.isPending) {
-    content = <p className="m-0 px-3 py-2 text-[13px] text-ink-2">{it.folders.loading}</p>;
+    content = (
+      <p className="m-0 px-3 py-2 text-[13px] text-ink-2">
+        <Working>{it.folders.loading}</Working>
+      </p>
+    );
   } else if (folders.isError) {
     content = (
       <div className="flex items-center justify-between gap-2 px-3 py-2 text-[13px] text-ink-2">
@@ -633,7 +639,7 @@ function DiskList({ status, team, uploads }: { status: DiskStatus; team: TeamVie
       <div className="mb-1 flex items-baseline justify-between px-3 text-[11px] font-semibold tracking-[0.1em] text-ink-2 uppercase">
         <span>{it.disks.heading}</span>
         {team.applying ? (
-          <span className="text-[12px] font-normal tracking-normal normal-case">{it.team.applying}</span>
+          <Working className="text-[12px] font-normal tracking-normal normal-case">{it.team.applying}</Working>
         ) : (
           <b className="font-ro text-[12px] font-normal tracking-[0.02em] text-ink">{team.disks.length}</b>
         )}

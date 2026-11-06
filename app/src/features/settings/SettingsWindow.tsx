@@ -7,7 +7,7 @@
  */
 
 import { type ReactNode, useState } from "react";
-import { Button, Confirm, Led, Notice, Readout, SlotMark, TextInput, Toggle } from "@/components/ui";
+import { Button, Confirm, Led, Notice, Readout, SlotMark, TextInput, Toggle, Working } from "@/components/ui";
 import { useAuth, useAuthStep } from "@/features/account/hooks";
 import { AuthErrorNotice, RefusedNotice, SignIn } from "@/features/account/SignIn";
 import { initialsOf, serverEditable } from "@/features/account/view";
@@ -40,7 +40,7 @@ export function SettingsWindow() {
           </div>
         ) : (
           <Row>
-            <Label title="…" />
+            <Working className="text-[13px] text-ink-2">{it.settings.loadingAccount}</Working>
           </Row>
         )}
       </Group>
@@ -99,7 +99,7 @@ export function SettingsWindow() {
           />
         </Row>
         <Row>
-          <Label title={it.settings.version} line={info.data ? it.settings.versionLine(info.data.version) : "…"} />
+          <Label title={it.settings.version} line={info.data ? it.settings.versionLine(info.data.version) : undefined} />
         </Row>
         <Row>
           <Label title={it.settings.engine} line={it.settings.engineLine} />
@@ -162,6 +162,7 @@ function AccountRows({ view, computerName }: { view: AuthView; computerName: str
         </span>
         <Label title={view.user_name || view.email} line={it.settings.accountLine(view.organization, view.email)} />
         <Button disabled={busy || confirming} onClick={() => setConfirming(true)}>
+          {busy && <Led state="dl" blink />}
           {busy ? t.signOut.signingOut : t.signOut.action}
         </Button>
       </Row>

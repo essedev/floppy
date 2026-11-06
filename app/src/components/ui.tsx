@@ -16,6 +16,19 @@ export function Led({ state, blink }: LedProps) {
   return <span className="led" data-state={state} data-blink={blink ? "" : undefined} aria-hidden="true" />;
 }
 
+/**
+ * Something under way: the LED blinking, Floppy's own sign of activity, before
+ * the text. In place of an ellipsis, in a list loading or a button working.
+ */
+export function Working({ children, className = "" }: { children: ReactNode; className?: string }) {
+  return (
+    <span className={`inline-flex items-center gap-2 ${className}`}>
+      <Led state="dl" blink />
+      <span>{children}</span>
+    </span>
+  );
+}
+
 export function Readout({ children, className = "" }: { children: ReactNode; className?: string }) {
   return <span className={`readout ${className}`}>{children}</span>;
 }

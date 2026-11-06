@@ -539,7 +539,7 @@ export const it = {
     colChanged: 'Cambiata',
     colBucket: 'Bucket',
     show: 'Mostra la chiave di {name}',
-    tail: '…{tail}',
+    tail: 'termina con {tail}',
     noKey: 'in preparazione',
     windowOpen: 'Da cambiare',
     windowClosed: 'Chiusa',

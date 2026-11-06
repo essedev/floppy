@@ -8,7 +8,7 @@
 import { useMemo, useState } from "react";
 import { useInfiniteQuery, useMutation } from "@tanstack/react-query";
 import { ChevronDown, ChevronRight, RefreshCw, RotateCcw } from "lucide-react";
-import { Button, Confirm, Led, Notice, SlotMark } from "@/components/ui";
+import { Button, Confirm, Led, Notice, SlotMark, Working } from "@/components/ui";
 import {
   type Group,
   group,
@@ -59,7 +59,12 @@ export function ActivityTab({ disk, onTrash }: ActivityTabProps) {
   const live = (snapshot.data?.live ?? []).filter((l) => l.disk === disk.disk);
   const first = pages[0];
 
-  if (feed.isPending) return <p className="m-0 p-6 text-[13px] text-ink-2">{it.activity.loading}</p>;
+  if (feed.isPending)
+    return (
+      <p className="m-0 p-6 text-[13px] text-ink-2">
+        <Working>{it.activity.loading}</Working>
+      </p>
+    );
   if (feed.isError) {
     const e = feed.error as unknown as CommandError;
     return (
@@ -250,7 +255,7 @@ function Row({ group: g, disk, onTrash }: { group: Group; disk: WindowDisk; onTr
   } else if (g.op === "deleted" && disk.writable) {
     action = (
       <Button size="sm" disabled={restore.isPending} onClick={() => restore.mutate()}>
-        <RotateCcw size={14} strokeWidth={1.7} aria-hidden="true" />
+        {restore.isPending ? <Led state="dl" blink /> : <RotateCcw size={14} strokeWidth={1.7} aria-hidden="true" />}
         {restore.isPending
           ? it.activity.restoring
           : g.kind === "folder"
@@ -269,7 +274,7 @@ function Row({ group: g, disk, onTrash }: { group: Group; disk: WindowDisk; onTr
   } else if (g.op === "renamed" && g.kind === "folder" && disk.writable && g.head.to) {
     action = (
       <Button size="sm" disabled={undo.isPending} onClick={() => (g.by.you ? undo.mutate() : setConfirming(true))}>
-        <RotateCcw size={14} strokeWidth={1.7} aria-hidden="true" />
+        {undo.isPending ? <Led state="dl" blink /> : <RotateCcw size={14} strokeWidth={1.7} aria-hidden="true" />}
         {undo.isPending ? it.activity.undoing : it.activity.undoRename}
       </Button>
     );

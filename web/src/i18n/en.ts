@@ -532,7 +532,7 @@ export const en: Dict = {
     colChanged: 'Changed',
     colBucket: 'Bucket',
     show: 'Show the key of {name}',
-    tail: '…{tail}',
+    tail: 'ends in {tail}',
     noKey: 'being prepared',
     windowOpen: 'To change',
     windowClosed: 'Closed',
