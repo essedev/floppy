@@ -7,7 +7,7 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { backend } from "@/lib/backend";
-import type { CommandError, DiskStatus, SetupProgress } from "@/lib/types";
+import type { AppUpdate, CommandError, DiskStatus, SetupProgress } from "@/lib/types";
 
 export const keys = {
   status: ["status"] as const,
@@ -38,6 +38,15 @@ export function useAppUpdate() {
   const qc = useQueryClient();
   useEffect(() => backend.onAppUpdate((u) => qc.setQueryData(keys.update, u)), [qc]);
   return useQuery({ queryKey: keys.update, queryFn: backend.getAppUpdate, staleTime: Infinity });
+}
+
+/** Reads the latest release now; the answer lands in `useAppUpdate` too. */
+export function useCheckAppUpdate() {
+  const qc = useQueryClient();
+  return useMutation<AppUpdate | null, CommandError>({
+    mutationFn: backend.checkAppUpdate,
+    onSuccess: (u) => qc.setQueryData(keys.update, u),
+  });
 }
 
 export function useAppInfo() {

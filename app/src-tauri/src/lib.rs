@@ -203,6 +203,7 @@ pub fn run() {
             commands::app_info,
             commands::open_dashboard,
             commands::get_app_update,
+            commands::check_app_update,
             commands::install_app_update,
             commands::open_settings,
             commands::open_welcome,

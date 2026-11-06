@@ -1,5 +1,5 @@
 //! New releases of the app: once a day the app reads its latest release on
-//! GitHub, and the panel offers it. Installing goes through Homebrew, which
+//! GitHub, and the panel offers it; Settings can check at once. Installing goes through Homebrew, which
 //! tracks the cask (DECISIONS #10): a shell detached from the app runs
 //! `brew upgrade --cask`, then ends this app and opens the new one. Homebrew
 //! does not quit the app itself: it sees it runs inside it ("Skipping quitting
@@ -14,7 +14,7 @@ use std::io::{BufRead, BufReader};
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, SystemTime};
 
@@ -139,6 +139,8 @@ pub struct Updates {
     log: PathBuf,
     state: Mutex<Option<AppUpdate>>,
     emit: Box<dyn Fn(Option<AppUpdate>) + Send + Sync>,
+    /// The HTTP client, made by `start` and shared with `check`.
+    agent: OnceLock<ureq::Agent>,
 }
 
 impl Updates {
@@ -152,6 +154,7 @@ impl Updates {
             log,
             state: Mutex::new(None),
             emit: Box::new(emit),
+            agent: OnceLock::new(),
         })
     }
 
@@ -175,27 +178,36 @@ impl Updates {
 
     /// Starts the daily check. Call once.
     pub fn start(self: &Arc<Self>, user_agent: String) {
+        let tls = ureq::tls::TlsConfig::builder()
+            .root_certs(ureq::tls::RootCerts::PlatformVerifier)
+            .build();
+        let agent = ureq::Agent::config_builder()
+            .timeout_global(Some(TIMEOUT))
+            .user_agent(&user_agent)
+            .tls_config(tls)
+            .build()
+            .new_agent();
+        let _ = self.agent.set(agent);
         let me = Arc::clone(self);
         thread::spawn(move || {
-            let tls = ureq::tls::TlsConfig::builder()
-                .root_certs(ureq::tls::RootCerts::PlatformVerifier)
-                .build();
-            let agent = ureq::Agent::config_builder()
-                .timeout_global(Some(TIMEOUT))
-                .user_agent(&user_agent)
-                .tls_config(tls)
-                .build()
-                .new_agent();
             thread::sleep(FIRST_CHECK);
             loop {
-                match latest_tag(&agent) {
-                    Ok((tag, total)) => me.found_sized(&tag, total),
-                    // Offline or rate limited: the next day tries again.
-                    Err(e) => eprintln!("floppy: could not read the latest release: {e}"),
+                // Offline or rate limited: the next day tries again.
+                if let Err(e) = me.check() {
+                    eprintln!("floppy: could not read the latest release: {e}");
                 }
                 thread::sleep(CHECK_EVERY);
             }
         });
+    }
+
+    /// Reads the latest release now and records it: the newer release, or
+    /// None when this app is the latest. Blocks up to the request's timeout.
+    pub fn check(&self) -> Result<Option<AppUpdate>, String> {
+        let agent = self.agent.get().ok_or("the check has not started")?;
+        let (tag, total) = latest_tag(agent)?;
+        self.found_sized(&tag, total);
+        Ok(self.get())
     }
 
     /// Records the latest release's tag, unless an installation is under way.
@@ -422,6 +434,12 @@ mod tests {
         Updates::new("0.2.1".into(), PathBuf::from("/nonexistent"), move |u| {
             seen.lock().unwrap().push(u);
         })
+    }
+
+    #[test]
+    fn a_check_before_start_says_so() {
+        let u = updates(Arc::new(Mutex::new(Vec::new())));
+        assert_eq!(u.check(), Err("the check has not started".into()));
     }
 
     #[test]

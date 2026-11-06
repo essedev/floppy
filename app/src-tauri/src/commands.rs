@@ -371,6 +371,21 @@ pub fn get_app_update(updates: State<'_, Arc<Updates>>) -> Option<AppUpdate> {
     updates.get()
 }
 
+/// Reads the latest release now: the newer one, or None when this app is the latest.
+#[tauri::command]
+pub async fn check_app_update(
+    updates: State<'_, Arc<Updates>>,
+) -> Result<Option<AppUpdate>, CommandError> {
+    let updates = Arc::clone(&updates);
+    tauri::async_runtime::spawn_blocking(move || updates.check())
+        .await
+        .map_err(io_error)?
+        .map_err(|message| CommandError {
+            code: "update_check",
+            message,
+        })
+}
+
 /// Upgrades the app through Homebrew; the app quits and the new one opens.
 #[tauri::command]
 pub fn install_app_update(updates: State<'_, Arc<Updates>>) -> Result<(), CommandError> {
@@ -456,9 +471,13 @@ pub async fn auth_set_server(
     account_step(account, move |a| a.set_server(url.as_deref())).await
 }
 
+/// Opens Settings, on one of its sections when `section` is given.
 #[tauri::command]
-pub fn open_settings(app: AppHandle) {
+pub fn open_settings(app: AppHandle, section: Option<String>) {
     windows::show(&app, windows::SETTINGS);
+    if let Some(section) = section {
+        let _ = app.emit_to(windows::SETTINGS, "settings-section", section);
+    }
 }
 
 /// Which disk and tab the disk window opens on.

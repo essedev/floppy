@@ -1,37 +1,86 @@
 /**
- * The Settings window (concept-c-app, DECISIONS #12: its own window): the
- * account (sign-in, or who is signed in with sign-out), the server for a
- * self-hosted team, the team's disks with a switch each, this Mac, space,
- * general and support. Diagnostics are
- * shown but not sendable yet.
+ * The Settings window (concept-c-app, DECISIONS #12: its own window), laid out
+ * like macOS System Settings: the sections on the left, the chosen one on the
+ * right. Account (sign-in, or who is signed in with sign-out, and the server
+ * while signed out), the team's disks with a switch each, space, general,
+ * updates with a check on demand, and support. Diagnostics are shown but not
+ * sendable yet.
  */
 
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
+import { ChartPie, CircleArrowDown, CircleUser, HardDrive, LifeBuoy, type LucideIcon, SlidersHorizontal } from "lucide-react";
 import { Button, Confirm, Led, Notice, Readout, SlotMark, TextInput, Toggle, Working } from "@/components/ui";
 import { useAuth, useAuthStep } from "@/features/account/hooks";
 import { AuthErrorNotice, RefusedNotice, SignIn } from "@/features/account/SignIn";
 import { initialsOf, serverEditable } from "@/features/account/view";
-import { useAppInfo, useDiskAction, useLogin, useStatus } from "@/features/disk/hooks";
+import { useAppInfo, useAppUpdate, useCheckAppUpdate, useDiskAction, useLogin, useStatus } from "@/features/disk/hooks";
 import { diskLook, teamOf } from "@/features/disk/team";
+import { AppUpdateNotice } from "@/features/update/AppUpdateNotice";
 import { it } from "@/i18n/it";
 import { backend } from "@/lib/backend";
 import { fillOf, gb, gbUnit } from "@/lib/format";
-import type { AuthView, DiskStatus, DiskView, Space, TeamView } from "@/lib/types";
+import type { AuthView, DiskStatus, DiskView, SettingsSection, Space, TeamView } from "@/lib/types";
+
+const SECTIONS: { key: SettingsSection; icon: LucideIcon }[] = [
+  { key: "account", icon: CircleUser },
+  { key: "disks", icon: HardDrive },
+  { key: "space", icon: ChartPie },
+  { key: "general", icon: SlidersHorizontal },
+  { key: "updates", icon: CircleArrowDown },
+  { key: "support", icon: LifeBuoy },
+];
 
 export function SettingsWindow() {
-  const info = useAppInfo();
-  const auth = useAuth();
   const { data: status } = useStatus();
-  const { query: login, set: setLogin } = useLogin();
-  const space = status?.space;
-  const used = space?.cache_used_mb ?? null;
-  const limit = space?.cache_limit_mb ?? null;
-  const view = auth.data;
-  const deviceName = view && (view.phase === "signed_in" || view.phase === "registering") ? view.device_name : null;
+  const update = useAppUpdate().data;
+  const [chosen, setChosen] = useState<SettingsSection>("account");
+  useEffect(() => backend.onSettingsSection(setChosen), []);
+  const team = status ? teamOf(status) : null;
+  // Disks is there only with team disks; a choice of it falls back to the account.
+  const sections = SECTIONS.filter((s) => s.key !== "disks" || team);
+  const current = sections.some((s) => s.key === chosen) ? chosen : "account";
 
   return (
-    <main className="flex min-h-screen flex-col gap-[18px] bg-surface px-[22px] pt-[18px] pb-6">
-      <Group title={it.settings.account}>
+    <main className="flex h-screen bg-surface text-ink">
+      <nav aria-label={it.settings.sections} className="flex w-[196px] shrink-0 flex-col gap-0.5 border-r border-line px-2.5 pt-4 pb-3">
+        {sections.map(({ key, icon: Icon }) => (
+          <button
+            key={key}
+            type="button"
+            aria-current={key === current ? "page" : undefined}
+            onClick={() => setChosen(key)}
+            className={`flex h-8 cursor-pointer items-center gap-2.5 rounded-lg border-0 px-2.5 text-left text-[13px] ${
+              key === current ? "bg-raised font-semibold text-ink" : "bg-transparent text-ink hover:bg-sunken"
+            }`}
+          >
+            <Icon size={16} strokeWidth={1.7} className="shrink-0 text-ink-2" aria-hidden="true" />
+            <span className="min-w-0 flex-1 truncate">{it.settings.nav[key]}</span>
+            {key === "updates" && update && <Led state={update.state === "failed" ? "err" : "dl"} />}
+          </button>
+        ))}
+      </nav>
+      <section className="min-w-0 flex-1 overflow-y-auto px-[22px] pt-[18px] pb-6">
+        <h1 className="m-0 mb-4 text-[20px] font-semibold">{it.settings.nav[current]}</h1>
+        <div className="flex flex-col gap-[18px]">
+          {current === "account" && <AccountSection />}
+          {current === "disks" && status && team && <DisksGroup status={status} team={team} />}
+          {current === "space" && <SpaceSection space={status?.space} />}
+          {current === "general" && <GeneralSection />}
+          {current === "updates" && <UpdatesSection />}
+          {current === "support" && <SupportSection />}
+        </div>
+      </section>
+    </main>
+  );
+}
+
+function AccountSection() {
+  const info = useAppInfo();
+  const auth = useAuth();
+  const view = auth.data;
+  return (
+    <>
+      <Group>
         {view ? (
           <AccountRows view={view} computerName={info.data?.computer_name ?? null} />
         ) : auth.isError ? (
@@ -44,51 +93,54 @@ export function SettingsWindow() {
           </Row>
         )}
       </Group>
-
       {view && view.phase !== "signed_in" && view.phase !== "registering" && <ServerGroup view={view} />}
+    </>
+  );
+}
 
-      {status && teamOf(status) && <DisksGroup status={status} team={teamOf(status)!} />}
-
-      <Group title={it.settings.thisMac}>
-        <Row>
-          <Label
-            title={info.data?.computer_name ?? it.settings.thisMacUnknown}
-            line={
-              deviceName && deviceName !== info.data?.computer_name ? it.settings.thisMacAs(deviceName) : it.settings.thisMacLine
-            }
-          />
-        </Row>
-      </Group>
-
-      <Group title={it.settings.space}>
-        {space?.chosen_mb != null ? (
-          <CopiesSetting space={space} />
-        ) : (
-          <Row column>
-            <div className="flex items-baseline justify-between gap-3">
-              <Label title={it.settings.copies} line={it.settings.copiesLine} />
-              <span className="font-ro text-[15px] text-ink">{limit != null ? gbUnit(limit) : it.settings.unknown}</span>
-            </div>
-          </Row>
-        )}
+function SpaceSection({ space }: { space: Space | null | undefined }) {
+  const used = space?.cache_used_mb ?? null;
+  const limit = space?.cache_limit_mb ?? null;
+  return (
+    <Group>
+      {space?.chosen_mb != null ? (
+        <CopiesSetting space={space} />
+      ) : (
         <Row column>
           <div className="flex items-baseline justify-between gap-3">
-            <Label title={it.settings.inUse} line={it.settings.inUseLine(gbUnit(space?.reserve_mb ?? 20480))} />
-            <span className="font-ro text-[12.5px] text-ink">
-              {used != null && limit != null ? it.space.of(gb(used), gb(limit)) : it.settings.unknown}
-            </span>
-          </div>
-          <div className="flex h-2 overflow-hidden rounded bg-track" aria-hidden="true">
-            <i className="block h-full bg-ink" style={{ width: `${fillOf(used, limit) * 100}%` }} />
-          </div>
-          <div className="flex justify-between font-ro text-[11.5px] text-ink-2">
-            <span>{it.settings.macFree(space?.mac_free_mb != null ? gbUnit(space.mac_free_mb) : it.settings.unknown)}</span>
-            <span>{it.settings.reserve(gbUnit(space?.reserve_mb ?? 20480))}</span>
+            <Label title={it.settings.copies} line={it.settings.copiesLine} />
+            <span className="font-ro text-[15px] text-ink">{limit != null ? gbUnit(limit) : it.settings.unknown}</span>
           </div>
         </Row>
-      </Group>
+      )}
+      <Row column>
+        <div className="flex items-baseline justify-between gap-3">
+          <Label title={it.settings.inUse} line={it.settings.inUseLine(gbUnit(space?.reserve_mb ?? 20480))} />
+          <span className="font-ro text-[12.5px] text-ink">
+            {used != null && limit != null ? it.space.of(gb(used), gb(limit)) : it.settings.unknown}
+          </span>
+        </div>
+        <div className="flex h-2 overflow-hidden rounded bg-track" aria-hidden="true">
+          <i className="block h-full bg-ink" style={{ width: `${fillOf(used, limit) * 100}%` }} />
+        </div>
+        <div className="flex justify-between font-ro text-[11.5px] text-ink-2">
+          <span>{it.settings.macFree(space?.mac_free_mb != null ? gbUnit(space.mac_free_mb) : it.settings.unknown)}</span>
+          <span>{it.settings.reserve(gbUnit(space?.reserve_mb ?? 20480))}</span>
+        </div>
+      </Row>
+    </Group>
+  );
+}
 
-      <Group title={it.settings.general}>
+function GeneralSection() {
+  const info = useAppInfo();
+  const auth = useAuth();
+  const { query: login, set: setLogin } = useLogin();
+  const view = auth.data;
+  const deviceName = view && (view.phase === "signed_in" || view.phase === "registering") ? view.device_name : null;
+  return (
+    <>
+      <Group>
         <Row>
           <Label title={it.settings.login} line={it.settings.loginLine} />
           <Toggle
@@ -98,42 +150,93 @@ export function SettingsWindow() {
             onChange={(on) => setLogin.mutate(on)}
           />
         </Row>
+      </Group>
+      <Group title={it.settings.thisMac}>
         <Row>
-          <Label title={it.settings.version} line={info.data ? it.settings.versionLine(info.data.version) : undefined} />
+          <Label
+            title={info.data?.computer_name ?? it.settings.thisMacUnknown}
+            line={deviceName && deviceName !== info.data?.computer_name ? it.settings.thisMacAs(deviceName) : it.settings.thisMacLine}
+          />
         </Row>
+      </Group>
+    </>
+  );
+}
+
+/** The app's version with a check on demand, the update it finds, and the engine. */
+function UpdatesSection() {
+  const info = useAppInfo();
+  const update = useAppUpdate().data;
+  const check = useCheckAppUpdate();
+  const t = it.settings;
+  const version = info.data?.version;
+  const line = check.isPending ? (
+    <Working>{t.checking}</Working>
+  ) : check.isSuccess && !update && version ? (
+    <span className="inline-flex items-center gap-2">
+      <Led state="ok" />
+      {t.upToDate(version)}
+    </span>
+  ) : (
+    t.updatesAuto
+  );
+  return (
+    <>
+      <Group>
         <Row>
-          <Label title={it.settings.engine} line={it.settings.engineLine} />
+          <span className="min-w-0 flex-1">
+            <b className="block text-[13.5px] font-semibold">{version ? t.versionLine(version) : t.version}</b>
+            <span className="block text-[13px] text-ink-2">{line}</span>
+          </span>
+          <Button disabled={check.isPending || update?.state === "installing"} onClick={() => check.mutate()}>
+            {t.checkNow}
+          </Button>
+        </Row>
+        {check.isError && (
+          <div className="p-3">
+            <Notice led="err">{it.errors[check.error.code] ?? check.error.message}</Notice>
+          </div>
+        )}
+      </Group>
+      {update && <AppUpdateNotice />}
+      <Group>
+        <Row>
+          <Label title={t.engine} line={t.engineLine} />
           <span className="max-w-[45%] truncate font-ro text-[11.5px] text-ink-2" title={info.data?.engine_path}>
             {info.data?.engine_path}
           </span>
         </Row>
       </Group>
+    </>
+  );
+}
 
-      <Group title={it.settings.support}>
-        <Row>
-          <span className="min-w-0 flex-1">
-            <b className="block text-[13.5px] font-semibold">{it.settings.diagnostics}</b>
-            <span className="block text-[13px] text-ink-2">{it.settings.diagnosticsLine}</span>
-            <ul className="m-0 mt-1.5 grid list-none gap-1 p-0 text-[13px] text-ink-2">
-              {it.settings.diagnosticsItems.map((t) => (
-                <li key={t} className="flex items-baseline">
-                  <span className="-translate-y-0.5">
-                    <SlotMark />
-                  </span>
-                  {t}
-                </li>
-              ))}
-            </ul>
-            <span className="mt-1.5 block text-[13px] text-ink-2">{it.settings.diagnosticsPrivacy}</span>
-            <span className="mt-2 flex items-center gap-2">
-              <Led />
-              <Readout>{it.settings.diagnosticsSoon}</Readout>
-            </span>
+function SupportSection() {
+  return (
+    <Group>
+      <Row>
+        <span className="min-w-0 flex-1">
+          <b className="block text-[13.5px] font-semibold">{it.settings.diagnostics}</b>
+          <span className="block text-[13px] text-ink-2">{it.settings.diagnosticsLine}</span>
+          <ul className="m-0 mt-1.5 grid list-none gap-1 p-0 text-[13px] text-ink-2">
+            {it.settings.diagnosticsItems.map((t) => (
+              <li key={t} className="flex items-baseline">
+                <span className="-translate-y-0.5">
+                  <SlotMark />
+                </span>
+                {t}
+              </li>
+            ))}
+          </ul>
+          <span className="mt-1.5 block text-[13px] text-ink-2">{it.settings.diagnosticsPrivacy}</span>
+          <span className="mt-2 flex items-center gap-2">
+            <Led />
+            <Readout>{it.settings.diagnosticsSoon}</Readout>
           </span>
-          <Button disabled>{it.settings.send}</Button>
-        </Row>
-      </Group>
-    </main>
+        </span>
+        <Button disabled>{it.settings.send}</Button>
+      </Row>
+    </Group>
   );
 }
 
@@ -225,7 +328,7 @@ function DisksGroup({ status, team }: { status: DiskStatus; team: TeamView }) {
   // A restart takes the disks out of the Finder for a few seconds: it asks first.
   const [confirmRestart, setConfirmRestart] = useState(false);
   return (
-    <Group title={it.settings.disks}>
+    <Group>
       {team.refused_single ? (
         <div className="p-3">
           <Notice led="err" title={it.team.single.title}>
@@ -439,10 +542,10 @@ function ServerGroup({ view }: { view: AuthView }) {
   );
 }
 
-function Group({ title, children }: { title: string; children: ReactNode }) {
+function Group({ title, children }: { title?: string; children: ReactNode }) {
   return (
     <section>
-      <h2 className="m-0 mb-2 ml-1 text-[11px] font-semibold tracking-[0.1em] text-ink-3 uppercase">{title}</h2>
+      {title && <h2 className="m-0 mb-2 ml-1 text-[11px] font-semibold tracking-[0.1em] text-ink-3 uppercase">{title}</h2>}
       <div className="well rounded-xl bg-raised [&>*+*]:border-t [&>*+*]:border-line">{children}</div>
     </section>
   );

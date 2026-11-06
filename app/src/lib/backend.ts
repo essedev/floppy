@@ -20,6 +20,7 @@ import type {
   DeletedItem,
   DiskStatus,
   DiskWindowTarget,
+  SettingsSection,
   FeedPage,
   Folder,
   Notice,
@@ -85,10 +86,14 @@ export interface Backend {
   appInfo(): Promise<AppInfo>;
   /** A newer release of the app, if the daily check found one. */
   getAppUpdate(): Promise<AppUpdate | null>;
+  /** Reads the latest release now: the newer one, or null when this app is the latest. */
+  checkAppUpdate(): Promise<AppUpdate | null>;
   /** Upgrades through Homebrew: the app quits and the new one opens. */
   installAppUpdate(): Promise<void>;
   onAppUpdate(cb: (u: AppUpdate | null) => void): Unlisten;
-  openSettings(): Promise<void>;
+  /** Opens Settings, on one of its sections when given. */
+  openSettings(section?: SettingsSection): Promise<void>;
+  onSettingsSection(cb: (s: SettingsSection) => void): Unlisten;
   /** The team's web, at the server this Mac is signed in to, in the browser. */
   openDashboard(): Promise<void>;
   openWelcome(): Promise<void>;
@@ -164,9 +169,11 @@ const tauriBackend: Backend = {
   installEngine: () => invoke("install_engine"),
   appInfo: () => invoke("app_info"),
   getAppUpdate: () => invoke("get_app_update"),
+  checkAppUpdate: () => invoke("check_app_update"),
   installAppUpdate: () => invoke("install_app_update"),
   onAppUpdate: (cb) => subscribe("app-update", cb),
-  openSettings: () => invoke("open_settings"),
+  openSettings: (section) => invoke("open_settings", { section: section ?? null }),
+  onSettingsSection: (cb) => subscribe("settings-section", cb),
   openDashboard: () => invoke("open_dashboard"),
   openWelcome: () => invoke("open_welcome"),
   finishWelcome: () => invoke("finish_welcome"),

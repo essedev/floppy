@@ -218,6 +218,7 @@ export interface CommandError {
     | "no_such_disk"
     | "cache_size"
     | "update"
+    | "update_check"
     | "not_in_trash"
     | "no_such_notice"
     | "server"
@@ -417,6 +418,9 @@ export type Alert =
 export type RenameRefusal = "gone" | "taken" | "no_folder";
 
 /** Which disk and tab the disk window opens on. */
+/** The sections of the Settings window, in the order of its sidebar. */
+export type SettingsSection = "account" | "disks" | "space" | "general" | "updates" | "support";
+
 export interface DiskWindowTarget {
   disk: string | null;
   tab: "activity" | "trash";

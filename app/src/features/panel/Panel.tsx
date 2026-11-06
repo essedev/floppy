@@ -17,6 +17,7 @@ import { useActivitySnapshot } from "@/features/activity/hooks";
 import { ActivityNotices, alertText } from "@/features/activity/notices";
 import { type UploadRow, type UploadSummary, uploadDiskLine, uploadRows, uploadSummary, uploadTitle } from "@/features/activity/uploads";
 import { lostAccess } from "@/features/account/view";
+import { AppUpdateNotice } from "@/features/update/AppUpdateNotice";
 import { faceFor, isBusy } from "@/features/disk/face";
 import { keys, useAppInfo, useAppUpdate, useCached, useCountdown, useDiskAction, useFolders, useStatus } from "@/features/disk/hooks";
 import { diskLook, noDisksCase, teamOf } from "@/features/disk/team";
@@ -24,7 +25,7 @@ import { it } from "@/i18n/it";
 import { backend } from "@/lib/backend";
 import { bytes, finderName, gb, gbUnit } from "@/lib/format";
 import { MenuHeading, MenuItem, MenuProvider, MenuSeparator, RowMenu, useMenu } from "./Menu";
-import type { AppUpdate, Cached, CommandError, DiskStatus, DiskView, Folder, LiveFile, TeamView, UploadsView } from "@/lib/types";
+import type { Cached, CommandError, DiskStatus, DiskView, Folder, LiveFile, TeamView, UploadsView } from "@/lib/types";
 
 const WITH_SPACE = new Set(["connected", "unreachable", "starting", "stopping"]);
 const WITH_DISKS = new Set(["connected", "unreachable", "starting", "no_disks"]);
@@ -34,6 +35,7 @@ export function Panel() {
   const uploads = useActivitySnapshot().data?.uploads;
   const up = uploadSummary(uploads);
   const info = useAppInfo();
+  const update = useAppUpdate().data;
   const qc = useQueryClient();
   const root = useRef<HTMLDivElement>(null);
   const team = status ? teamOf(status) : null;
@@ -83,7 +85,11 @@ export function Panel() {
               <Faceplate {...faceFor(status, status.state === "connected" ? up : undefined)} />
             </div>
             <StatusSection status={status} uploads={up} />
-            <AppUpdateNotice />
+            {update && (
+              <div className="px-4 pb-3">
+                <AppUpdateNotice />
+              </div>
+            )}
             <ActivityNotices />
             <RevokedSection />
             {WITH_SPACE.has(status.state) && status.space?.cache_used_mb != null && <SpaceSection status={status} />}
@@ -111,79 +117,6 @@ export function Panel() {
 
 /** An admin took this Mac off the team: say so here too, with the way back. */
 /** A newer release of the app: the person picks the moment, since the app quits to update. */
-function AppUpdateNotice() {
-  const update = useAppUpdate().data;
-  const install = useDiskAction(backend.installAppUpdate);
-  if (!update) return null;
-  const t = it.appUpdate;
-  const failed = update.state === "failed" || install.isError;
-  const installing = update.state === "installing" && !install.isError;
-  return (
-    <div className="px-4 pb-3">
-      <Notice led={failed ? "err" : "dl"} title={failed ? t.failedTitle : installing ? t.installingTitle : t.title(update.version)}>
-        {failed ? (
-          <>
-            <span className="block">{t.failedBody}</span>
-            <span className="mt-1 block font-ro text-[11.5px] break-all text-ink select-text">{t.command}</span>
-            {(update.error || install.error) && (
-              <span className="mt-1 block font-ro text-[11.5px] text-ink-2">
-                {update.error ?? it.errors[install.error!.code] ?? install.error!.message}
-              </span>
-            )}
-          </>
-        ) : installing ? (
-          <InstallProgress update={update} />
-        ) : (
-          <span className="block">{t.body}</span>
-        )}
-        {!installing && (
-          <Button
-            size="sm"
-            className="mt-2 bg-raised shadow-[0_0_0_0.5px_rgba(0,0,0,0.12)]"
-            disabled={install.isPending}
-            onClick={() => install.mutate()}
-          >
-            {failed ? t.retry : t.action}
-          </Button>
-        )}
-      </Notice>
-    </div>
-  );
-}
-
-/** Where an app update stands: the DMG is about 430 MB, so its download shows. */
-function InstallProgress({ update }: { update: AppUpdate }) {
-  const t = it.appUpdate;
-  const share = update.step === "downloading" && update.total && update.downloaded != null ? Math.min(1, update.downloaded / update.total) : null;
-  const line =
-    update.step === "downloading" && update.downloaded != null
-      ? t.downloading(bytes(update.downloaded), update.total ? bytes(update.total) : null)
-      : update.step === "installing"
-        ? t.installing
-        : update.step === "preparing"
-          ? t.preparing
-          : t.installingBody;
-  return (
-    <>
-      <span className="block">{line}</span>
-      <span
-        className="mt-2 block h-1 overflow-hidden rounded-sm bg-track"
-        role="progressbar"
-        aria-label={t.installingTitle}
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-valuenow={share != null ? Math.round(share * 100) : undefined}
-      >
-        <span
-          className={`block h-full rounded-sm bg-ink-3 ${share == null ? "w-1/3 animate-pulse" : "transition-[width] duration-700"}`}
-          style={share != null ? { width: `${(share * 100).toFixed(1)}%` } : undefined}
-        />
-      </span>
-      <span className="mt-2 block text-ink-2">{t.keepWorking}</span>
-    </>
-  );
-}
-
 function RevokedSection() {
   const { data: auth } = useAuth();
   const lost = auth?.phase === "signed_out" ? lostAccess(auth.notice) : null;
@@ -193,7 +126,7 @@ function RevokedSection() {
       <Notice led="err" title={lost.title}>
         {lost.body}
         <span className="mt-2.5 block">
-          <Button size="sm" variant="primary" onClick={() => void backend.openSettings()}>
+          <Button size="sm" variant="primary" onClick={() => void backend.openSettings("account")}>
             {it.account.revoked.signIn}
           </Button>
         </span>
@@ -276,7 +209,7 @@ function StatusSection({ status, uploads }: { status: DiskStatus; uploads: Uploa
       body = it.panel.noDisks[which].body;
       actions =
         which === "signed_out" ? (
-          <Button variant="primary" size="lg" className="flex-1" onClick={() => void backend.openSettings()}>
+          <Button variant="primary" size="lg" className="flex-1" onClick={() => void backend.openSettings("account")}>
             {it.panel.noDisks.signIn}
           </Button>
         ) : null;
@@ -504,7 +437,7 @@ function SpaceSection({ status }: { status: DiskStatus }) {
                   className="mt-0.5 self-start border-0 bg-transparent p-0 text-[12.5px] font-semibold text-ink underline underline-offset-2"
                   onClick={() => {
                     info.close();
-                    void backend.openSettings();
+                    void backend.openSettings("space");
                   }}
                 >
                   {t.change}

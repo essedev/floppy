@@ -29,6 +29,7 @@ import type {
   Notice,
   PersonRef,
   RestoreResult,
+  SettingsSection,
   SetupProgress,
   TeamView,
   TrashEntry,
@@ -54,6 +55,8 @@ let appUpdate: AppUpdate | null =
     : updateParam === "installing"
       ? { version: "0.2.2", state: "installing", error: null, total: DMG, step: "downloading", downloaded: 150 * 1024 * 1024 }
       : null;
+// ?check=newer|offline: what "Check for updates" finds; by default this app is the latest.
+const checkParam = params.get("check");
 const updateListeners = new Set<(u: AppUpdate | null) => void>();
 function publishUpdate(u: AppUpdate | null) {
   appUpdate = u;
@@ -745,6 +748,14 @@ export const mockBackend: Backend = {
     computer_name: MAC,
   }),
   getAppUpdate: async () => appUpdate,
+  checkAppUpdate: async () => {
+    await new Promise((r) => setTimeout(r, 1200));
+    if (checkParam === "offline") throw { code: "update_check", message: "io: Connection refused" };
+    if (checkParam === "newer" && !appUpdate) {
+      publishUpdate({ version: "0.2.2", state: "available", error: null, total: DMG, step: null, downloaded: null });
+    }
+    return appUpdate;
+  },
   installAppUpdate: async () => {
     if (!appUpdate) return;
     // Preparing, a download in steps, the install, then the mock's failure.
@@ -759,6 +770,11 @@ export const mockBackend: Backend = {
   },
   onAppUpdate: (cb) => listen(updateListeners, cb),
   openSettings: async () => {},
+  onSettingsSection: (cb) => {
+    const section = params.get("section") as SettingsSection | null;
+    if (section) later(0, () => cb(section));
+    return () => {};
+  },
   openDashboard: async () => {},
   openWelcome: async () => {},
   finishWelcome: async () => {},

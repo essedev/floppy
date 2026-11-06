@@ -5,7 +5,7 @@
  */
 
 import { gbUnit } from "@/lib/format";
-import type { CommandError, JobKind, Problem } from "@/lib/types";
+import type { CommandError, JobKind, Problem, SettingsSection } from "@/lib/types";
 
 export const it = {
   product: "Floppy",
@@ -404,6 +404,15 @@ export const it = {
 
   settings: {
     title: "Impostazioni",
+    sections: "Sezioni delle impostazioni",
+    nav: {
+      account: "Account",
+      disks: "Dischi",
+      space: "Spazio",
+      general: "Generale",
+      updates: "Aggiornamenti",
+      support: "Assistenza",
+    } satisfies Record<SettingsSection, string>,
     account: "Account",
     accountLine: (org: string | null, email: string) => (org ? `${org} · ${email}` : email),
     dashboard: "Pannello del team",
@@ -444,6 +453,10 @@ export const it = {
     loginLine: "L'icona torna nella barra dei menu ogni volta che accendi il Mac. Il disco torna comunque da solo.",
     version: "Versione",
     versionLine: (v: string) => `Floppy ${v}`,
+    updatesAuto: "Floppy controlla da solo una volta al giorno.",
+    checkNow: "Verifica aggiornamenti",
+    checking: "Controllo gli aggiornamenti",
+    upToDate: (v: string) => `Floppy è aggiornato: la ${v} è l'ultima versione.`,
     engine: "Comando",
     engineLine: "Il programma che fa funzionare il disco su questo Mac.",
     support: "Assistenza",
@@ -836,6 +849,7 @@ export const it = {
     no_such_disk: "Questo disco non c'è più su questo Mac.",
     cache_size: "Questo spazio non c'è sul Mac: scegline uno più piccolo.",
     update: "Non riesco ad aggiornare Floppy da qui.",
+    update_check: "Non riesco a controllare gli aggiornamenti: GitHub non risponde. Controlla la connessione e riprova.",
     not_in_trash: "Non è più nel cestino: forse l'ha già ripristinato qualcun altro, o è scaduto.",
     no_such_notice: "Questo avviso non c'è più.",
     server: "Il server del team non ha risposto.",

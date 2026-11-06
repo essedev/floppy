@@ -27,9 +27,9 @@
       {
         "label": "settings",
         "title": "Impostazioni",
-        "width": 600,
-        "height": 700,
-        "minWidth": 480,
+        "width": 780,
+        "height": 620,
+        "minWidth": 660,
         "minHeight": 420,
         "visible": false,
         "center": true
