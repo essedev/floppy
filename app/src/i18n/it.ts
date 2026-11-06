@@ -80,6 +80,7 @@ export const it = {
       title: "Un aggiornamento di Floppy è pronto",
       body: "Si applica riavviando il disco, in circa un minuto: prima salva e chiudi i progetti aperti.",
       action: "Aggiorna ora",
+      waitUploads: "Aspetta che finiscano i caricamenti: l'aggiornamento riavvia il disco e li interromperebbe.",
     },
     needsSetup: {
       title: "Floppy non è ancora pronto",
@@ -165,7 +166,8 @@ export const it = {
   team: {
     restart: {
       title: "Floppy va riavviato",
-      body: "Con i nuovi dischi gli serve più memoria. Riavvia quando non stai lavorando.",
+      body: "Gli serve più memoria per non disconnettersi durante le copie grandi. Riavvia quando non stai lavorando.",
+      waitUploads: "Aspetta che finiscano i caricamenti: il riavvio li interromperebbe.",
       bodySpace: "Lo spazio per le copie che hai scelto vale dal prossimo riavvio. Riavvia quando non stai lavorando.",
       action: "Riavvia",
       confirmTitle: "Riavviare Floppy adesso?",

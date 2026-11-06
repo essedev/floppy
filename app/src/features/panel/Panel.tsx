@@ -187,6 +187,9 @@ function StatusSection({ status, uploads }: { status: DiskStatus; uploads: Uploa
   let body: string | null = null;
   const extra: ReactNode[] = [];
   let actions: ReactNode;
+  // An update or a restart takes the disk away: a copy on its way would be cut (Emanuele's
+  // 16 GB clip, 22/10). They wait for the uploads.
+  const uploading = uploads.phase === "sending" || uploads.phase === "paused";
 
   const finder = (
     <Button variant="primary" size="lg" className="flex-1" disabled={!status.mount_point} onClick={() => openFinder.mutate(undefined)}>
@@ -310,7 +313,13 @@ function StatusSection({ status, uploads }: { status: DiskStatus; uploads: Uploa
     extra.push(
       <Notice key="update" led="dl" title={it.panel.update.title}>
         <span className="block">{it.panel.update.body}</span>
-        <Button size="sm" className="mt-2 bg-raised shadow-[0_0_0_0.5px_rgba(0,0,0,0.12)]" disabled={!!status.job || install.isPending} onClick={() => install.mutate()}>
+        {uploading && <span className="mt-1 block text-ink-2">{it.panel.update.waitUploads}</span>}
+        <Button
+          size="sm"
+          className="mt-2 bg-raised shadow-[0_0_0_0.5px_rgba(0,0,0,0.12)]"
+          disabled={!!status.job || install.isPending || uploading}
+          onClick={() => install.mutate()}
+        >
           {it.panel.update.action}
         </Button>
       </Notice>,
@@ -353,7 +362,8 @@ function StatusSection({ status, uploads }: { status: DiskStatus; uploads: Uploa
       ) : (
         <Notice key="restart" led="dl" title={it.team.restart.title}>
           <span className="block">{team.restart_reason === "space" ? it.team.restart.bodySpace : it.team.restart.body}</span>
-          <Button size="sm" className="mt-2 bg-raised shadow-[0_0_0_0.5px_rgba(0,0,0,0.12)]" onClick={() => setConfirmRestart(true)}>
+          {uploading && <span className="mt-1 block text-ink-2">{it.team.restart.waitUploads}</span>}
+          <Button size="sm" className="mt-2 bg-raised shadow-[0_0_0_0.5px_rgba(0,0,0,0.12)]" disabled={uploading} onClick={() => setConfirmRestart(true)}>
             {it.team.restart.action}
           </Button>
         </Notice>

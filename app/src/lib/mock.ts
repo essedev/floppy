@@ -9,7 +9,7 @@
  * shows three team disks; its scenarios are `trash_empty`, `trash_error`,
  * `trash_none`, `activity_offline`, `activity_local` and `activity_empty`. This
  * Mac's uploads (concept H) are `upload_sending`, `upload_paused`, `upload_done`,
- * `upload_incomplete`, `upload_check` and `upload_many`, on the team's disks. The
+ * `upload_incomplete`, `upload_check`, `upload_many` and `upload_restart`, on the team's disks. The
  * app itself never uses this module. Folder names come from concept-a-panel
  * and concept-f.
  */
@@ -195,6 +195,8 @@ const SCENARIOS: Record<string, Partial<DiskStatus>> = {
   team_single: { ...team({ refused_single: true }), mode: "single" },
   team_activity: team(),
   upload_sending: team(),
+  // An update and a restart waiting while a copy is on its way: both wait for it.
+  upload_restart: { ...team({ restart_needed: true, restart_reason: "memory" }), install: "update" },
   upload_paused: team(),
   upload_done: team(),
   upload_incomplete: team(),
@@ -532,7 +534,7 @@ const UPLOADS: Record<string, UploadsView> = {
     files: Array.from({ length: 9 }, (_, i) => upFile(`Girato/C${String(400 + i).padStart(4, "0")}.MP4`, "done", 1200 * MB)),
   },
 };
-let uploads: UploadsView = UPLOADS[scenario] ?? { sending: [], disks: [], files: [] };
+let uploads: UploadsView = UPLOADS[scenario === "upload_restart" ? "upload_sending" : scenario] ?? { sending: [], disks: [], files: [] };
 const activityListeners = new Set<(s: ActivitySnapshot) => void>();
 const snapshot = (): ActivitySnapshot => ({ notices, live: scenario === "team_activity" || view === "disk" ? liveNow() : [], uploads });
 function publishActivity(next: ActivityNotice[]) {
