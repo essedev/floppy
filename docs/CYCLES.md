@@ -13,7 +13,8 @@ Log of the work done, most recent first. Plans are in [ROADMAP.md](ROADMAP.md), 
 - **What is on this Mac** (DECISIONS #33): each project's row says how much of it is here, from JuiceFS's `warmup --check` (`floppy cached`); a video opened from a folder mostly not here brings "Make available" for that folder, once a day. The tester had asked for both; "Make available" existed, unfound.
 - **The server through a link** (DECISIONS #34): `floppy://connect?server=...`, "Open in Floppy" on the web's start page; the app asks before taking it.
 - **Smaller ones**: Lima stopped logging a failed listen on 445 at every start (a second ignore rule, on 0.0.0.0); the release scripts can notarize once there is a Developer ID; `cp`'s "Attribute not found" did not reproduce with any extended attribute or over an existing file.
-- **Next**: release 0.2.8, the web deployed for its link, and the testers' update with a restart; an Apple Developer account for the notarization.
+- **0.2.9, after 0.2.8 went out**: the app update shows its download (the DMG is about 430 MB and "Aggiorno Floppy" sat still for minutes, taken for stuck), and texts of something under way show the LED blinking instead of an ellipsis.
+- **Next**: the testers' update with a restart; an Apple Developer account for the notarization.
 
 ## 15. Big copies on slow lines (31/10-01/11/2026)
 
