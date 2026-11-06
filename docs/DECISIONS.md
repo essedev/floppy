@@ -46,7 +46,7 @@ A Valkey replica copies its whole instance, so every disk has its own Valkey ins
 ## 10. Distribution through a Homebrew cask
 
 **Active, 17/10/2026.** The app ships as a cask in its own tap, like Portsage. Homebrew needs administrator rights once to install itself; installing and using the disk does not. Since 21/10/2026 the app reads its latest GitHub release once a day and, on the person's click, runs `brew upgrade --cask` in a shell of its own, which then ends the old app and opens the new one: Homebrew keeps tracking the version.
-**Ruled out:** a DMG in `~/Applications` (kept as the fallback if a team has standard accounts), a signed and notarized DMG for now, Tauri's own updater (it would replace the bundle behind Homebrew's back).
+**Ruled out:** a DMG in `~/Applications` (kept as the fallback if a team has standard accounts), a signed and notarized DMG for now, Tauri's own updater (it would replace the bundle behind Homebrew's back). Since 06/11/2026 the release scripts can sign with a Developer ID and notarize (`NOTARY_PROFILE`), waiting for an Apple Developer account: a tester's new Mac still had to allow the app by hand, the cask's clearing of the quarantine notwithstanding.
 
 ## 11. Identity: the drive, Grafite faceplate with the Essenziale icons
 

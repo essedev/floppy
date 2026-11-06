@@ -5,7 +5,9 @@
 # tap, essedev/homebrew-floppy. Everything it does is public: run it by hand.
 # Usage: scripts/release-app.sh
 # Signed with the stable self-signed identity of scripts/setup-signing.sh; an ad hoc
-# release is SIGN_IDENTITY=- scripts/release-app.sh.
+# release is SIGN_IDENTITY=- scripts/release-app.sh. With an Apple Developer account,
+# SIGN_IDENTITY="Developer ID Application: <name> (<team>)" NOTARY_PROFILE=<profile>
+# notarizes it (scripts/build-app.sh).
 # The version is the one in app/src-tauri/tauri.conf.json, app/package.json
 # and app/Cargo.toml, bumped together beforehand. A version already on GitHub
 # but missing from the tap only updates the tap.
@@ -66,11 +68,12 @@ fi
 
 # A stable identity: setup-signing.sh checks the certificate, the keychain in the search
 # list, the unlock and the trust.
-if [ "$SIGN_IDENTITY" != "-" ]; then
+# A Developer ID lives in the login keychain, set up by Xcode or Apple's portal.
+if [ "$SIGN_IDENTITY" != "-" ] && [ -z "${NOTARY_PROFILE:-}" ]; then
   bash scripts/setup-signing.sh >&2 \
     || fail "signing identity '$SIGN_IDENTITY' not ready (see above), or release ad hoc: SIGN_IDENTITY=- scripts/release-app.sh"
 fi
-dmg=$(SIGN_IDENTITY="$SIGN_IDENTITY" scripts/build-app.sh)
+dmg=$(SIGN_IDENTITY="$SIGN_IDENTITY" NOTARY_PROFILE="${NOTARY_PROFILE:-}" scripts/build-app.sh)
 sha=$(shasum -a 256 "$dmg" | cut -d' ' -f1)
 
 git push origin main
